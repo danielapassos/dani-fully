@@ -10,11 +10,15 @@ test('per-platform video limits match the spec', function (): void {
         ->and(Platform::LinkedIn->maxVideoDurationSeconds())->toBe(1800)
         ->and(Platform::Bluesky->maxVideoBytes())->toBe(100_000_000)
         ->and(Platform::Bluesky->maxVideoDurationSeconds())->toBe(180)
+        ->and(Platform::TikTok->maxVideoBytes())->toBe(4_000_000_000)
+        ->and(Platform::TikTok->maxVideoDurationSeconds())->toBe(600)
+        ->and(Platform::YouTube->maxVideoBytes())->toBe(1_073_741_824)
+        ->and(Platform::YouTube->maxVideoDurationSeconds())->toBe(43_200)
         ->and(Platform::X->allowedVideoMime())->toBe(['video/mp4']);
 });
 
 test('video byte ceiling is the largest per-platform cap', function (): void {
-    expect(Platform::maxVideoBytesCeiling())->toBe(1_073_741_824);
+    expect(Platform::maxVideoBytesCeiling())->toBe(4_000_000_000);
 });
 
 test('limits payload exposes video fields', function (): void {

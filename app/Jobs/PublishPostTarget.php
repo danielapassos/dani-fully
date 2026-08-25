@@ -463,7 +463,17 @@ class PublishPostTarget implements ShouldQueue
         $state = new MediaUploadState($target->media_upload_state);
         $polls = $state->incrementPolls();
 
-        if ($polls > self::MAX_MEDIA_POLLS) {
+        $maxPolls = match ($target->platform) {
+            // TikTok's creator-inbox flow intentionally waits for the human to
+            // finish the post in TikTok; YouTube also advances one resumable
+            // 8 MiB upload chunk per poll cycle. Neither fits the short Meta/X
+            // transcode window used by the original connectors.
+            Platform::TikTok => 1_440,
+            Platform::YouTube => 512,
+            default => self::MAX_MEDIA_POLLS,
+        };
+
+        if ($polls > $maxPolls) {
             Log::warning('Video transcode poll timed out', [
                 'post_target_id' => $target->id,
                 'platform' => $target->platform->value,

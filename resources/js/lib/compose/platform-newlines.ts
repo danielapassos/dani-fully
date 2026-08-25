@@ -20,6 +20,8 @@ const MAX_CONSECUTIVE_NEWLINES: Record<PlatformName, number> = {
     bluesky: Number.POSITIVE_INFINITY,
     facebook: 2,
     instagram: 2,
+    tiktok: 2,
+    youtube: Number.POSITIVE_INFINITY,
     threads: 2,
     discord: Number.POSITIVE_INFINITY,
 };

@@ -34,6 +34,10 @@ export function postPermalink(
             return remoteId.startsWith('urn:li:')
                 ? `https://www.linkedin.com/feed/update/${remoteId}/`
                 : null;
+        case 'tiktok':
+            return h ? `https://www.tiktok.com/@${h}/video/${remoteId}` : null;
+        case 'youtube':
+            return `https://www.youtube.com/watch?v=${remoteId}`;
         default:
             return null;
     }

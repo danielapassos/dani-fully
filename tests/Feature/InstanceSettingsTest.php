@@ -343,12 +343,12 @@ test('instance owner can update polling settings', function () {
                 'x' => 720, 'bluesky' => 30, 'linkedin' => 120, 'facebook' => 15, 'instagram' => 15, 'threads' => 15,
             ],
             'post_metrics' => [
-                'enabled' => ['x' => false, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'threads' => true, 'discord' => true],
-                'x' => 1440, 'bluesky' => 45, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'threads' => 15, 'discord' => 90,
+                'enabled' => ['x' => false, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'tiktok' => true, 'youtube' => true, 'threads' => true, 'discord' => true],
+                'x' => 1440, 'bluesky' => 45, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'tiktok' => 30, 'youtube' => 60, 'threads' => 15, 'discord' => 90,
             ],
             'account_metrics' => [
-                'enabled' => ['x' => false, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'threads' => true],
-                'x' => 1440, 'bluesky' => 240, 'linkedin' => 1440, 'facebook' => 15, 'instagram' => 15, 'threads' => 15,
+                'enabled' => ['x' => false, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'tiktok' => true, 'youtube' => true, 'threads' => true],
+                'x' => 1440, 'bluesky' => 240, 'linkedin' => 1440, 'facebook' => 15, 'instagram' => 15, 'tiktok' => 60, 'youtube' => 120, 'threads' => 15,
             ],
             'metrics_enabled' => true,
             'engagement_enabled' => true,
@@ -367,16 +367,16 @@ test('instance owner can update polling settings', function () {
             'x' => 720, 'bluesky' => 30, 'linkedin' => 120, 'facebook' => 15, 'instagram' => 15, 'threads' => 15,
         ])
         ->and($polling['post_metrics']['enabled'])->toMatchArray([
-            'x' => false, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'threads' => true, 'discord' => true,
+            'x' => false, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'tiktok' => true, 'youtube' => true, 'threads' => true, 'discord' => true,
         ])
         ->and($polling['post_metrics'])->toMatchArray([
-            'x' => 1440, 'bluesky' => 45, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'threads' => 15, 'discord' => 90,
+            'x' => 1440, 'bluesky' => 45, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'tiktok' => 30, 'youtube' => 60, 'threads' => 15, 'discord' => 90,
         ])
         ->and($polling['account_metrics']['enabled'])->toMatchArray([
-            'x' => false, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'threads' => true,
+            'x' => false, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'tiktok' => true, 'youtube' => true, 'threads' => true,
         ])
         ->and($polling['account_metrics'])->toMatchArray([
-            'x' => 1440, 'bluesky' => 240, 'linkedin' => 1440, 'facebook' => 15, 'instagram' => 15, 'threads' => 15,
+            'x' => 1440, 'bluesky' => 240, 'linkedin' => 1440, 'facebook' => 15, 'instagram' => 15, 'tiktok' => 60, 'youtube' => 120, 'threads' => 15,
         ]);
 });
 
@@ -390,12 +390,12 @@ test('instance owner can toggle the metrics and engagement master switches from 
                 'x' => 360, 'bluesky' => 15, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'threads' => 15,
             ],
             'post_metrics' => [
-                'enabled' => ['x' => true, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'threads' => true, 'discord' => true],
-                'x' => 360, 'bluesky' => 15, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'threads' => 15, 'discord' => 15,
+                'enabled' => ['x' => true, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'tiktok' => true, 'youtube' => true, 'threads' => true, 'discord' => true],
+                'x' => 360, 'bluesky' => 15, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'tiktok' => 15, 'youtube' => 15, 'threads' => 15, 'discord' => 15,
             ],
             'account_metrics' => [
-                'enabled' => ['x' => true, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'threads' => true],
-                'x' => 1440, 'bluesky' => 1440, 'linkedin' => 1440, 'facebook' => 15, 'instagram' => 15, 'threads' => 15,
+                'enabled' => ['x' => true, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'tiktok' => true, 'youtube' => true, 'threads' => true],
+                'x' => 1440, 'bluesky' => 1440, 'linkedin' => 1440, 'facebook' => 15, 'instagram' => 15, 'tiktok' => 15, 'youtube' => 15, 'threads' => 15,
             ],
             'metrics_enabled' => false,
             'engagement_enabled' => false,
@@ -421,12 +421,12 @@ test('instance owner can toggle the messages master switch from the polling page
                 'x' => 360, 'bluesky' => 15, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'threads' => 15,
             ],
             'post_metrics' => [
-                'enabled' => ['x' => true, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'threads' => true, 'discord' => true],
-                'x' => 360, 'bluesky' => 15, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'threads' => 15, 'discord' => 15,
+                'enabled' => ['x' => true, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'tiktok' => true, 'youtube' => true, 'threads' => true, 'discord' => true],
+                'x' => 360, 'bluesky' => 15, 'linkedin' => 15, 'facebook' => 15, 'instagram' => 15, 'tiktok' => 15, 'youtube' => 15, 'threads' => 15, 'discord' => 15,
             ],
             'account_metrics' => [
-                'enabled' => ['x' => true, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'threads' => true],
-                'x' => 1440, 'bluesky' => 1440, 'linkedin' => 1440, 'facebook' => 15, 'instagram' => 15, 'threads' => 15,
+                'enabled' => ['x' => true, 'bluesky' => true, 'linkedin' => true, 'facebook' => true, 'instagram' => true, 'tiktok' => true, 'youtube' => true, 'threads' => true],
+                'x' => 1440, 'bluesky' => 1440, 'linkedin' => 1440, 'facebook' => 15, 'instagram' => 15, 'tiktok' => 15, 'youtube' => 15, 'threads' => 15,
             ],
             'metrics_enabled' => true,
             'engagement_enabled' => true,

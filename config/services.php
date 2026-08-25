@@ -64,10 +64,38 @@ return [
         'graph_version' => env('FACEBOOK_GRAPH_VERSION', 'v25.0'),
     ],
 
+    'instagram' => [
+        'client_id' => env('INSTAGRAM_APP_ID'),
+        'client_secret' => env('INSTAGRAM_APP_SECRET'),
+        'redirect' => env('INSTAGRAM_REDIRECT_URI'),
+        'graph_version' => env('INSTAGRAM_GRAPH_API_VERSION', 'v25.0'),
+    ],
+
     'threads' => [
         'client_id' => env('THREADS_CLIENT_ID'),
         'client_secret' => env('THREADS_CLIENT_SECRET'),
         'redirect' => env('THREADS_REDIRECT_URI'),
+    ],
+
+    'tiktok' => [
+        'client_id' => env('TIKTOK_CLIENT_KEY'),
+        'client_secret' => env('TIKTOK_CLIENT_SECRET'),
+        'redirect' => env('TIKTOK_REDIRECT_URI'),
+        'inbox_enabled' => filter_var(env('TIKTOK_INBOX_ENABLED', false), FILTER_VALIDATE_BOOL),
+    ],
+
+    'youtube' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('YOUTUBE_REDIRECT_URI'),
+        'publishing_enabled' => filter_var(env('YOUTUBE_PUBLISHING_ENABLED', false), FILTER_VALIDATE_BOOL),
+        'privacy_status' => env('YOUTUBE_PRIVACY_STATUS'),
+        'category_id' => env('YOUTUBE_CATEGORY_ID', '22'),
+        'format_intent' => env('YOUTUBE_FORMAT_INTENT'),
+        'made_for_kids' => filter_var(env('YOUTUBE_MADE_FOR_KIDS'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE),
+        'contains_synthetic_media' => filter_var(env('YOUTUBE_CONTAINS_SYNTHETIC_MEDIA'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE),
+        'has_paid_product_placement' => filter_var(env('YOUTUBE_HAS_PAID_PRODUCT_PLACEMENT'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE),
+        'notify_subscribers' => filter_var(env('YOUTUBE_NOTIFY_SUBSCRIBERS'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE),
     ],
 
     'klipy' => [

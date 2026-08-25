@@ -9,6 +9,7 @@ use App\Dto\Metrics\PostMetricsResult;
 use App\Enums\UsageCategory;
 use App\Models\ConnectedAccount;
 use App\Models\PostTarget;
+use App\Services\ConnectedAccounts\Instagram\InstagramGraphApi;
 use App\Services\Metrics\Contracts\MetricsConnector;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
@@ -21,11 +22,6 @@ class InstagramMetricsConnector implements MetricsConnector
     use TracksUsage;
 
     public function __construct(private readonly HttpFactory $http) {}
-
-    private function baseUrl(): string
-    {
-        return sprintf('https://graph.facebook.com/%s', config('services.facebook.graph_version'));
-    }
 
     public function fetchPost(ConnectedAccount $account, PostTarget $target, array $credentials): PostMetricsResult
     {
@@ -42,7 +38,7 @@ class InstagramMetricsConnector implements MetricsConnector
                 ->timeout(10)
                 ->connectTimeout(5)
                 ->acceptJson()
-                ->get($this->baseUrl().'/'.$mediaId.'/insights', [
+                ->get(InstagramGraphApi::baseUrl($account).'/'.$mediaId.'/insights', [
                     'metric' => 'likes,comments,saved,shares,reach,views',
                     'access_token' => $token,
                 ]);
@@ -96,7 +92,7 @@ class InstagramMetricsConnector implements MetricsConnector
                 ->timeout(10)
                 ->connectTimeout(5)
                 ->acceptJson()
-                ->get($this->baseUrl().'/'.$account->remote_account_id, [
+                ->get(InstagramGraphApi::baseUrl($account).'/'.$account->remote_account_id, [
                     'fields' => 'followers_count,media_count',
                     'access_token' => (string) ($credentials['access_token'] ?? ''),
                 ]);

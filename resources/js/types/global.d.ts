@@ -40,11 +40,6 @@ declare module '@inertiajs/core' {
                 subscribed: boolean;
                 manageUrl: string;
             } | null;
-            community?: {
-                repoUrl: string;
-                sponsorUrl: string;
-                stars: number | null;
-            } | null;
             updateAvailable?: boolean;
             latestVersion?: string | null;
             latestReleaseUrl?: string | null;

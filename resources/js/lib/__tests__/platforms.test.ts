@@ -19,6 +19,8 @@ it('derives disabled platform labels from enabled keys', () => {
         linkedin: false,
         facebook: true,
         instagram: true,
+        tiktok: false,
+        youtube: true,
         threads: true,
         discord: true,
     };
@@ -29,8 +31,14 @@ it('derives disabled platform labels from enabled keys', () => {
         'linkedin',
         'facebook',
         'instagram',
+        'tiktok',
+        'youtube',
         'threads',
         'discord',
     ]);
-    expect(disabledPlatformLabels(enabled)).toEqual(['X', 'LinkedIn']);
+    expect(disabledPlatformLabels(enabled)).toEqual([
+        'X',
+        'LinkedIn',
+        'TikTok',
+    ]);
 });

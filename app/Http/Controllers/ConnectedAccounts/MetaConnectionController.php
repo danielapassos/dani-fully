@@ -278,7 +278,7 @@ class MetaConnectionController extends Controller
         $scopes = [];
 
         foreach (Platform::availableMetaGraphPlatforms() as $platform) {
-            array_push($scopes, ...$platform->scopes());
+            array_push($scopes, ...$platform->metaGraphScopes());
 
             if ($platform->supportsDirectMessages() && $this->settings->directMessagesEnabled()) {
                 array_push($scopes, ...$this->directMessageScopeDeltas($platform));

@@ -11,6 +11,7 @@ use App\Enums\UsageCategory;
 use App\Models\ConnectedAccount;
 use App\Models\Conversation;
 use App\Models\PostMedia;
+use App\Services\ConnectedAccounts\Instagram\InstagramGraphApi;
 use App\Services\Media\ImageConversionFailed;
 use App\Support\RetryAfter;
 use App\Support\UsageOperation;
@@ -29,8 +30,12 @@ use Illuminate\Support\Str;
  */
 trait InteractsWithMetaGraph
 {
-    private function metaGraphBase(): string
+    private function metaGraphBase(?ConnectedAccount $account = null): string
     {
+        if ($account?->usesInstagramLogin()) {
+            return InstagramGraphApi::baseUrl($account);
+        }
+
         return sprintf('https://graph.facebook.com/%s', (string) config('services.facebook.graph_version'));
     }
 
@@ -82,7 +87,7 @@ trait InteractsWithMetaGraph
         $delivered = 0;
 
         foreach ($messages as $message) {
-            $response = $this->http->acceptJson()->post($this->metaGraphBase()."/{$account->remote_account_id}/messages", [
+            $response = $this->http->acceptJson()->post($this->metaGraphBase($account)."/{$account->remote_account_id}/messages", [
                 ...$basePayload,
                 'recipient' => ['id' => $conversation->counterpart_remote_id],
                 'message' => $message,

@@ -15,6 +15,8 @@ it('defaults every platform to available', function () {
         'linkedin' => true,
         'facebook' => true,
         'instagram' => true,
+        'tiktok' => true,
+        'youtube' => true,
         'threads' => true,
         'discord' => true,
     ]);
@@ -46,7 +48,7 @@ it('lets an owner view the platforms page', function () {
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('settings/instance-platforms')
-            ->has('platforms', 7)
+            ->has('platforms', 9)
             ->where('linkedin_community_management_enabled', false));
 });
 
@@ -69,6 +71,8 @@ it('persists platform toggles for an owner', function () {
                 'linkedin' => true,
                 'facebook' => true,
                 'instagram' => true,
+                'tiktok' => true,
+                'youtube' => true,
                 'threads' => true,
                 'discord' => true,
             ],
@@ -92,6 +96,8 @@ it('persists the linkedin community management toggle from the platforms page', 
                 'linkedin' => true,
                 'facebook' => true,
                 'instagram' => true,
+                'tiktok' => true,
+                'youtube' => true,
                 'threads' => true,
                 'discord' => true,
             ],
@@ -113,6 +119,8 @@ it('rejects a platforms update missing the linkedin community management field',
                 'linkedin' => true,
                 'facebook' => true,
                 'instagram' => true,
+                'tiktok' => true,
+                'youtube' => true,
                 'threads' => true,
                 'discord' => true,
             ],

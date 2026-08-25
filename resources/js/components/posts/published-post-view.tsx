@@ -48,6 +48,8 @@ const PLATFORM_ACCENT: Record<PlatformName, string> = {
     linkedin: 'text-blue-600',
     facebook: 'text-[#1877F2]',
     instagram: 'text-[#E4405F]',
+    tiktok: 'text-foreground',
+    youtube: 'text-[#FF0033]',
     threads: 'text-foreground',
     discord: 'text-[#5865F2]',
 };

@@ -17,6 +17,7 @@ export type Account = {
     x_subscription_label: string | null;
     x_subscription_checked_at: string | null;
     is_linkedin_page: boolean;
+    connection_flow: 'oauth' | 'meta';
     is_default: boolean;
     disabled: boolean;
     pds_url: string | null;
@@ -30,6 +31,7 @@ export type Capability = {
     supportsAppPassword: boolean;
     supportsWebhook: boolean;
     configured: boolean;
+    directlyConfigured: boolean;
     launched: boolean;
     enabled: boolean;
 };

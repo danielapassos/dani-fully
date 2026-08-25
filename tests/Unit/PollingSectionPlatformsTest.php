@@ -21,8 +21,8 @@ test('pollingSectionPlatforms returns the capability matrix per section', functi
     );
 
     expect($values('engagement'))->toBe(['x', 'bluesky', 'linkedin', 'facebook', 'instagram', 'threads'])
-        ->and($values('post_metrics'))->toBe(['x', 'bluesky', 'linkedin', 'facebook', 'instagram', 'threads', 'discord'])
-        ->and($values('account_metrics'))->toBe(['x', 'bluesky', 'linkedin', 'facebook', 'instagram', 'threads']);
+        ->and($values('post_metrics'))->toBe(['x', 'bluesky', 'linkedin', 'facebook', 'instagram', 'tiktok', 'youtube', 'threads', 'discord'])
+        ->and($values('account_metrics'))->toBe(['x', 'bluesky', 'linkedin', 'facebook', 'instagram', 'tiktok', 'youtube', 'threads']);
 });
 
 test('pollingSectionPlatforms is empty for an unknown section', function () {

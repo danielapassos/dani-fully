@@ -64,6 +64,10 @@ class ConnectedAccountController extends Controller
                 'x_subscription_label' => $account->xSubscriptionLabel(),
                 'x_subscription_checked_at' => $account->xSubscriptionCheckedAt(),
                 'is_linkedin_page' => $account->isLinkedInOrganization(),
+                'connection_flow' => ($account->platform === Platform::Facebook
+                    || ($account->platform === Platform::Instagram && ! $account->usesInstagramLogin()))
+                        ? 'meta'
+                        : 'oauth',
                 'is_default' => $account->id === $defaultAccountId,
                 'disabled' => $account->isDisabled(),
                 'pds_url' => $this->customPdsUrl($account),
@@ -141,15 +145,24 @@ class ConnectedAccountController extends Controller
         }
 
         if (! $account->platform->supportsAppPassword()) {
-            if (! $account->platform->isConfigured()) {
-                return redirect()->route('accounts.index')
-                    ->with('error', "{$account->platform->label()} is not configured for reconnection.");
+            // Facebook and Instagram accounts originally connected from a
+            // linked Page must return to that picker. Direct Instagram Login
+            // accounts retain the generic per-platform reconnect route.
+            $usesMetaFlow = $account->platform === Platform::Facebook
+                || ($account->platform === Platform::Instagram && ! $account->usesInstagramLogin());
+
+            if ($usesMetaFlow) {
+                if (! Platform::Facebook->isDirectlyConfigured()) {
+                    return redirect()->route('accounts.index')
+                        ->with('error', "{$account->platform->label()} is not configured for reconnection.");
+                }
+
+                return redirect()->route('accounts.meta.redirect');
             }
 
-            // Facebook/Instagram reconnect by re-running the shared Meta
-            // Login + Page-selection flow, not the generic per-platform route.
-            if ($account->platform->usesMetaConnectionFlow()) {
-                return redirect()->route('accounts.meta.redirect');
+            if (! $account->platform->isDirectlyConfigured()) {
+                return redirect()->route('accounts.index')
+                    ->with('error', "{$account->platform->label()} is not configured for reconnection.");
             }
 
             return redirect()->route('accounts.connect', ['platform' => $account->platform->value]);

@@ -11,6 +11,7 @@ use App\Exceptions\TokenRefreshException;
 use App\Models\ConnectedAccount;
 use App\Models\ConnectedAccountSecret;
 use App\Services\Atproto\DPoP;
+use App\Services\ConnectedAccounts\Instagram\InstagramTokenRefresher;
 use App\Services\ConnectedAccounts\Threads\ThreadsTokenExchanger;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
@@ -33,6 +34,7 @@ class TokenManager
         private readonly HttpFactory $http,
         private readonly DPoP $dpop,
         private readonly ThreadsTokenExchanger $threadsExchanger,
+        private readonly InstagramTokenRefresher $instagramRefresher,
     ) {}
 
     /**
@@ -56,6 +58,10 @@ class TokenManager
 
         if ($account->platform === Platform::Threads) {
             return $this->threadsCredentials($account, $secret, $force);
+        }
+
+        if ($account->platform === Platform::Instagram && $account->usesInstagramLogin()) {
+            return $this->instagramCredentials($account, $secret, $force);
         }
 
         // Facebook/Instagram authenticate with a Page access token minted from a
@@ -155,6 +161,60 @@ class TokenManager
 
                 return $this->refreshThreads($freshAccount, $freshSecret);
             });
+    }
+
+    /**
+     * Direct Instagram Login tokens are long-lived and refresh themselves; no
+     * separate refresh token is issued. Legacy linked-Page tokens never enter
+     * this path because they do not carry the `instagram_login` capability.
+     *
+     * @return array<string, mixed>
+     */
+    private function instagramCredentials(ConnectedAccount $account, ConnectedAccountSecret $secret, bool $force): array
+    {
+        if (! $force && ! $this->needsRefresh($account)) {
+            return ['access_token' => $secret->access_token];
+        }
+
+        return Cache::lock("connected-account-token-refresh:{$account->id}", 60)
+            ->block(10, function () use ($account, $force): array {
+                $freshAccount = $account->newQueryWithoutScopes()->findOrFail($account->id);
+                $freshSecret = $freshAccount->secret()->firstOrFail();
+
+                if (! $force && ! $this->needsRefresh($freshAccount)) {
+                    return ['access_token' => $freshSecret->access_token];
+                }
+
+                return $this->refreshInstagram($freshAccount, $freshSecret);
+            });
+    }
+
+    /** @return array<string, mixed> */
+    private function refreshInstagram(ConnectedAccount $account, ConnectedAccountSecret $secret): array
+    {
+        try {
+            $refreshed = $this->instagramRefresher->refresh((string) $secret->access_token);
+        } catch (Throwable $exception) {
+            $account->forceFill([
+                'status' => ConnectedAccountStatus::NeedsAttention->value,
+                'refresh_failed_at' => Date::now(),
+                'refresh_failure_reason' => $exception->getMessage(),
+            ])->save();
+
+            throw $exception;
+        }
+
+        $secret->forceFill(['access_token' => $refreshed['token']])->save();
+
+        $account->forceFill([
+            'token_expires_at' => $refreshed['expiresAt'],
+            'last_refreshed_at' => Date::now(),
+            'status' => ConnectedAccountStatus::Active->value,
+            'refresh_failed_at' => null,
+            'refresh_failure_reason' => null,
+        ])->save();
+
+        return ['access_token' => $refreshed['token']];
     }
 
     /**
@@ -343,6 +403,10 @@ class TokenManager
             $issuer = (string) ($secret->session['issuer'] ?? $secret->session['auth_server'] ?? $endpoint);
         } elseif ($account->platform === Platform::X) {
             $endpoint = 'https://api.twitter.com/2/oauth2/token';
+        } elseif ($account->platform === Platform::TikTok) {
+            $endpoint = 'https://open.tiktokapis.com/v2/oauth/token/';
+        } elseif ($account->platform === Platform::YouTube) {
+            $endpoint = 'https://oauth2.googleapis.com/token';
         } else {
             $endpoint = 'https://www.linkedin.com/oauth/v2/accessToken';
         }
@@ -360,8 +424,13 @@ class TokenManager
         $body = [
             'grant_type' => 'refresh_token',
             'refresh_token' => (string) $secret->refresh_token,
-            'client_id' => $clientId,
         ];
+
+        if ($account->platform === Platform::TikTok) {
+            $body['client_key'] = $clientId;
+        } else {
+            $body['client_id'] = $clientId;
+        }
 
         // X is a confidential client (it has a client secret), so its token endpoint
         // requires the credentials via HTTP Basic auth — sending them in the body 401s

@@ -3,21 +3,6 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { formatStars } from '../sidebar-footer-card';
-
-describe('formatStars', () => {
-    it('leaves small counts unabbreviated', () => {
-        expect(formatStars(0)).toBe('0');
-        expect(formatStars(999)).toBe('999');
-    });
-
-    it('abbreviates thousands with one decimal', () => {
-        expect(formatStars(1200)).toBe('1.2k');
-        expect(formatStars(4210)).toBe('4.2k');
-        expect(formatStars(10000)).toBe('10k');
-    });
-});
-
 describe('sidebar footer card variants', () => {
     const source = readFileSync(
         resolve(
@@ -42,9 +27,10 @@ describe('sidebar footer card variants', () => {
         expect(source).not.toContain('Active subscription');
     });
 
-    it('links the community card to the repo and sponsor urls', () => {
-        expect(source).toContain('community.repoUrl');
-        expect(source).toContain('community.sponsorUrl');
-        expect(source).toContain('Star on GitHub');
+    it('does not render the upstream community promos', () => {
+        expect(source).not.toContain('Star on GitHub');
+        expect(source).not.toContain('Sponsor');
+        expect(source).not.toContain('community.repoUrl');
+        expect(source).not.toContain('community.sponsorUrl');
     });
 });

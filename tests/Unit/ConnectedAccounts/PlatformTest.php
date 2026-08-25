@@ -37,16 +37,29 @@ test('platforms report whether their connector can like a reply', function () {
         ->and(Platform::Facebook->supportsReplyLikes())->toBeTrue()
         ->and(Platform::Discord->supportsReplyLikes())->toBeTrue()
         ->and(Platform::Instagram->supportsReplyLikes())->toBeTrue()
+        ->and(Platform::TikTok->supportsReplyLikes())->toBeFalse()
+        ->and(Platform::YouTube->supportsReplyLikes())->toBeFalse()
         ->and(Platform::Threads->supportsReplyLikes())->toBeFalse();
 });
 
 test('instagram requests the engagement scope that powers reply likes', function () {
-    expect(Platform::Instagram->scopes())->toContain('instagram_manage_engagement');
+    expect(Platform::Instagram->metaGraphScopes())->toContain('instagram_manage_engagement');
+});
+
+test('direct instagram scopes use the instagram login permission family', function () {
+    expect(Platform::Instagram->scopes())
+        ->toContain('instagram_business_basic')
+        ->toContain('instagram_business_manage_insights')
+        ->toContain('instagram_business_content_publish')
+        ->toContain('instagram_business_manage_comments')
+        ->not->toContain('pages_show_list');
 });
 
 test('socialite driver names match core socialite keys', function () {
     expect(Platform::X->socialiteDriver())->toBe('x')
         ->and(Platform::LinkedIn->socialiteDriver())->toBe('linkedin-openid')
+        ->and(Platform::TikTok->socialiteDriver())->toBe('tiktok')
+        ->and(Platform::YouTube->socialiteDriver())->toBe('youtube')
         ->and(Platform::Bluesky->socialiteDriver())->toBeNull();
 });
 
@@ -84,8 +97,8 @@ test('capabilities array exposes one entry per platform for the frontend', funct
 
     $caps = Platform::capabilities();
 
-    expect($caps)->toHaveCount(7)
-        ->and($caps[0])->toHaveKeys(['platform', 'label', 'supportsOAuth', 'supportsAppPassword', 'supportsWebhook', 'configured', 'launched', 'enabled']);
+    expect($caps)->toHaveCount(9)
+        ->and($caps[0])->toHaveKeys(['platform', 'label', 'supportsOAuth', 'supportsAppPassword', 'supportsWebhook', 'configured', 'directlyConfigured', 'launched', 'enabled']);
 });
 
 test('every platform is launched', function () {
@@ -94,8 +107,33 @@ test('every platform is launched', function () {
         ->and(Platform::LinkedIn->isLaunched())->toBeTrue()
         ->and(Platform::Facebook->isLaunched())->toBeTrue()
         ->and(Platform::Instagram->isLaunched())->toBeTrue()
+        ->and(Platform::TikTok->isLaunched())->toBeTrue()
+        ->and(Platform::YouTube->isLaunched())->toBeTrue()
         ->and(Platform::Threads->isLaunched())->toBeTrue()
         ->and(Platform::Discord->isLaunched())->toBeTrue();
+});
+
+test('tiktok and youtube scopes cover publishing and metrics', function () {
+    expect(Platform::TikTok->scopes())
+        ->toContain('video.upload')
+        ->toContain('video.list')
+        ->toContain('user.info.stats')
+        ->and(Platform::YouTube->scopes())
+        ->toContain('https://www.googleapis.com/auth/youtube.upload')
+        ->toContain('https://www.googleapis.com/auth/youtube.readonly')
+        ->toContain('https://www.googleapis.com/auth/yt-analytics.readonly');
+});
+
+test('tiktok and youtube use independent oauth credentials', function () {
+    config()->set('services.tiktok.client_id', 'tiktok-client');
+    config()->set('services.tiktok.client_secret', 'tiktok-secret');
+    config()->set('services.youtube.client_id', 'youtube-client');
+    config()->set('services.youtube.client_secret', 'youtube-secret');
+
+    expect(Platform::TikTok->configKey())->toBe('services.tiktok')
+        ->and(Platform::TikTok->isConfigured())->toBeTrue()
+        ->and(Platform::YouTube->configKey())->toBe('services.youtube')
+        ->and(Platform::YouTube->isConfigured())->toBeTrue();
 });
 
 test('facebook scopes cover the reconciled facebook-login set', function () {
@@ -119,10 +157,10 @@ test('meta platforms report oauth capability and no app password', function () {
 
 test('meta socialite drivers and config keys are wired', function () {
     expect(Platform::Facebook->socialiteDriver())->toBe('facebook')
-        ->and(Platform::Instagram->socialiteDriver())->toBe('facebook')
+        ->and(Platform::Instagram->socialiteDriver())->toBe('instagram')
         ->and(Platform::Threads->socialiteDriver())->toBe('threads')
         ->and(Platform::Facebook->configKey())->toBe('services.facebook')
-        ->and(Platform::Instagram->configKey())->toBe('services.facebook')
+        ->and(Platform::Instagram->configKey())->toBe('services.instagram')
         ->and(Platform::Threads->configKey())->toBe('services.threads');
 });
 
@@ -136,10 +174,21 @@ test('meta text limits and threading match the spec', function () {
         ->and(Platform::Threads->measure('héllo'))->toBe(5);
 });
 
-test('instagram is configured off the shared facebook credentials', function () {
+test('instagram is connectable from direct or linked page credentials', function () {
+    config()->set('services.instagram.client_id', 'instagram-id');
+    config()->set('services.instagram.client_secret', 'instagram-secret');
+    config()->set('services.facebook.client_id', null);
+    config()->set('services.facebook.client_secret', null);
+
+    expect(Platform::Instagram->isDirectlyConfigured())->toBeTrue()
+        ->and(Platform::Instagram->isConfigured())->toBeTrue();
+
+    config()->set('services.instagram.client_id', null);
+    config()->set('services.instagram.client_secret', null);
     config()->set('services.facebook.client_id', 'cid');
     config()->set('services.facebook.client_secret', 'secret');
     expect(Platform::Facebook->isConfigured())->toBeTrue()
+        ->and(Platform::Instagram->isDirectlyConfigured())->toBeFalse()
         ->and(Platform::Instagram->isConfigured())->toBeTrue();
 
     config()->set('services.facebook.client_id', '');

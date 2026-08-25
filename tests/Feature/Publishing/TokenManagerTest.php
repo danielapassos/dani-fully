@@ -69,6 +69,60 @@ test('fresh returns the stored instagram page token without attempting a refresh
     Http::assertNothingSent();
 });
 
+test('fresh refreshes an expiring direct instagram login token', function () {
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::Instagram->value,
+        'capabilities' => ['instagram_login' => true],
+        'token_expires_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'access_token' => 'old-instagram-token',
+    ]);
+
+    Http::fake([
+        'https://graph.instagram.com/refresh_access_token*' => Http::response([
+            'access_token' => 'fresh-instagram-token',
+            'token_type' => 'bearer',
+            'expires_in' => 5_184_000,
+        ]),
+    ]);
+
+    $credentials = app(TokenManager::class)->fresh($account->fresh());
+
+    expect($credentials['access_token'])->toBe('fresh-instagram-token')
+        ->and($account->fresh()->secret->access_token)->toBe('fresh-instagram-token')
+        ->and($account->fresh()->token_expires_at)->toBeGreaterThan(now()->addDays(59));
+
+    Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://graph.instagram.com/refresh_access_token?')
+        && $request['grant_type'] === 'ig_refresh_token'
+        && $request['access_token'] === 'old-instagram-token');
+});
+
+test('direct instagram refresh failure marks the account as needing attention', function () {
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::Instagram->value,
+        'capabilities' => ['instagram_login' => true],
+        'token_expires_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'access_token' => 'expired-instagram-token',
+    ]);
+
+    Http::fake([
+        'https://graph.instagram.com/refresh_access_token*' => Http::response([
+            'error' => ['message' => 'Invalid OAuth access token'],
+        ], 400),
+    ]);
+
+    expect(fn () => app(TokenManager::class)->fresh($account->fresh()))
+        ->toThrow(TokenRefreshException::class);
+
+    expect($account->fresh()->status)->toBe(ConnectedAccountStatus::NeedsAttention)
+        ->and($account->fresh()->refresh_failure_reason)->toContain('Invalid OAuth access token');
+});
+
 test('fresh refreshes an expired oauth token and persists it', function () {
     $account = ConnectedAccount::factory()->create([
         'platform' => Platform::X->value,
@@ -210,6 +264,66 @@ test('linkedin token refresh sends credentials in the body', function () {
     Http::assertSent(fn ($request) => $request['client_id'] === 'lid'
         && $request['client_secret'] === 'lsecret'
         && ! $request->hasHeader('Authorization'));
+});
+
+test('tiktok token refresh uses client_key and persists the rotated refresh token', function () {
+    config()->set('services.tiktok.client_id', 'tiktok-key');
+    config()->set('services.tiktok.client_secret', 'tiktok-secret');
+
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::TikTok,
+        'token_expires_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'access_token' => 'old-access',
+        'refresh_token' => 'old-refresh',
+    ]);
+
+    Http::fake([
+        'https://open.tiktokapis.com/v2/oauth/token/' => Http::response([
+            'access_token' => 'new-access',
+            'refresh_token' => 'rotated-refresh',
+            'expires_in' => 86_400,
+        ]),
+    ]);
+
+    expect(app(TokenManager::class)->fresh($account->fresh())['access_token'])->toBe('new-access')
+        ->and($account->fresh()->secret->refresh_token)->toBe('rotated-refresh');
+
+    Http::assertSent(fn ($request) => $request['client_key'] === 'tiktok-key'
+        && $request['client_secret'] === 'tiktok-secret'
+        && $request['refresh_token'] === 'old-refresh'
+        && ! isset($request['client_id']));
+});
+
+test('youtube token refresh keeps the durable refresh token when google omits it', function () {
+    config()->set('services.youtube.client_id', 'youtube-id');
+    config()->set('services.youtube.client_secret', 'youtube-secret');
+
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::YouTube,
+        'token_expires_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'access_token' => 'old-access',
+        'refresh_token' => 'durable-refresh',
+    ]);
+
+    Http::fake([
+        'https://oauth2.googleapis.com/token' => Http::response([
+            'access_token' => 'new-access',
+            'expires_in' => 3_600,
+        ]),
+    ]);
+
+    expect(app(TokenManager::class)->fresh($account->fresh())['access_token'])->toBe('new-access')
+        ->and($account->fresh()->secret->refresh_token)->toBe('durable-refresh');
+
+    Http::assertSent(fn ($request) => $request['client_id'] === 'youtube-id'
+        && $request['client_secret'] === 'youtube-secret'
+        && $request['refresh_token'] === 'durable-refresh');
 });
 
 test('fresh refreshes the bluesky session before publishing and persists the new tokens', function () {

@@ -57,6 +57,12 @@ const PLATFORM_OPTIONS: { value: string; label: string }[] = [
     { value: 'x', label: 'X' },
     { value: 'bluesky', label: 'Bluesky' },
     { value: 'linkedin', label: 'LinkedIn' },
+    { value: 'facebook', label: 'Facebook' },
+    { value: 'instagram', label: 'Instagram' },
+    { value: 'tiktok', label: 'TikTok' },
+    { value: 'youtube', label: 'YouTube' },
+    { value: 'threads', label: 'Threads' },
+    { value: 'discord', label: 'Discord' },
 ];
 
 function FilterChip({

@@ -97,6 +97,13 @@ class OAuthConnectionController extends Controller
             }
         }
 
+        if ($resolved === Platform::Instagram) {
+            $data = $data->withCapabilities([
+                'instagram_login' => true,
+                'oauth_scopes' => array_values((array) $oauthUser->approvedScopes),
+            ]);
+        }
+
         if ($resolved->supportsDirectMessages()) {
             // Record whether the provider actually granted the DM scope(s) this
             // app requested, so the Messages inbox only polls/sends through
@@ -298,12 +305,12 @@ class OAuthConnectionController extends Controller
         if (
             ! $resolved instanceof Platform
             || ! $resolved->supportsOAuth()
-            || ! $resolved->isConfigured()
+            || ! $resolved->isDirectlyConfigured()
             || ! $resolved->isLaunched()
             || ! app(InstanceSettings::class)->platformAvailable($resolved)
-            // Facebook/Instagram always go through the dedicated
-            // MetaConnectionController Page-selection flow, never this
-            // generic single-step route — even once launched.
+            // Facebook always goes through the dedicated Page-selection flow.
+            // Instagram reaches this route only when its direct app credentials
+            // are configured; linked-Page Instagram remains available from Meta.
             || $resolved->usesMetaConnectionFlow()
         ) {
             abort(404);

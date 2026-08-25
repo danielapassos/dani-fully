@@ -35,6 +35,20 @@ test('instagram maps conversations and sets 24h window from latest inbound', fun
     expect($convo->messagingWindowExpiresAt->timestamp)->toBe($inbound->copy()->addHours(24)->timestamp);
 });
 
+test('direct instagram login reads conversations from graph instagram', function () {
+    Http::fake([
+        'graph.instagram.com/*/conversations*' => Http::response(['data' => []]),
+    ]);
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::Instagram,
+        'remote_account_id' => 'me-igid',
+        'capabilities' => ['instagram_login' => true],
+    ]);
+
+    expect(app(InstagramDirectMessageConnector::class)->fetchConversations($account, ['access_token' => 'tok'], null)->isOk())->toBeTrue();
+    Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://graph.instagram.com/'));
+});
+
 test('instagram send posts recipient IGSID', function () {
     Http::fake(['graph.facebook.com/*/messages' => Http::response(['message_id' => 'ig-sent-1'])]);
     $account = ConnectedAccount::factory()->create(['platform' => Platform::Instagram, 'remote_account_id' => 'me-igid']);

@@ -64,6 +64,27 @@ final class MediaUploadState
         $this->state[$mediaId] = $entry;
     }
 
+    /** @return array<string, mixed> */
+    public function metadata(string $mediaId): array
+    {
+        $metadata = $this->entry($mediaId)['metadata'] ?? [];
+
+        return is_array($metadata) ? $metadata : [];
+    }
+
+    /** @param array<string, mixed> $metadata */
+    public function setMetadata(string $mediaId, array $metadata): void
+    {
+        $entry = $this->entry($mediaId);
+        $entry['metadata'] = $metadata;
+        $this->state[$mediaId] = $entry;
+    }
+
+    public function forget(string $mediaId): void
+    {
+        unset($this->state[$mediaId]);
+    }
+
     public function polls(): int
     {
         return (int) ($this->state[self::POLLS_KEY] ?? 0);
