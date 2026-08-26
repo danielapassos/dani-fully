@@ -11,6 +11,13 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 import { resolveAppVersion } from './resolve-app-version';
 
+const CONFIG_ENV_KEYS = [
+    'APP_URL',
+    'VITE_HMR_HOST',
+    'VITE_PORT',
+    'SKIP_WAYFINDER_GENERATE',
+] as const;
+
 // Copy the emojibase `en` locale into public/ so Frimousse and the emoji
 // typeahead fetch it same-origin. The app's CSP (connect-src 'self') blocks
 // Frimousse's default jsdelivr CDN, so the data must be served from our origin.
@@ -77,10 +84,17 @@ function disableHotFileForHttpsAppUrl(appUrl: URL): Plugin | null {
 }
 
 export default defineConfig(({ mode }) => {
-    const environment = {
-        ...loadEnv(mode, process.cwd(), ''),
-        ...process.env,
-    };
+    // Vite's debug output includes every value returned by loadEnv(). Loading
+    // with an empty prefix therefore leaks unrelated provider/API credentials
+    // into build logs. Keep the config's environment surface to the four
+    // non-secret values it actually consumes.
+    const fileEnvironment = loadEnv(mode, process.cwd(), CONFIG_ENV_KEYS);
+    const environment = Object.fromEntries(
+        CONFIG_ENV_KEYS.map((key) => [
+            key,
+            process.env[key] ?? fileEnvironment[key],
+        ]),
+    ) as Record<(typeof CONFIG_ENV_KEYS)[number], string | undefined>;
 
     const appUrl = new URL(environment.APP_URL || 'http://localhost');
     // Prefer VITE_HMR_HOST when accessing the app via a hostname other than

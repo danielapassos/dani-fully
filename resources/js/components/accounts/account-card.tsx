@@ -16,7 +16,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
-import { RefreshCw, Trash2 } from '@/components/ui/icons';
+import { AlertTriangle, RefreshCw, Trash2 } from '@/components/ui/icons';
 import { Input } from '@/components/ui/input';
 import {
     InputGroup,
@@ -250,6 +250,8 @@ export function AccountCard({
     const brand = PLATFORM_BRAND[account.platform] ?? PLATFORM_FALLBACK;
     const needsAttention = account.status !== 'active';
     const disabled = account.disabled;
+    const publishingBlocked =
+        !disabled && !needsAttention && !account.publishing_ready;
     const name = account.display_name ?? account.handle;
     const repostCapable = REPOST_CAPABLE_PLATFORMS.includes(account.platform);
 
@@ -309,6 +311,11 @@ export function AccountCard({
                     {disabled && !frozen && (
                         <Badge variant="secondary" className="shrink-0">
                             Disabled
+                        </Badge>
+                    )}
+                    {publishingBlocked && (
+                        <Badge variant="secondary" className="shrink-0">
+                            Read only
                         </Badge>
                     )}
                     <span className="flex shrink-0 items-center gap-1.5 text-[11.5px] font-medium">
@@ -394,6 +401,16 @@ export function AccountCard({
                 )}
             </div>
 
+            {publishingBlocked && account.publishing_unavailable_reason && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2 text-[12px] text-amber-900 dark:text-amber-200">
+                    <AlertTriangle
+                        className="mt-0.5 size-3.5 shrink-0"
+                        aria-hidden
+                    />
+                    <span>{account.publishing_unavailable_reason}</span>
+                </div>
+            )}
+
             {account.platform === 'x' && (
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
                     <span className="min-w-0">
@@ -467,7 +484,11 @@ export function AccountCard({
                             <ReconnectDiscordDialog account={account} />
                         ) : (
                             <Button
-                                variant={needsAttention ? 'default' : 'outline'}
+                                variant={
+                                    needsAttention || publishingBlocked
+                                        ? 'default'
+                                        : 'outline'
+                                }
                                 size="sm"
                                 className="h-8 shrink-0"
                                 onClick={() => onReconnectOAuth(account)}

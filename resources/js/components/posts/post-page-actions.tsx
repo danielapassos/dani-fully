@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/icons';
 import { useSchedulingTimezone } from '@/hooks/posts/use-scheduling-timezone';
 import { dayjs } from '@/lib/datetime/dayjs';
-import { postCapabilities } from '@/lib/posts/capabilities';
+import { postCapabilities, targetCanRetry } from '@/lib/posts/capabilities';
 import { postLiveStatus } from '@/lib/posts/live-status';
 import { index as engagementRoute } from '@/routes/engagement';
 import { index as postsRoute } from '@/routes/posts';
@@ -125,7 +125,9 @@ export function PostPageActions({ post }: Props) {
     }
 
     async function handleRetry() {
-        const failed = post.targets.find((t) => t.status === 'failed');
+        const failed = post.targets.find(
+            (target) => target.status === 'failed' && targetCanRetry(target),
+        );
         if (!failed) {
             return;
         }

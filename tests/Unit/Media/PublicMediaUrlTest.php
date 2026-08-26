@@ -38,6 +38,18 @@ it('returns an absolute url for public-disk media so Meta can fetch it server-si
         ->and(parse_url($url, PHP_URL_HOST))->not->toBeNull();
 });
 
+it('uses the configured verified public media base for provider fetches', function () {
+    config(['media.public_url' => 'https://media.example.com/tiktok']);
+
+    $media = PostMedia::factory()->video()->create([
+        'disk' => 's3',
+        'path' => 'media/ws/clip.mp4',
+    ]);
+
+    expect(app(PublicMediaUrl::class)->for($media))
+        ->toBe('https://media.example.com/tiktok/media/ws/clip.mp4');
+});
+
 it('leaves an already-conforming jpeg untouched rather than deriving a copy', function () {
     Storage::fake('public');
     Storage::disk('public')->put('media/ws/pic.jpg', 'jpg-bytes');

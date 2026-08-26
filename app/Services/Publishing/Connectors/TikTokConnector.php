@@ -9,6 +9,7 @@ use App\Dto\Publishing\PublishContext;
 use App\Dto\Publishing\PublishResult;
 use App\Enums\ErrorKind;
 use App\Enums\UsageCategory;
+use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Media\PublicMediaUrl;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
@@ -57,9 +58,14 @@ class TikTokConnector implements PublishConnector
         $media = $context->media[0];
         $state = new MediaUploadState($context->target->media_upload_state);
         $publishId = $state->remoteRef($media->id);
+        $initializing = false;
 
         try {
             if ($publishId === null) {
+                if ($this->initOutcomeUnknown($state, $media)) {
+                    return $this->initNeedsReview();
+                }
+
                 $mediaUrl = $this->publicMediaUrl->for($media);
                 if (parse_url($mediaUrl, PHP_URL_SCHEME) !== 'https') {
                     return PublishResult::failure(
@@ -67,6 +73,13 @@ class TikTokConnector implements PublishConnector
                         'TikTok must fetch the video from a verified public HTTPS media domain.',
                     );
                 }
+
+                // An inbox-init response can be lost after TikTok creates the
+                // transfer. Persist the mutation boundary first so a retry cannot
+                // silently create a second inbox notification.
+                $this->setInitOutcomeUnknown($state, $media, true);
+                $context->target->forceFill(['media_upload_state' => $state->toArray()])->save();
+                $initializing = true;
 
                 $response = $this->request($token)->post(self::BASE_URL.'/inbox/video/init/', [
                     'source_info' => [
@@ -78,25 +91,63 @@ class TikTokConnector implements PublishConnector
                 $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
                 if ($failure = $this->failure($response, 'TikTok could not transfer the video to the creator inbox.')) {
+                    if ($response->serverError()) {
+                        return $this->initNeedsReview();
+                    }
+
+                    $this->setInitOutcomeUnknown($state, $media, false);
+                    $context->target->forceFill(['media_upload_state' => $state->toArray()])->save();
+                    $initializing = false;
+
                     return $failure;
                 }
 
                 $publishId = (string) $response->json('data.publish_id');
                 if ($publishId === '') {
-                    return PublishResult::failure(ErrorKind::ServerError, 'TikTok did not return a publish id.');
+                    return $this->initNeedsReview();
                 }
 
                 $state->markUploaded($media->id, $publishId);
+                $this->setInitOutcomeUnknown($state, $media, false);
                 $context->target->forceFill(['media_upload_state' => $state->toArray()])->save();
+                $initializing = false;
             }
 
-            return $this->status($context, $token, $publishId);
+            return $this->status($context, $token, $publishId, $media, $state);
         } catch (ConnectionException $exception) {
+            if ($initializing) {
+                return $this->initNeedsReview();
+            }
+
             return PublishResult::failure(ErrorKind::Network, $exception->getMessage());
         }
     }
 
-    private function status(PublishContext $context, string $token, string $publishId): PublishResult
+    private function initOutcomeUnknown(MediaUploadState $state, PostMedia $media): bool
+    {
+        return ($state->metadata($media->id)['init_outcome_unknown'] ?? false) === true;
+    }
+
+    private function setInitOutcomeUnknown(MediaUploadState $state, PostMedia $media, bool $unknown): void
+    {
+        $metadata = $state->metadata($media->id);
+        if ($unknown) {
+            $metadata['init_outcome_unknown'] = true;
+        } else {
+            unset($metadata['init_outcome_unknown']);
+        }
+        $state->setMetadata($media->id, $metadata);
+    }
+
+    private function initNeedsReview(): PublishResult
+    {
+        return PublishResult::failure(
+            ErrorKind::Unknown,
+            'TikTok may already have created this inbox transfer, but Shoutrrr did not receive its publish id. Check the TikTok inbox before retrying.',
+        );
+    }
+
+    private function status(PublishContext $context, string $token, string $publishId, PostMedia $media, MediaUploadState $state): PublishResult
     {
         $response = $this->request($token)->post(self::BASE_URL.'/status/fetch/', [
             'publish_id' => $publishId,
@@ -111,16 +162,48 @@ class TikTokConnector implements PublishConnector
         $status = strtoupper((string) $response->json('data.status'));
 
         if ($status === 'PUBLISH_COMPLETE') {
-            $ids = array_values(array_unique(array_map(
-                strval(...),
-                array_filter((array) $response->json('data.publicaly_available_post_id', []), is_scalar(...)),
+            $ids = array_values(array_unique(array_filter(
+                array_map(
+                    static fn (mixed $id): string => trim((string) $id),
+                    array_filter((array) $response->json('data.publicaly_available_post_id', []), is_scalar(...)),
+                ),
+                static fn (string $id): bool => $id !== '',
             )));
 
-            return PublishResult::success($ids !== [] ? $ids : [$publishId]);
+            if ($ids === []) {
+                // A private/friends post is a valid completed inbox handoff but
+                // TikTok never exposes a public post id for it. The publish_id
+                // remains in media_upload_state as an operation tracker; it must
+                // not be promoted to a video id or polled forever.
+                return PublishResult::success([]);
+            }
+
+            return PublishResult::success($ids);
         }
 
         if ($status === 'FAILED') {
             $reason = (string) $response->json('data.fail_reason', 'unknown');
+
+            if ($reason === 'auth_removed') {
+                return PublishResult::failure(
+                    ErrorKind::AuthExpired,
+                    'The TikTok creator removed access while the inbox handoff was processing; reconnect the account.',
+                );
+            }
+
+            if (in_array($reason, ['internal', 'video_pull_failed'], true)) {
+                // TikTok documents these as retryable. The existing publish_id is
+                // terminal once status is FAILED, so discard it before returning a
+                // retryable result; the next job must initialize a fresh handoff.
+                $state->forget($media->id);
+                $context->target->forceFill(['media_upload_state' => $state->toArray()])->save();
+
+                return PublishResult::failure(
+                    ErrorKind::ServerError,
+                    "TikTok could not complete the inbox handoff ({$reason}); retrying with a fresh transfer.",
+                    retryAfter: 30,
+                );
+            }
 
             return PublishResult::failure(ErrorKind::Validation, "TikTok could not complete the inbox handoff ({$reason}).");
         }

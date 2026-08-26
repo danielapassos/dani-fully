@@ -1,9 +1,11 @@
+import type { PlatformName } from '@/types/compose';
+
 export type ReplyItem = {
     id: string;
     conversation_key?: string;
     reply_count?: number;
     unread_count?: number;
-    platform: 'x' | 'bluesky' | 'linkedin';
+    platform: PlatformName;
     remote_reply_id: string;
     author_handle: string;
     author_name: string | null;

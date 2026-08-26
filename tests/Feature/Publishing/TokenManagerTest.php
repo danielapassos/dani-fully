@@ -208,6 +208,30 @@ test('fresh flips status and throws on refresh failure', function () {
     expect($account->fresh()->status)->toBe(ConnectedAccountStatus::NeedsAttention);
 });
 
+test('fresh rejects a successful oauth refresh response without all required token fields', function () {
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::YouTube,
+        'token_expires_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'access_token' => 'old-access',
+        'refresh_token' => 'durable-refresh',
+    ]);
+
+    Http::fake([
+        'https://oauth2.googleapis.com/token' => Http::response(['access_token' => 'incomplete-new-token'], 200),
+    ]);
+
+    expect(fn () => app(TokenManager::class)->fresh($account->fresh()))
+        ->toThrow(TokenRefreshException::class);
+
+    expect($account->fresh()->status)->toBe(ConnectedAccountStatus::NeedsAttention)
+        ->and($account->fresh()->refresh_failure_reason)->toContain('valid access_token and expires_in')
+        ->and($account->fresh()->secret->access_token)->toBe('old-access')
+        ->and($account->fresh()->secret->refresh_token)->toBe('durable-refresh');
+});
+
 test('x token refresh authenticates with http basic auth (confidential client)', function () {
     config()->set('services.x.client_id', 'cid');
     config()->set('services.x.client_secret', 'csecret');
@@ -530,6 +554,26 @@ test('fresh flips a threads account to needs-attention and throws on refresh fai
         ->toThrow(TokenRefreshException::class);
 
     expect($account->fresh()->status)->toBe(ConnectedAccountStatus::NeedsAttention);
+});
+
+test('fresh flips a threads account to needs-attention on a malformed successful refresh', function () {
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::Threads->value,
+        'token_expires_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'access_token' => 'stale-long-token',
+    ]);
+
+    Http::fake(['https://graph.threads.net/refresh_access_token*' => Http::response([], 200)]);
+
+    expect(fn () => app(TokenManager::class)->fresh($account->fresh()))
+        ->toThrow(TokenRefreshException::class, 'valid access_token and expires_in');
+
+    expect($account->fresh()->status)->toBe(ConnectedAccountStatus::NeedsAttention)
+        ->and($account->fresh()->refresh_failure_reason)->toContain('valid access_token and expires_in')
+        ->and($account->fresh()->secret->access_token)->toBe('stale-long-token');
 });
 
 test('fresh flags the bluesky account for attention when both refresh and login fail', function () {

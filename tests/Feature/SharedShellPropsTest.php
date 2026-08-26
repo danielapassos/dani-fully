@@ -34,6 +34,8 @@ test('shell props expose accounts, sets, and limits on every page', function () 
             ->where('shell.accounts.0.status', 'needs_attention')
             ->where('shell.accounts.0.max_video_duration_seconds', 140)
             ->where('shell.accounts.0.auto_repost_enabled', false)
+            ->where('shell.accounts.0.publishing_ready', false)
+            ->where('shell.accounts.0.publishing_unavailable_reason', fn (string $reason): bool => str_contains($reason, 'Reconnect'))
             ->has('shell.sets', 1)
             ->has('shell.limits')
         );

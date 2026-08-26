@@ -20,6 +20,7 @@ function limits(
             maxBytes: null,
             maxMedia: 4,
             requiresMedia: false,
+            requiresVideo: false,
             maxMediaBytes: 5_242_880,
             allowedMime: ['image/jpeg'],
             threadMax: null,

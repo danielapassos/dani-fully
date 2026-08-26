@@ -17,6 +17,7 @@ const failedTarget = (overrides: Partial<ChipTarget> = {}): ChipTarget => ({
     id: 't1',
     platform: 'bluesky',
     status: 'failed',
+    error_kind: 'validation',
     error_message: 'Remote server rejected the post',
     attempts: 2,
     ...overrides,
@@ -45,7 +46,10 @@ afterEach(() => {
     mountedContainer = null;
 });
 
-const renderChips = (targets: ChipTarget[]): HTMLDivElement => {
+const renderChips = (
+    targets: ChipTarget[],
+    onRetry?: (targetId: string) => void,
+): HTMLDivElement => {
     const container = document.createElement('div');
     document.body.append(container);
 
@@ -57,7 +61,7 @@ const renderChips = (targets: ChipTarget[]): HTMLDivElement => {
             createElement(
                 TooltipProvider,
                 null,
-                createElement(TargetStatusChips, { targets }),
+                createElement(TargetStatusChips, { targets, onRetry }),
             ),
         );
     });
@@ -118,5 +122,44 @@ describe('target status chips', () => {
 
         expect(container.querySelector('button')).toBeNull();
         expect(document.querySelector('[role="tooltip"]')).toBeNull();
+    });
+
+    it('replaces Retry with manual-review guidance for an unconfirmed outcome', () => {
+        const container = renderChips(
+            [
+                failedTarget({
+                    error_kind: 'unknown',
+                    can_retry: false,
+                    retry_blocked_reason:
+                        'The provider outcome is unconfirmed and may already be live.',
+                }),
+            ],
+            () => undefined,
+        );
+        const buttons = Array.from(container.querySelectorAll('button'));
+        const manualReview = Array.from(
+            container.querySelectorAll('span'),
+        ).find((node) => node.textContent === 'Manual review');
+
+        expect(buttons.some((button) => button.textContent === 'Retry')).toBe(
+            false,
+        );
+        expect(manualReview?.getAttribute('title')).toContain(
+            'provider outcome is unconfirmed',
+        );
+    });
+
+    it('keeps Retry for a safely retryable failure', () => {
+        const container = renderChips(
+            [failedTarget({ error_kind: 'validation', can_retry: true })],
+            () => undefined,
+        );
+
+        expect(
+            Array.from(container.querySelectorAll('button')).some(
+                (button) => button.textContent === 'Retry',
+            ),
+        ).toBe(true);
+        expect(container.textContent).not.toContain('Manual review');
     });
 });

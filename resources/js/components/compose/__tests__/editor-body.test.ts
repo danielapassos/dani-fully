@@ -38,6 +38,7 @@ describe('shouldFocusEditorOnMount', () => {
         expect(shouldFocusEditorOnMount(true, true)).toBe(true);
         expect(shouldFocusEditorOnMount(false, true)).toBe(false);
         expect(shouldFocusEditorOnMount(true, false)).toBe(false);
+        expect(shouldFocusEditorOnMount(true, true, true)).toBe(false);
     });
 });
 

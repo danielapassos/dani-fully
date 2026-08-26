@@ -1,6 +1,12 @@
 <?php
 
 return [
+    // Optional stable public base URL for media that a social provider fetches
+    // server-side. This is deliberately separate from an S3 API/presign endpoint:
+    // TikTok requires the exact HTTPS domain or URL prefix to be verified, while
+    // Laravel Cloud public buckets expose a dedicated public URL via AWS_URL.
+    'public_url' => env('PUBLIC_MEDIA_URL'),
+
     // Decode guard for GD image processing in the publish worker. Peak GD memory is
     // ~2 x (W x H x 4 bytes) because ->scale() clones the source canvas, so this is
     // calibrated to stay under a 256M worker memory_limit. Images over this are

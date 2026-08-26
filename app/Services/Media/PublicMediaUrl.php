@@ -44,7 +44,7 @@ class PublicMediaUrl
             $path = $converted->path;
         }
 
-        return $this->absolute(FileStorage::url($path, $disk));
+        return $this->absolute(FileStorage::publicMediaUrl($path, $disk));
     }
 
     private function needsConversion(PostMedia $media, ?Platform $platform): bool

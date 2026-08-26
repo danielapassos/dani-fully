@@ -76,7 +76,9 @@ return [
             'url' => env('PUBLIC_IMAGES_URL', env('AWS_URL')),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
-            'visibility' => 'public',
+            // Cloudflare R2 and Laravel Cloud set visibility at bucket level and
+            // reject per-object public ACL headers. A public bucket may expose its
+            // base through PUBLIC_IMAGES_URL; private buckets use temporary URLs.
             'throw' => true,
             'report' => true,
         ],

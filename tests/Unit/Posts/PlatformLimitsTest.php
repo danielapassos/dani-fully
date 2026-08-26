@@ -23,6 +23,9 @@ test('only linkedin caps the thread length', function () {
 test('media constraints match each platform', function () {
     expect(Platform::X->maxMedia())->toBe(4)
         ->and(Platform::LinkedIn->maxMedia())->toBe(9)
+        ->and(Platform::TikTok->requiresVideo())->toBeTrue()
+        ->and(Platform::YouTube->requiresVideo())->toBeTrue()
+        ->and(Platform::Instagram->requiresVideo())->toBeFalse()
         ->and(Platform::Bluesky->maxMediaBytes())->toBe(2_000_000)
         ->and(Platform::Bluesky->allowedMime())->toContain('image/webp')
         ->and(Platform::LinkedIn->allowedMime())->toContain('image/gif');
@@ -38,5 +41,5 @@ test('the limits array exposes one descriptor per platform for the frontend', fu
     $limits = Platform::allLimits();
 
     expect($limits)->toHaveCount(9)
-        ->and($limits[0])->toHaveKeys(['platform', 'maxLength', 'maxBytes', 'maxMedia', 'maxMediaBytes', 'allowedMime', 'threadMax']);
+        ->and($limits[0])->toHaveKeys(['platform', 'maxLength', 'maxBytes', 'maxMedia', 'requiresVideo', 'maxMediaBytes', 'allowedMime', 'threadMax']);
 });

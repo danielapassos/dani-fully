@@ -106,7 +106,7 @@ class SecurityHeaders
 
     /**
      * CSP source origins for the deployment's media storage host. Empty unless
-     * the default disk is remote (s3), so local/public-disk deployments keep the
+     * the default disk uses the s3 driver, so local/public-disk deployments keep the
      * tightest policy. Derived from the configured public URL and API endpoint;
      * an s3 disk with neither configured (vanilla AWS, whose virtual-hosted,
      * region-derived presign host can't be predicted cheaply here) falls back to
@@ -116,13 +116,15 @@ class SecurityHeaders
      */
     private function storageOrigins(): array
     {
-        if (FileStorage::diskName() !== 's3') {
+        $disk = FileStorage::diskName();
+
+        if (config("filesystems.disks.{$disk}.driver") !== 's3') {
             return [];
         }
 
         $origins = [];
 
-        foreach (['filesystems.disks.s3.url', 'filesystems.disks.s3.endpoint'] as $key) {
+        foreach (["filesystems.disks.{$disk}.url", "filesystems.disks.{$disk}.endpoint"] as $key) {
             $origin = $this->originOf((string) config($key));
 
             if ($origin !== null) {

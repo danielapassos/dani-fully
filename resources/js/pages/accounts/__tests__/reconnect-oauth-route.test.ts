@@ -31,6 +31,8 @@ function account(overrides: Partial<Account>): Account {
         disabled: false,
         pds_url: null,
         auto_repost_enabled: false,
+        publishing_ready: false,
+        publishing_unavailable_reason: 'Reconnect before posting.',
         ...overrides,
     };
 }

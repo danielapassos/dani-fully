@@ -93,32 +93,115 @@ type DestinationSelectorProps = {
     disabled?: boolean;
 };
 
-function selectedAccountIds(
+export function destinationAccountIds(
     destination: Destination,
     accounts: Account[],
     sets: AccountSet[],
 ): string[] {
+    const available = new Set(accounts.map((account) => account.id));
     if (destination.kind === 'account') {
-        return accounts.some((a) => a.id === destination.id)
-            ? [destination.id]
-            : [];
+        return available.has(destination.id) ? [destination.id] : [];
     }
     if (destination.kind === 'accounts') {
-        const available = new Set(accounts.map((a) => a.id));
-
         return destination.ids.filter((id) => available.has(id));
     }
     if (destination.kind === 'set') {
-        return (
-            sets.find((s) => s.id === destination.id)?.connected_account_ids ??
-            []
-        );
+        const setIds =
+            sets.find((set) => set.id === destination.id)
+                ?.connected_account_ids ?? [];
+
+        return setIds.filter((id) => available.has(id));
     }
     if (destination.kind === 'none') {
         return [];
     }
 
-    return accounts.map((a) => a.id);
+    return accounts.map((account) => account.id);
+}
+
+export function publishingAccountIds(
+    destination: Destination,
+    accounts: Account[],
+    sets: AccountSet[],
+): string[] {
+    const publishableIds = new Set(
+        accounts
+            .filter((account) => account.publishing_ready !== false)
+            .map((account) => account.id),
+    );
+
+    return destinationAccountIds(destination, accounts, sets).filter((id) =>
+        publishableIds.has(id),
+    );
+}
+
+/** Persisted drafts retain every stored target; only new composers filter defaults. */
+export function composerAccountIds(
+    hasPersistedPost: boolean,
+    destination: Destination,
+    accounts: Account[],
+    sets: AccountSet[],
+): string[] {
+    return hasPersistedPost
+        ? destinationAccountIds(destination, accounts, sets)
+        : publishingAccountIds(destination, accounts, sets);
+}
+
+function explicitDestinationFor(ids: string[]): Destination {
+    if (ids.length === 0) {
+        return { kind: 'none' };
+    }
+    if (ids.length === 1) {
+        return { kind: 'account', id: ids[0] };
+    }
+
+    return { kind: 'accounts', ids };
+}
+
+/**
+ * A saved "all" or set destination may outlive a provider's publishing grant.
+ * Convert only stale destinations to explicit ready account ids so an autosave
+ * cannot silently add an unavailable account back server-side.
+ */
+export function normalizePublishingDestination(
+    destination: Destination,
+    accounts: Account[],
+    sets: AccountSet[],
+): Destination {
+    const readyIds = publishingAccountIds(destination, accounts, sets);
+
+    if (destination.kind === 'none') {
+        return destination;
+    }
+    if (destination.kind === 'all' && readyIds.length === accounts.length) {
+        return destination;
+    }
+    if (destination.kind === 'set') {
+        const set = sets.find((item) => item.id === destination.id);
+        if (
+            set &&
+            readyIds.length === set.connected_account_ids.length &&
+            set.connected_account_ids.every((id) => readyIds.includes(id))
+        ) {
+            return destination;
+        }
+    }
+    if (
+        destination.kind === 'account' &&
+        readyIds.length === 1 &&
+        readyIds[0] === destination.id
+    ) {
+        return destination;
+    }
+    if (
+        destination.kind === 'accounts' &&
+        readyIds.length === destination.ids.length &&
+        readyIds.every((id) => destination.ids.includes(id))
+    ) {
+        return destination;
+    }
+
+    return explicitDestinationFor(readyIds);
 }
 
 function sameIds(left: string[], right: string[]): boolean {
@@ -141,7 +224,11 @@ function destinationFromIds(
     if (ids.length === accounts.length) {
         return { kind: 'all' };
     }
-    if (preferredSet && sameIds(ids, preferredSet.connected_account_ids)) {
+    if (
+        preferredSet &&
+        preferredSet.connected_account_ids.length === ids.length &&
+        sameIds(ids, preferredSet.connected_account_ids)
+    ) {
         return { kind: 'set', id: preferredSet.id };
     }
     if (ids.length === 1) {
@@ -157,10 +244,13 @@ function triggerLabel(
     accounts: Account[],
     sets: AccountSet[],
 ): string {
+    const publishableCount = accounts.filter(
+        (account) => account.publishing_ready !== false,
+    ).length;
     if (selectedIds.length === 0) {
         return 'No accounts';
     }
-    if (selectedIds.length === accounts.length) {
+    if (selectedIds.length === publishableCount) {
         return 'All accounts';
     }
     if (destination.kind === 'set') {
@@ -182,17 +272,31 @@ export default function DestinationSelector({
     onChange,
     disabled = false,
 }: DestinationSelectorProps) {
-    const selectedIds = selectedAccountIds(destination, accounts, sets);
+    const publishableAccounts = accounts.filter(
+        (account) => account.publishing_ready !== false,
+    );
+    const publishableIds = new Set(
+        publishableAccounts.map((account) => account.id),
+    );
+    const selectedIds = publishingAccountIds(destination, accounts, sets);
     const selected = new Set(selectedIds);
     const label = triggerLabel(destination, selectedIds, accounts, sets);
     const allSelected =
-        accounts.length > 0 && selectedIds.length === accounts.length;
+        publishableAccounts.length > 0 &&
+        selectedIds.length === publishableAccounts.length;
 
     // "All accounts" toggles the whole roster: on when nothing (or a subset) is
     // selected, off when everything is. Clearing to none leaves publishing
     // disabled until the user picks the specific accounts they want.
     function toggleAll() {
-        onChange(allSelected ? { kind: 'none' } : { kind: 'all' });
+        onChange(
+            allSelected
+                ? { kind: 'none' }
+                : destinationFromIds(
+                      publishableAccounts.map((account) => account.id),
+                      accounts,
+                  ),
+        );
     }
 
     function toggleAccount(accountId: string) {
@@ -204,13 +308,19 @@ export default function DestinationSelector({
     }
 
     function toggleSet(set: AccountSet) {
-        const allSetAccountsSelected = set.connected_account_ids.every((id) =>
+        const eligibleIds = set.connected_account_ids.filter((id) =>
+            publishableIds.has(id),
+        );
+        if (eligibleIds.length === 0) {
+            return;
+        }
+        const allSetAccountsSelected = eligibleIds.every((id) =>
             selected.has(id),
         );
-        const setIds = new Set(set.connected_account_ids);
+        const setIds = new Set(eligibleIds);
         const next = allSetAccountsSelected
             ? selectedIds.filter((id) => !setIds.has(id))
-            : [...new Set([...selectedIds, ...set.connected_account_ids])];
+            : [...new Set([...selectedIds, ...eligibleIds])];
 
         onChange(destinationFromIds(next, accounts, set));
     }
@@ -232,7 +342,7 @@ export default function DestinationSelector({
             </PopoverTrigger>
             <PopoverContent
                 align="end"
-                className="w-[216px] gap-1 rounded-3xl p-2 text-sm"
+                className="w-[288px] gap-1 rounded-3xl p-2 text-sm"
             >
                 <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
                     Sets
@@ -241,45 +351,103 @@ export default function DestinationSelector({
                     <SetVisual />
                     All accounts
                 </OptionButton>
-                {sets.map((set) => (
-                    <OptionButton
-                        key={set.id}
-                        selected={sameIds(
-                            selectedIds,
-                            set.connected_account_ids,
-                        )}
-                        onClick={() => toggleSet(set)}
-                    >
-                        <SetVisual />
-                        {set.name}
-                    </OptionButton>
-                ))}
+                {sets.map((set) => {
+                    const eligibleIds = set.connected_account_ids.filter((id) =>
+                        publishableIds.has(id),
+                    );
+
+                    return (
+                        <OptionButton
+                            key={set.id}
+                            selected={
+                                eligibleIds.length > 0 &&
+                                sameIds(selectedIds, eligibleIds)
+                            }
+                            disabled={eligibleIds.length === 0}
+                            onClick={() => toggleSet(set)}
+                        >
+                            <SetVisual />
+                            {set.name}
+                        </OptionButton>
+                    );
+                })}
                 {accounts.length > 0 && (
                     <>
                         <div className="px-2 pt-3 pb-1.5 text-xs font-medium text-muted-foreground">
                             Accounts
                         </div>
-                        {accounts.map((account) => (
-                            <OptionButton
-                                key={account.id}
-                                selected={selected.has(account.id)}
-                                onClick={() => toggleAccount(account.id)}
-                            >
-                                <AccountVisual account={account} />
-                                <span className="min-w-0 flex-1 truncate">
-                                    {account.handle}
-                                </span>
-                                {account.status === 'needs_attention' && (
-                                    <NeedsAttentionLabel
-                                        handle={account.handle}
-                                    />
-                                )}
-                            </OptionButton>
-                        ))}
+                        {accounts.map((account) =>
+                            account.publishing_ready === false ? (
+                                <PublishingUnavailableRow
+                                    key={account.id}
+                                    account={account}
+                                />
+                            ) : (
+                                <OptionButton
+                                    key={account.id}
+                                    selected={selected.has(account.id)}
+                                    onClick={() => toggleAccount(account.id)}
+                                >
+                                    <AccountVisual account={account} />
+                                    <span className="min-w-0 flex-1 truncate">
+                                        {account.handle}
+                                    </span>
+                                    {account.status === 'needs_attention' && (
+                                        <NeedsAttentionLabel
+                                            handle={account.handle}
+                                        />
+                                    )}
+                                </OptionButton>
+                            ),
+                        )}
                     </>
                 )}
             </PopoverContent>
         </Popover>
+    );
+}
+
+function PublishingUnavailableRow({ account }: { account: Account }) {
+    const reason =
+        account.publishing_unavailable_reason ??
+        'Reconnect this account before publishing.';
+
+    function openAccounts() {
+        router.visit(accountsRoute().url);
+    }
+
+    return (
+        <div
+            className="flex min-h-10 w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm"
+            aria-disabled="true"
+        >
+            <AccountVisual account={account} />
+            <span className="min-w-0 flex-1">
+                <span className="block truncate text-muted-foreground">
+                    {account.handle}
+                </span>
+                <span className="block truncate text-[11px] text-destructive">
+                    {reason}
+                </span>
+            </span>
+            <Tooltip>
+                <TooltipTrigger
+                    render={
+                        <button
+                            type="button"
+                            className="inline-grid size-6 shrink-0 place-items-center rounded-md text-destructive outline-hidden hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-destructive/40"
+                            aria-label={`Manage ${account.handle} on Accounts`}
+                            onClick={openAccounts}
+                        />
+                    }
+                >
+                    <AlertTriangle className="size-3.5" aria-hidden />
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                    {reason} Open Accounts to fix it.
+                </TooltipContent>
+            </Tooltip>
+        </div>
     );
 }
 
@@ -327,17 +495,20 @@ function OptionButton({
     selected,
     children,
     onClick,
+    disabled = false,
 }: {
     selected: boolean;
     children: React.ReactNode;
     onClick: () => void;
+    disabled?: boolean;
 }) {
     return (
         <button
             type="button"
             aria-pressed={selected}
             onClick={onClick}
-            className="flex min-h-8 w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-muted focus-visible:bg-muted"
+            disabled={disabled}
+            className="flex min-h-8 w-full items-center gap-2 rounded-xl px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-muted focus-visible:bg-muted disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
         >
             <span className="flex min-w-0 flex-1 items-center gap-2">
                 {children}

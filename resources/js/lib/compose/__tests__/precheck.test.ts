@@ -15,6 +15,7 @@ function limitsFor(
         maxBytes: null,
         maxMedia: 4,
         requiresMedia: false,
+        requiresVideo: false,
         maxMediaBytes: 1_000_000,
         allowedMime: [],
         threadMax: null,
@@ -120,6 +121,30 @@ describe('precheckAccount', () => {
         });
         expect(reasons).toEqual([]);
     });
+
+    it('blocks content for an account that is temporarily unable to publish', () => {
+        const reasons = precheckAccount({
+            account: accountFor({
+                platform: 'youtube',
+                publishing_ready: false,
+                publishing_unavailable_reason:
+                    'Reconnect YouTube to grant upload access.',
+            }),
+            segments: ['hello'],
+            autoSplit: false,
+            mentions: [],
+            mediaCount: 1,
+            hasVideo: true,
+            format: 'feed',
+            limits: limitsFor({
+                platform: 'youtube',
+                requiresVideo: true,
+                threadMax: 1,
+            }),
+        });
+
+        expect(reasons).toEqual(['publishing_unavailable']);
+    });
 });
 
 function mediaItem(over: Partial<MediaView> & { id: string }): MediaView {
@@ -160,29 +185,129 @@ describe('precheckDestinations', () => {
         expect(blocks[0]).toMatchObject({ accountId: 'a', handle: '@bsky' });
     });
 
-    it('counts the full media set for every target — a per-account media exclusion does not reduce the count', () => {
-        // Five images over X's limit of 4. The composer may let a user "exclude"
-        // one image from X, but the connector publishes the full post media set,
-        // so the precheck must still block on the global count of 5.
+    it('preserves an unavailable account recovery reason in its block', () => {
+        const reason = 'Enable YouTube publishing or reconnect this account.';
+        const blocks = precheckDestinations({
+            accounts: [
+                accountFor({
+                    id: 'yt1',
+                    platform: 'youtube',
+                    handle: '@youtube',
+                    publishing_ready: false,
+                    publishing_unavailable_reason: reason,
+                }),
+            ],
+            segments: ['video'],
+            mentions: [],
+            autoSplitByAccount: { yt1: true },
+            overrideByAccount: {},
+            formatByAccount: {},
+            media: [mediaItem({ id: 'v1', kind: 'video', mime: 'video/mp4' })],
+            limits: [
+                limitsFor({
+                    platform: 'youtube',
+                    requiresVideo: true,
+                    threadMax: 1,
+                }),
+            ],
+        });
+
+        expect(blocks[0]).toMatchObject({
+            accountId: 'yt1',
+            reasons: ['publishing_unavailable'],
+            publishingUnavailableReason: reason,
+        });
+    });
+
+    it('allows each thread segment to use the platform media cap independently', () => {
         const media = [
             mediaItem({ id: 'm1' }),
             mediaItem({ id: 'm2' }),
             mediaItem({ id: 'm3' }),
             mediaItem({ id: 'm4' }),
             mediaItem({ id: 'm5' }),
+            mediaItem({ id: 'm6' }),
+            mediaItem({ id: 'm7' }),
+            mediaItem({ id: 'm8' }),
         ];
         const blocks = precheckDestinations({
             accounts: [accountFor({ id: 'x1', platform: 'x', handle: '@x' })],
-            segments: ['hi'],
+            segments: ['first', 'second'],
             mentions: [],
             autoSplitByAccount: { x1: true },
             overrideByAccount: {},
             formatByAccount: {},
             media,
             limits: [limitsFor({ platform: 'x', maxMedia: 4 })],
+            placements: {
+                __head__: ['m1', 'm2', 'm3', 'm4'],
+                break1: ['m5', 'm6', 'm7', 'm8'],
+            },
+            placementsByAccount: {},
+            segmentBreaks: ['break1'],
         });
-        expect(blocks).toHaveLength(1);
-        expect(blocks[0].reasons).toContain('too_many_media');
+        expect(blocks).toEqual([]);
+    });
+
+    it('blocks when one thread segment exceeds the platform media cap', () => {
+        const media = Array.from({ length: 5 }, (_, index) =>
+            mediaItem({ id: `m${index + 1}` }),
+        );
+        const blocks = precheckDestinations({
+            accounts: [accountFor({ id: 'x1', platform: 'x', handle: '@x' })],
+            segments: ['first', 'second'],
+            mentions: [],
+            autoSplitByAccount: { x1: true },
+            overrideByAccount: {},
+            formatByAccount: {},
+            media,
+            limits: [limitsFor({ platform: 'x', maxMedia: 4 })],
+            placements: {
+                __head__: ['m1', 'm2', 'm3', 'm4', 'm5'],
+            },
+            segmentBreaks: ['break1'],
+        });
+        expect(blocks[0]?.reasons).toContain('too_many_media');
+    });
+
+    it('uses an account placement override instead of the canonical groups', () => {
+        const media = Array.from({ length: 5 }, (_, index) =>
+            mediaItem({ id: `m${index + 1}` }),
+        );
+        const blocks = precheckDestinations({
+            accounts: [accountFor({ id: 'x1', platform: 'x', handle: '@x' })],
+            segments: ['first', 'second'],
+            mentions: [],
+            autoSplitByAccount: { x1: true },
+            overrideByAccount: {},
+            formatByAccount: {},
+            media,
+            limits: [limitsFor({ platform: 'x', maxMedia: 4 })],
+            placements: { __head__: ['m1', 'm2', 'm3', 'm4', 'm5'] },
+            placementsByAccount: {
+                x1: { __head__: ['m1', 'm2', 'm3'], break1: ['m4', 'm5'] },
+            },
+            segmentBreaks: ['break1'],
+        });
+        expect(blocks).toEqual([]);
+    });
+
+    it('blocks when an explicit placement map leaves attached media unplaced', () => {
+        const media = [mediaItem({ id: 'm1' }), mediaItem({ id: 'm2' })];
+        const blocks = precheckDestinations({
+            accounts: [accountFor({ id: 'x1', platform: 'x', handle: '@x' })],
+            segments: ['first', 'second'],
+            mentions: [],
+            autoSplitByAccount: { x1: true },
+            overrideByAccount: {},
+            formatByAccount: {},
+            media,
+            limits: [limitsFor({ platform: 'x', maxMedia: 4 })],
+            placements: { __head__: ['m1'] },
+            segmentBreaks: ['break1'],
+        });
+
+        expect(blocks[0]?.reasons).toContain('unplaced_media');
     });
 });
 
@@ -197,6 +322,26 @@ describe('precheckAccount empty content', () => {
             hasVideo: false,
             format: 'feed' as const,
             limits: limitsFor({ platform: 'x', maxLength: 280 }),
+        });
+        expect(reasons).toEqual(['empty']);
+    });
+
+    it('keeps empty as the only issue even when publishing is unavailable', () => {
+        const reasons = precheckAccount({
+            account: accountFor({
+                platform: 'youtube',
+                publishing_ready: false,
+            }),
+            segments: [],
+            autoSplit: true,
+            mentions: [],
+            mediaCount: 0,
+            hasVideo: false,
+            format: 'feed',
+            limits: limitsFor({
+                platform: 'youtube',
+                requiresVideo: true,
+            }),
         });
         expect(reasons).toEqual(['empty']);
     });
@@ -314,6 +459,48 @@ describe('precheckAccount media-first platforms', () => {
     });
 });
 
+describe('precheckAccount video-only platforms', () => {
+    it('blocks a TikTok image post with a video-specific reason', () => {
+        const reasons = precheckAccount({
+            account: accountFor({ platform: 'tiktok' }),
+            segments: ['Test'],
+            autoSplit: false,
+            mentions: [],
+            mediaCount: 1,
+            hasVideo: false,
+            format: 'feed',
+            limits: limitsFor({
+                platform: 'tiktok',
+                requiresMedia: true,
+                requiresVideo: true,
+                maxMedia: 1,
+                threadMax: 1,
+            }),
+        });
+        expect(reasons).toEqual(['video_required']);
+    });
+
+    it('allows a YouTube post when a video is attached', () => {
+        const reasons = precheckAccount({
+            account: accountFor({ platform: 'youtube' }),
+            segments: ['Test'],
+            autoSplit: false,
+            mentions: [],
+            mediaCount: 1,
+            hasVideo: true,
+            format: 'feed',
+            limits: limitsFor({
+                platform: 'youtube',
+                requiresMedia: true,
+                requiresVideo: true,
+                maxMedia: 1,
+                threadMax: 1,
+            }),
+        });
+        expect(reasons).toEqual([]);
+    });
+});
+
 describe('format-aware precheck blocks', () => {
     it('blocks reels with no video', () => {
         const reasons = precheckAccount({
@@ -367,6 +554,28 @@ describe('describeReason', () => {
         );
         expect(text).toContain('Instagram');
         expect(text).toContain('image or video');
+    });
+
+    it('uses the account-specific recovery reason when publishing is unavailable', () => {
+        const reason = 'Reconnect YouTube to grant upload access.';
+        const text = describeReason(
+            'publishing_unavailable',
+            'youtube',
+            limitsFor({ platform: 'youtube' }),
+            reason,
+        );
+
+        expect(text).toBe(reason);
+    });
+
+    it('describes a platform that specifically needs a video', () => {
+        const text = describeReason(
+            'video_required',
+            'tiktok',
+            limitsFor({ platform: 'tiktok', requiresVideo: true }),
+        );
+        expect(text).toContain('TikTok');
+        expect(text).toContain('exactly one video');
     });
 
     it('describes empty content without a platform limit', () => {
@@ -435,5 +644,15 @@ describe('describeReason', () => {
             limitsFor({ platform: 'x', maxMedia: 4 }),
         );
         expect(text).toContain('4 media');
+    });
+
+    it('describes media missing from every thread section', () => {
+        const text = describeReason(
+            'unplaced_media',
+            'x',
+            limitsFor({ platform: 'x' }),
+        );
+        expect(text).toContain('not placed');
+        expect(text).toContain('thread section');
     });
 });

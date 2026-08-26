@@ -61,4 +61,26 @@ final class FileStorage
 
         return Storage::disk($disk)->temporaryUrl($path, now()->addHours(6));
     }
+
+    /**
+     * Resolve the stable provider-facing URL for a media object. When a verified
+     * public base is configured, append the storage key without involving the S3
+     * API endpoint or a presigned hostname. Other deployments retain the existing
+     * public/temporary URL behavior.
+     */
+    public static function publicMediaUrl(string $path, ?string $disk = null): string
+    {
+        $baseUrl = config('media.public_url');
+
+        if (is_string($baseUrl) && trim($baseUrl) !== '') {
+            $encodedPath = implode('/', array_map(
+                static fn (string $segment): string => rawurlencode($segment),
+                explode('/', ltrim($path, '/')),
+            ));
+
+            return rtrim(trim($baseUrl), '/').'/'.$encodedPath;
+        }
+
+        return self::url($path, $disk);
+    }
 }

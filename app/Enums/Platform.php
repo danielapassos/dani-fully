@@ -430,6 +430,43 @@ enum Platform: string
     }
 
     /**
+     * Whether the platform accepts only video for this publishing path.
+     * TikTok's inbox upload and YouTube's videos.insert flow cannot publish an
+     * image, so the composer must reject image-only drafts before dispatch.
+     */
+    public function requiresVideo(): bool
+    {
+        return in_array($this, [self::TikTok, self::YouTube], true);
+    }
+
+    /**
+     * Whether provider-side publishing has been explicitly enabled for this
+     * installation. TikTok and YouTube may be connected read-only before their
+     * upload permissions are approved; every other connector is publish-ready
+     * as soon as the account is connected.
+     */
+    public function publishingEnabled(): bool
+    {
+        return match ($this) {
+            self::TikTok => (bool) config('services.tiktok.inbox_enabled'),
+            self::YouTube => (bool) config('services.youtube.publishing_enabled'),
+            default => true,
+        };
+    }
+
+    /**
+     * OAuth scope a connected account must have recorded before publishing.
+     */
+    public function requiredPublishingScope(): ?string
+    {
+        return match ($this) {
+            self::TikTok => 'video.upload',
+            self::YouTube => 'https://www.googleapis.com/auth/youtube.upload',
+            default => null,
+        };
+    }
+
+    /**
      * Whether a post mixing a video with images survives publish intact.
      * Instagram/Threads build a real mixed carousel (each item keeps its own
      * media_type) and Discord attaches every file to the webhook message
@@ -580,7 +617,7 @@ enum Platform: string
     }
 
     /**
-     * @return array{platform: string, maxLength: int, maxBytes: int|null, maxMedia: int, requiresMedia: bool, maxMediaBytes: int, allowedMime: list<string>, threadMax: int|null, maxImageDimensions: array{width: int, height: int}, allowedVideoMime: list<string>, maxVideoBytes: int, maxVideoDurationSeconds: int}
+     * @return array{platform: string, maxLength: int, maxBytes: int|null, maxMedia: int, requiresMedia: bool, requiresVideo: bool, maxMediaBytes: int, allowedMime: list<string>, threadMax: int|null, maxImageDimensions: array{width: int, height: int}, allowedVideoMime: list<string>, maxVideoBytes: int, maxVideoDurationSeconds: int}
      */
     public function limits(): array
     {
@@ -590,6 +627,7 @@ enum Platform: string
             'maxBytes' => $this->maxBytes(),
             'maxMedia' => $this->maxMedia(),
             'requiresMedia' => $this->requiresMedia(),
+            'requiresVideo' => $this->requiresVideo(),
             'maxMediaBytes' => $this->maxMediaBytes(),
             'allowedMime' => $this->allowedMime(),
             'threadMax' => $this->threadMax(),
@@ -601,7 +639,7 @@ enum Platform: string
     }
 
     /**
-     * @return list<array{platform: string, maxLength: int, maxBytes: int|null, maxMedia: int, requiresMedia: bool, maxMediaBytes: int, allowedMime: list<string>, threadMax: int|null, maxImageDimensions: array{width: int, height: int}, allowedVideoMime: list<string>, maxVideoBytes: int, maxVideoDurationSeconds: int}>
+     * @return list<array{platform: string, maxLength: int, maxBytes: int|null, maxMedia: int, requiresMedia: bool, requiresVideo: bool, maxMediaBytes: int, allowedMime: list<string>, threadMax: int|null, maxImageDimensions: array{width: int, height: int}, allowedVideoMime: list<string>, maxVideoBytes: int, maxVideoDurationSeconds: int}>
      */
     public static function allLimits(): array
     {

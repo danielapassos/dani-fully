@@ -61,14 +61,18 @@ class YouTubeConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::Validation, 'YouTube publishing requires exactly one video.');
         }
 
-        if ($context->target->remote_id !== null) {
-            return $this->processingStatus($context, $token, $context->target->remote_id);
-        }
-
         $media = $context->media[0];
         $state = new MediaUploadState($context->target->media_upload_state);
+        $storedPrivacy = (string) ($state->metadata($media->id)['privacy_status'] ?? '');
+        $expectedPrivacy = in_array($storedPrivacy, ['private', 'unlisted', 'public'], true)
+            ? $storedPrivacy
+            : $options['privacyStatus'];
 
         try {
+            if ($context->target->remote_id !== null) {
+                return $this->processingStatus($context, $token, $context->target->remote_id, $expectedPrivacy);
+            }
+
             $sealedSession = $state->remoteRef($media->id);
             if ($sealedSession === null) {
                 $sealedSession = $this->startSession($context, $media, $token, $options, $state);
@@ -78,21 +82,28 @@ class YouTubeConnector implements PublishConnector
             $metadata = $state->metadata($media->id);
 
             if (($metadata['outcome_unknown'] ?? false) === true) {
-                $probe = $this->probeSession($context, $token, $sessionUrl, $media, $state);
+                $probe = $this->probeSession($context, $token, $sessionUrl, $media, $state, $expectedPrivacy);
                 if ($probe !== null) {
                     return $probe;
                 }
                 $metadata = $state->metadata($media->id);
             }
 
-            return $this->uploadNextChunk($context, $token, $sessionUrl, $media, $state, $metadata);
+            return $this->uploadNextChunk($context, $token, $sessionUrl, $media, $state, $metadata, $expectedPrivacy);
         } catch (ConnectionException $exception) {
-            $metadata = $state->metadata($media->id);
-            $metadata['outcome_unknown'] = true;
-            $state->setMetadata($media->id, $metadata);
-            $this->persistState($context, $state);
+            // A lost chunk response is ambiguous and must be probed before more
+            // bytes are sent. Once a video id is stored, however, the upload is
+            // already reconciled and only the processing-status read needs retrying.
+            if ($context->target->remote_id === null) {
+                $metadata = $state->metadata($media->id);
+                $metadata['outcome_unknown'] = true;
+                $state->setMetadata($media->id, $metadata);
+                $this->persistState($context, $state);
+            }
 
             return PublishResult::failure(ErrorKind::Network, $exception->getMessage(), retryAfter: 10);
+        } catch (YouTubeRequestFailed $exception) {
+            return $this->httpFailure($exception->response, 'YouTube could not start the resumable upload.');
         } catch (RuntimeException $exception) {
             return PublishResult::failure(ErrorKind::Validation, $exception->getMessage());
         }
@@ -137,7 +148,7 @@ class YouTubeConnector implements PublishConnector
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
         if ($response->failed()) {
-            throw new RuntimeException($this->providerMessage($response, 'YouTube could not start the resumable upload.'));
+            throw new YouTubeRequestFailed($response);
         }
 
         $sessionUrl = $this->sessionUrl($response->header('Location'));
@@ -149,6 +160,7 @@ class YouTubeConnector implements PublishConnector
             'total_bytes' => $media->size_bytes,
             'content_type' => $media->mime,
             'format_intent' => $options['formatIntent'],
+            'privacy_status' => $options['privacyStatus'],
             'outcome_unknown' => false,
         ]);
         $this->persistState($context, $state);
@@ -160,7 +172,7 @@ class YouTubeConnector implements PublishConnector
      * Probe an ambiguous upload before sending another byte. A 308 gives the
      * authoritative offset; a completed response gives the video id.
      */
-    private function probeSession(PublishContext $context, string $token, string $sessionUrl, PostMedia $media, MediaUploadState $state): ?PublishResult
+    private function probeSession(PublishContext $context, string $token, string $sessionUrl, PostMedia $media, MediaUploadState $state, string $expectedPrivacy): ?PublishResult
     {
         $response = $this->http
             ->timeout(15)
@@ -176,12 +188,25 @@ class YouTubeConnector implements PublishConnector
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_STATUS_POLL, $context->account, $response);
 
         if (in_array($response->status(), [200, 201], true)) {
-            return $this->recordVideoAndPoll($context, $token, $response);
+            return $this->recordVideoAndPoll($context, $token, $response, $expectedPrivacy);
         }
 
         if ($response->status() === 308) {
             $metadata = $state->metadata($media->id);
-            $metadata['uploaded_bytes'] = $this->acknowledgedBytes($response);
+            $acknowledgedBytes = $this->acknowledgedBytes($response);
+            if ($acknowledgedBytes > $media->size_bytes) {
+                $metadata['outcome_unknown'] = true;
+                $state->setMetadata($media->id, $metadata);
+                $this->persistState($context, $state);
+
+                return PublishResult::failure(
+                    ErrorKind::ServerError,
+                    'YouTube returned an invalid resumable-upload byte range; reconciling the session before retrying.',
+                    retryAfter: 2,
+                );
+            }
+
+            $metadata['uploaded_bytes'] = $acknowledgedBytes;
             $metadata['outcome_unknown'] = false;
             $state->setMetadata($media->id, $metadata);
             $this->persistState($context, $state);
@@ -200,7 +225,7 @@ class YouTubeConnector implements PublishConnector
     }
 
     /** @param array<string, mixed> $metadata */
-    private function uploadNextChunk(PublishContext $context, string $token, string $sessionUrl, PostMedia $media, MediaUploadState $state, array $metadata): PublishResult
+    private function uploadNextChunk(PublishContext $context, string $token, string $sessionUrl, PostMedia $media, MediaUploadState $state, array $metadata, string $expectedPrivacy): PublishResult
     {
         $offset = max(0, (int) ($metadata['uploaded_bytes'] ?? 0));
         $remaining = $media->size_bytes - $offset;
@@ -244,14 +269,39 @@ class YouTubeConnector implements PublishConnector
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
         if (in_array($response->status(), [200, 201], true)) {
-            return $this->recordVideoAndPoll($context, $token, $response);
+            return $this->recordVideoAndPoll($context, $token, $response, $expectedPrivacy);
+        }
+
+        // A 5xx can arrive after YouTube accepted some or all of this chunk.
+        // Persist the ambiguity so the next job probes the session instead of
+        // blindly retransmitting bytes that may already be committed.
+        if ($response->serverError()) {
+            $metadata['outcome_unknown'] = true;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
         }
 
         if ($response->status() !== 308) {
             return $this->httpFailure($response, 'YouTube rejected the video chunk.');
         }
 
-        $metadata['uploaded_bytes'] = max($last + 1, $this->acknowledgedBytes($response));
+        // The Range header is authoritative. YouTube may accept only part of a
+        // submitted chunk, and a missing Range means it accepted zero bytes.
+        // Advancing to the end of the submitted chunk would silently skip data.
+        $acknowledgedBytes = $this->acknowledgedBytes($response);
+        if ($acknowledgedBytes > $last + 1 || $acknowledgedBytes > $media->size_bytes) {
+            $metadata['outcome_unknown'] = true;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
+
+            return PublishResult::failure(
+                ErrorKind::ServerError,
+                'YouTube returned an invalid resumable-upload byte range; reconciling the session before retrying.',
+                retryAfter: 2,
+            );
+        }
+
+        $metadata['uploaded_bytes'] = $acknowledgedBytes;
         $metadata['outcome_unknown'] = false;
         $state->setMetadata($media->id, $metadata);
         $this->persistState($context, $state);
@@ -259,7 +309,7 @@ class YouTubeConnector implements PublishConnector
         return PublishResult::failure(ErrorKind::MediaProcessing, 'Uploading the next YouTube video chunk.', retryAfter: 1);
     }
 
-    private function recordVideoAndPoll(PublishContext $context, string $token, Response $response): PublishResult
+    private function recordVideoAndPoll(PublishContext $context, string $token, Response $response, string $expectedPrivacy): PublishResult
     {
         $videoId = (string) $response->json('id');
         if (! preg_match('/^[A-Za-z0-9_-]{6,64}$/', $videoId)) {
@@ -271,10 +321,10 @@ class YouTubeConnector implements PublishConnector
             'remote_ids' => [$videoId],
         ])->save();
 
-        return $this->processingStatus($context, $token, $videoId);
+        return $this->processingStatus($context, $token, $videoId, $expectedPrivacy);
     }
 
-    private function processingStatus(PublishContext $context, string $token, string $videoId): PublishResult
+    private function processingStatus(PublishContext $context, string $token, string $videoId, string $expectedPrivacy): PublishResult
     {
         $response = $this->http
             ->timeout(10)
@@ -315,11 +365,17 @@ class YouTubeConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::MediaProcessing, 'YouTube is processing the uploaded video.', retryAfter: 15);
         }
 
-        if ($privacyStatus !== 'public') {
+        if ($privacyStatus === '') {
             return PublishResult::failure(
-                ErrorKind::MediaProcessing,
-                'The YouTube video is uploaded but not public yet.',
-                retryAfter: 60,
+                ErrorKind::ServerError,
+                'YouTube processed the video without returning its privacy status.',
+            );
+        }
+
+        if ($privacyStatus !== $expectedPrivacy) {
+            return PublishResult::failure(
+                ErrorKind::Unsupported,
+                "YouTube processed the video as {$privacyStatus}, but this upload requested {$expectedPrivacy}.",
             );
         }
 
@@ -438,12 +494,43 @@ class YouTubeConnector implements PublishConnector
     private function httpFailure(Response $response, string $fallback): PublishResult
     {
         return PublishResult::failure(
-            $this->classifyStatus($response->status()),
+            $this->youtubeFailureKind($response),
             $this->providerMessage($response, $fallback),
             $response->status(),
             $this->excerpt($response),
             $this->retryAfter($response),
         );
+    }
+
+    private function youtubeFailureKind(Response $response): ErrorKind
+    {
+        if ($response->status() !== 403) {
+            return $this->classifyStatus($response->status());
+        }
+
+        $reasons = array_values(array_filter(array_map(
+            static fn (mixed $error): string => is_array($error)
+                ? strtolower((string) ($error['reason'] ?? ''))
+                : '',
+            (array) $response->json('error.errors', []),
+        )));
+
+        if (array_intersect($reasons, [
+            'quotaexceeded',
+            'dailylimitexceeded',
+            'dailylimitexceededunreg',
+            'userratelimitexceeded',
+            'ratelimitexceeded',
+            'uploadlimitexceeded',
+        ]) !== []) {
+            return ErrorKind::RateLimited;
+        }
+
+        if (in_array('insufficientpermissions', $reasons, true)) {
+            return ErrorKind::AuthExpired;
+        }
+
+        return ErrorKind::Validation;
     }
 
     private function providerMessage(Response $response, string $fallback): string
@@ -472,5 +559,20 @@ class YouTubeConnector implements PublishConnector
         );
 
         $this->throwUnlessDeleteAccepted($response);
+    }
+}
+
+/**
+ * Internal signal that preserves an HTTP response from resumable-session
+ * creation so publish() can classify authentication, throttling, and server
+ * failures accurately instead of flattening them into Validation.
+ *
+ * @internal
+ */
+final class YouTubeRequestFailed extends RuntimeException
+{
+    public function __construct(public readonly Response $response)
+    {
+        parent::__construct('YouTube request failed.');
     }
 }

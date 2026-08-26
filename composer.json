@@ -2,7 +2,7 @@
     "$schema": "https://getcomposer.org/schema.json",
     "name": "coollabsio/shoutrrr",
     "type": "project",
-    "description": "Self-hostable social media scheduling and publishing for X, Bluesky, and LinkedIn.",
+    "description": "Self-hostable social media scheduling and publishing across major platforms.",
     "keywords": [
         "social-media",
         "scheduling",

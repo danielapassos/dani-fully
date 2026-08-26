@@ -22,6 +22,8 @@ export type Account = {
     disabled: boolean;
     pds_url: string | null;
     auto_repost_enabled: boolean;
+    publishing_ready: boolean;
+    publishing_unavailable_reason: string | null;
 };
 
 export type Capability = {

@@ -74,6 +74,11 @@ class InstagramConnector implements PublishConnector
         }
 
         $state = new MediaUploadState($context->target->media_upload_state);
+        if ($this->publishOutcomeUnknown($state)) {
+            return $this->publishNeedsReview();
+        }
+
+        $finalPublishPending = false;
 
         try {
             $containerId = $this->resolveContainerId($context, $state, $igUserId, $caption, $token, $format);
@@ -83,6 +88,13 @@ class InstagramConnector implements PublishConnector
                 return $notReady;
             }
 
+            // Persist the mutation boundary before calling media_publish. If the
+            // process or connection dies after Meta accepts the request, a retry
+            // must stop for manual reconciliation instead of publishing twice.
+            $this->setPublishOutcomeUnknown($state, true);
+            $this->persistState($context, $state);
+            $finalPublishPending = true;
+
             $publish = $this->http->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media_publish', [
                 'creation_id' => $containerId,
                 'access_token' => $token,
@@ -91,6 +103,14 @@ class InstagramConnector implements PublishConnector
             $this->meter(UsageCategory::Publish, UsageOperation::POST, $context->account, $publish);
 
             if ($publish->failed()) {
+                if ($publish->serverError()) {
+                    return $this->publishNeedsReview();
+                }
+
+                $this->setPublishOutcomeUnknown($state, false);
+                $this->persistState($context, $state);
+                $finalPublishPending = false;
+
                 return $this->mapFailure($publish);
             }
 
@@ -104,12 +124,25 @@ class InstagramConnector implements PublishConnector
             // won't change that, so fail with the reason rather than looping.
             return PublishResult::failure(ErrorKind::Unsupported, $e->getMessage());
         } catch (ConnectionException $e) {
+            if ($finalPublishPending) {
+                return $this->publishNeedsReview();
+            }
+
             return PublishResult::failure(ErrorKind::Network, $e->getMessage());
         }
 
         if ($mediaId === '') {
-            return PublishResult::failure(ErrorKind::ServerError, 'Instagram did not return a media id');
+            return $this->publishNeedsReview();
         }
+
+        // Clear the ambiguity marker and persist the returned media id in the same
+        // row update. A worker death after this point can reconcile from remote_ids.
+        $this->setPublishOutcomeUnknown($state, false);
+        $context->target->forceFill([
+            'remote_id' => $mediaId,
+            'remote_ids' => [$mediaId],
+            'media_upload_state' => $state->toArray(),
+        ])->save();
 
         return PublishResult::success([$mediaId]);
     }
@@ -301,7 +334,8 @@ class InstagramConnector implements PublishConnector
         $status = (string) $response->json('status_code');
 
         return match ($status) {
-            'FINISHED', 'PUBLISHED' => null,
+            'FINISHED' => null,
+            'PUBLISHED' => $this->publishNeedsReview(),
             'IN_PROGRESS' => PublishResult::failure(ErrorKind::MediaProcessing, 'Instagram is processing the media.', retryAfter: 6),
             default => PublishResult::failure(
                 ErrorKind::ServerError,
@@ -310,6 +344,30 @@ class InstagramConnector implements PublishConnector
                 $this->excerpt($response),
             ),
         };
+    }
+
+    private function publishOutcomeUnknown(MediaUploadState $state): bool
+    {
+        return ($state->metadata(self::CONTAINER_KEY)['publish_outcome_unknown'] ?? false) === true;
+    }
+
+    private function setPublishOutcomeUnknown(MediaUploadState $state, bool $unknown): void
+    {
+        $metadata = $state->metadata(self::CONTAINER_KEY);
+        if ($unknown) {
+            $metadata['publish_outcome_unknown'] = true;
+        } else {
+            unset($metadata['publish_outcome_unknown']);
+        }
+        $state->setMetadata(self::CONTAINER_KEY, $metadata);
+    }
+
+    private function publishNeedsReview(): PublishResult
+    {
+        return PublishResult::failure(
+            ErrorKind::Unknown,
+            'Instagram may already have published this post, but Shoutrrr could not confirm its media id. Check Instagram before retrying.',
+        );
     }
 
     public function delete(PostTarget $target, array $credentials): void

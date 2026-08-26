@@ -23,6 +23,22 @@ test('post view exposes per-target publish status and root published_at', functi
         ->and($view['targets'][0]['status'])->toBe('failed')
         ->and($view['targets'][0]['error_kind'])->toBe('rate_limited')
         ->and($view['targets'][0]['error_message'])->toBe('slow down')
+        ->and($view['targets'][0]['can_retry'])->toBeTrue()
+        ->and($view['targets'][0]['retry_blocked_reason'])->toBeNull()
         ->and($view['targets'][0]['attempts'])->toBe(3)
         ->and($view['targets'][0]['remote_id'])->toBe('abc');
+});
+
+test('post view marks an unconfirmed provider outcome for manual review', function () {
+    $post = Post::factory()->create(['status' => PostStatus::Failed]);
+    PostTarget::factory()->for($post)->failed()->create([
+        'error_kind' => ErrorKind::Unknown->value,
+        'error_message' => 'Threads may already have published this segment.',
+    ]);
+
+    $view = PostView::make($post->fresh(['targets.account', 'media']));
+
+    expect($view['targets'][0]['can_retry'])->toBeFalse()
+        ->and($view['targets'][0]['retry_blocked_reason'])
+        ->toBe('The provider outcome is unconfirmed and may already be live. Check the connected platform before taking any further action.');
 });

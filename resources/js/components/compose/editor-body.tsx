@@ -140,8 +140,9 @@ export type EditorBodyHandle = {
 export function shouldFocusEditorOnMount(
     autoFocus: boolean,
     editable: boolean,
+    compactViewport = false,
 ): boolean {
-    return autoFocus && editable;
+    return autoFocus && editable && !compactViewport;
 }
 
 /** A file we attach on paste/drop — images and videos only. */
@@ -346,7 +347,14 @@ function EditorBodyInner(
     );
 
     useEffect(() => {
-        if (!editor || !shouldFocusEditorOnMount(autoFocus, editable)) {
+        // Auto-focus is useful for keyboard-first desktop composing, but on a
+        // phone it can summon the keyboard and scroll the dashboard past its
+        // header before the user has touched anything.
+        const compactViewport = window.matchMedia('(max-width: 639px)').matches;
+        if (
+            !editor ||
+            !shouldFocusEditorOnMount(autoFocus, editable, compactViewport)
+        ) {
             return;
         }
 

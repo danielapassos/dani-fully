@@ -103,5 +103,5 @@ test('it proactively refreshes expiring bluesky oauth accounts', function () {
 
 test('token refresh health check is scheduled every fifteen minutes', function () {
     expect(file_get_contents(base_path('routes/console.php')))
-        ->toContain('Schedule::command(RefreshExpiringTokens::class)->everyFifteenMinutes()->withoutOverlapping();');
+        ->toContain('Schedule::command(RefreshExpiringTokens::class)->everyFifteenMinutes()->onOneServer()->withoutOverlapping();');
 });

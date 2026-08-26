@@ -70,6 +70,7 @@ function limitsFor(
             maxBytes: null,
             maxMedia: 0,
             requiresMedia: false,
+            requiresVideo: false,
             maxMediaBytes: 0,
             allowedMime: [],
             threadMax: null,
@@ -410,6 +411,7 @@ export function SubmitBar({
                                         reason,
                                         block.platform,
                                         limitsFor(limits, block.platform),
+                                        block.publishingUnavailableReason,
                                     ),
                                 )
                                 .join('; ')}

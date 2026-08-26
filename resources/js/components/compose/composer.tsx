@@ -20,7 +20,6 @@ import {
     initialComposerState,
     pickActiveAccount,
     shouldShowConnectAccountPrompt,
-    type ComposerState,
 } from '@/lib/compose/composer-state';
 import {
     describeFormatNotice,
@@ -39,7 +38,7 @@ import {
     syncMentionsFromText,
 } from '@/lib/compose/mentions';
 import { buildPlatformPreview } from '@/lib/compose/platform-preview';
-import { precheckAccount, precheckDestinations } from '@/lib/compose/precheck';
+import { precheckDestinations } from '@/lib/compose/precheck';
 import { readVideoMetadata, videoLimitsForTargets } from '@/lib/compose/video';
 import {
     defaultSettings,
@@ -66,7 +65,10 @@ import type { GifItem } from '@/types/gifs';
 import CharCounter from './char-counter';
 import { ComposerToolbar } from './composer-toolbar';
 import { ConflictDialog } from './conflict-dialog';
-import DestinationSelector from './destination-selector';
+import DestinationSelector, {
+    composerAccountIds,
+    normalizePublishingDestination,
+} from './destination-selector';
 import EditorBody, { type EditorBodyHandle } from './editor-body';
 import { ImageEditor } from './image-editor';
 import { PlatformPreviewPanel } from './platform-preview-panel';
@@ -144,32 +146,6 @@ type ComposerProps = {
 
 const EMPTY_SAVED_MENTIONS: WorkspaceMention[] = [];
 
-function accountIdsFor(
-    state: ComposerState,
-    accounts: Account[],
-    sets: AccountSet[],
-): string[] {
-    const { destination } = state;
-    if (destination.kind === 'account') {
-        return accounts.filter((a) => a.id === destination.id).map((a) => a.id);
-    }
-    if (destination.kind === 'set') {
-        const set = sets.find((s) => s.id === destination.id);
-
-        return set ? set.connected_account_ids : [];
-    }
-    if (destination.kind === 'accounts') {
-        const selected = new Set(destination.ids);
-
-        return accounts.filter((a) => selected.has(a.id)).map((a) => a.id);
-    }
-    if (destination.kind === 'none') {
-        return [];
-    }
-
-    return accounts.map((a) => a.id);
-}
-
 function measure(text: string, platform: PlatformName): number {
     // oxlint-disable-next-line no-misused-spread -- intentional code-point count
     return platform === 'x' ? text.length : [...text].length;
@@ -207,6 +183,24 @@ export default function Composer({
             : initialComposerState(initialScheduleAt, initialDestination),
     );
 
+    useEffect(() => {
+        // Existing drafts can carry per-account overrides and placements for a
+        // connection that is temporarily read-only. Never rewrite that saved
+        // destination automatically: setDestination marks the reducer dirty,
+        // which would let autosave delete the target and its custom content.
+        if (post !== null) {
+            return;
+        }
+        const destination = normalizePublishingDestination(
+            state.destination,
+            accounts,
+            sets,
+        );
+        if (destination !== state.destination) {
+            dispatch({ type: 'setDestination', destination });
+        }
+    }, [accounts, post, sets, state.destination]);
+
     // Inertia reuses this component across same-page visits (no remount), so
     // the reducer's mount-time hydrate is the only seed. When a navigation or
     // reload delivers a newer/different server `post` — e.g. after a schedule,
@@ -233,7 +227,12 @@ export default function Composer({
         schedulingTz,
     );
 
-    const destinationAccountIds = accountIdsFor(state, accounts, sets);
+    const destinationAccountIds = composerAccountIds(
+        post !== null,
+        state.destination,
+        accounts,
+        sets,
+    );
     const tabAccounts = accounts.filter((a) =>
         destinationAccountIds.includes(a.id),
     );
@@ -795,21 +794,20 @@ export default function Composer({
             state.overrideByAccount[accountId] !== undefined
                 ? (state.overrideByAccount[accountId] as string[])
                 : state.segments;
-        // Whole-post media count — the server precheck and connectors still
-        // enforce media caps per whole post (see precheckDestinations), so the
-        // severity a destination shows is judged against the full media set.
-        const mediaCount = state.media.length;
-        const hasVideo = state.media.some((item) => item.kind === 'video');
-        const reasons = precheckAccount({
-            account,
-            segments,
-            autoSplit: state.autoSplitByAccount[accountId] ?? true,
-            mentions: state.mentions,
-            mediaCount,
-            hasVideo,
-            format: state.formatByAccount[accountId] ?? 'feed',
-            limits: platformLimits,
-        });
+        const reasons =
+            precheckDestinations({
+                accounts: [account],
+                segments: state.segments,
+                mentions: state.mentions,
+                autoSplitByAccount: state.autoSplitByAccount,
+                overrideByAccount: state.overrideByAccount,
+                media: state.media,
+                limits: [platformLimits],
+                formatByAccount: state.formatByAccount,
+                placements: state.placements,
+                placementsByAccount: state.placementsByAccount,
+                segmentBreaks: state.segmentBreaks,
+            })[0]?.reasons ?? [];
         if (reasons.length > 0) {
             return 'over';
         }
@@ -1034,6 +1032,9 @@ export default function Composer({
         formatByAccount: state.formatByAccount,
         media: state.media,
         limits,
+        placements: state.placements,
+        placementsByAccount: state.placementsByAccount,
+        segmentBreaks: state.segmentBreaks,
     });
     const notices = precheckNotices({
         accounts: tabAccounts,

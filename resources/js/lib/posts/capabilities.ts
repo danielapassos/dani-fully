@@ -1,5 +1,20 @@
 import type { PostView } from '@/types/compose';
 
+type RetryTarget = Pick<PostView['targets'][number], 'status'> &
+    Partial<Pick<PostView['targets'][number], 'can_retry' | 'error_kind'>>;
+
+/**
+ * Prefer the server-authoritative retry gate. The error-kind fallback keeps a
+ * stale/partial Inertia payload fail-closed for an unconfirmed provider result.
+ */
+export function targetCanRetry(target: RetryTarget): boolean {
+    if (target.status !== 'failed' && target.status !== 'skipped') {
+        return false;
+    }
+
+    return target.can_retry ?? target.error_kind !== 'unknown';
+}
+
 export interface PostCapabilities {
     canEdit: boolean;
     canSchedule: boolean;
@@ -23,7 +38,7 @@ const NONE: PostCapabilities = {
 export function postCapabilities(post: PostView): PostCapabilities {
     // Tolerate partial Inertia payloads that omit targets (e.g. lighter feed rows).
     const hasFailedTarget = (post.targets ?? []).some(
-        (t) => t.status === 'failed',
+        (target) => target.status === 'failed' && targetCanRetry(target),
     );
     switch (post.status) {
         case 'draft':

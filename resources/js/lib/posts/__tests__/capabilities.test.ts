@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { postCapabilities } from '@/lib/posts/capabilities';
+import { postCapabilities, targetCanRetry } from '@/lib/posts/capabilities';
 import type { PostView } from '@/types/compose';
 
 function post(partial: Partial<PostView>): PostView {
@@ -52,6 +52,44 @@ describe('postCapabilities', () => {
             canEdit: false,
             canDuplicate: true,
         });
+    });
+    it('failed with only an unconfirmed provider outcome: manual review, no retry', () => {
+        const c = postCapabilities(
+            post({
+                status: 'failed',
+                targets: [
+                    {
+                        status: 'failed',
+                        error_kind: 'unknown',
+                    } as PostView['targets'][number],
+                ],
+            }),
+        );
+        expect(c).toMatchObject({
+            canDelete: true,
+            canRetry: false,
+            canDuplicate: true,
+        });
+    });
+    it('a safe failed target remains retryable when another target needs manual review', () => {
+        const targets = [
+            {
+                status: 'failed',
+                error_kind: 'unknown',
+                can_retry: false,
+            },
+            {
+                status: 'failed',
+                error_kind: 'validation',
+                can_retry: true,
+            },
+        ] as PostView['targets'];
+
+        expect(
+            postCapabilities(post({ status: 'partial', targets })).canRetry,
+        ).toBe(true);
+        expect(targetCanRetry(targets[0])).toBe(false);
+        expect(targetCanRetry(targets[1])).toBe(true);
     });
     it('published: delete + duplicate', () => {
         const c = postCapabilities(post({ status: 'published' }));

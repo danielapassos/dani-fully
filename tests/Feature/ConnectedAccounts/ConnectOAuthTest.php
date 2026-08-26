@@ -217,6 +217,52 @@ test('callback persists a direct instagram account and its connection flow', fun
         ->and($account->capabilities['oauth_scopes'])->toContain('instagram_business_content_publish');
 });
 
+test('callback records the TikTok upload scope used by the publishing gate', function () {
+    config()->set('services.tiktok.client_id', 'tiktok-id');
+    config()->set('services.tiktok.client_secret', 'tiktok-secret');
+    config()->set('services.tiktok.inbox_enabled', true);
+    ownerActingIn();
+    fakeOAuthUser('tiktok', [
+        'id' => 'tiktok-creator-1',
+        'nickname' => 'dani',
+        'name' => 'Dani',
+        'token' => 'tiktok-token',
+        'approvedScopes' => ['user.info.basic', 'video.upload'],
+    ]);
+
+    test()->get('/accounts/callback/tiktok')->assertRedirect(route('accounts.index'));
+
+    $account = ConnectedAccount::withoutGlobalScopes()->firstWhere('remote_account_id', 'tiktok-creator-1');
+    expect($account)->not->toBeNull()
+        ->and($account->capabilities['oauth_scopes'])->toContain('video.upload')
+        ->and($account->canPublish())->toBeTrue();
+});
+
+test('callback records the YouTube upload scope used by the publishing gate', function () {
+    config()->set('services.youtube.client_id', 'youtube-id');
+    config()->set('services.youtube.client_secret', 'youtube-secret');
+    config()->set('services.youtube.publishing_enabled', true);
+    ownerActingIn();
+    fakeOAuthUser('youtube', [
+        'id' => 'youtube-channel-1',
+        'nickname' => '@dani',
+        'name' => 'Dani',
+        'token' => 'youtube-token',
+        'refreshToken' => 'youtube-refresh',
+        'approvedScopes' => [
+            'https://www.googleapis.com/auth/youtube.readonly',
+            'https://www.googleapis.com/auth/youtube.upload',
+        ],
+    ]);
+
+    test()->get('/accounts/callback/youtube')->assertRedirect(route('accounts.index'));
+
+    $account = ConnectedAccount::withoutGlobalScopes()->firstWhere('remote_account_id', 'youtube-channel-1');
+    expect($account)->not->toBeNull()
+        ->and($account->capabilities['oauth_scopes'])->toContain('https://www.googleapis.com/auth/youtube.upload')
+        ->and($account->canPublish())->toBeTrue();
+});
+
 test('linkedin connect requests the community management feed scopes only when enabled', function () {
     config()->set('services.linkedin-openid.client_id', 'cid');
     config()->set('services.linkedin-openid.client_secret', 'secret');

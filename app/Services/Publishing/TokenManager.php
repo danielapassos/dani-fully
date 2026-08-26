@@ -489,9 +489,22 @@ class TokenManager
             throw new TokenRefreshException("Token refresh failed for account {$account->id}.");
         }
 
-        $accessToken = (string) $response->json('access_token');
-        $refreshToken = $response->json('refresh_token') ?? $secret->refresh_token;
+        $accessToken = trim((string) $response->json('access_token'));
         $expiresIn = (int) ($response->json('expires_in') ?? 0);
+        if ($accessToken === '' || $expiresIn <= 0) {
+            $account->forceFill([
+                'status' => ConnectedAccountStatus::NeedsAttention->value,
+                'refresh_failed_at' => Date::now(),
+                'refresh_failure_reason' => 'HTTP 200: OAuth token refresh response did not include a valid access_token and expires_in.',
+            ])->save();
+
+            throw new TokenRefreshException("Token refresh failed for account {$account->id}.");
+        }
+
+        $rotatedRefreshToken = $response->json('refresh_token');
+        $refreshToken = is_string($rotatedRefreshToken) && trim($rotatedRefreshToken) !== ''
+            ? $rotatedRefreshToken
+            : $secret->refresh_token;
 
         $secret->forceFill([
             'access_token' => $accessToken,
@@ -502,7 +515,7 @@ class TokenManager
         ])->save();
 
         $account->forceFill([
-            'token_expires_at' => $expiresIn > 0 ? Date::now()->addSeconds($expiresIn) : null,
+            'token_expires_at' => Date::now()->addSeconds($expiresIn),
             'last_refreshed_at' => Date::now(),
             'status' => ConnectedAccountStatus::Active->value,
             'refresh_failed_at' => null,

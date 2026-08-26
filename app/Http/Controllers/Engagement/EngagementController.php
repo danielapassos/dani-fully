@@ -99,11 +99,10 @@ class EngagementController extends Controller
                 'archived' => $archived,
             ],
             'facets' => ['accounts' => $accounts, 'posts' => $posts],
-            'engagementEnabled' => [
-                'x' => $settings->engagementPollingEnabled(Platform::X),
-                'bluesky' => $settings->engagementPollingEnabled(Platform::Bluesky),
-                'linkedin' => $settings->engagementPollingEnabled(Platform::LinkedIn),
-            ],
+            'engagementEnabled' => collect(Platform::pollingSectionPlatforms('engagement'))
+                ->mapWithKeys(fn (Platform $platform): array => [
+                    $platform->value => $settings->engagementPollingEnabled($platform),
+                ])->all(),
             // LinkedIn engagement is off by default until the operator declares
             // their app is approved for the restricted Community Management scope.
             // The UI uses this to keep LinkedIn out of the "temporarily disabled"

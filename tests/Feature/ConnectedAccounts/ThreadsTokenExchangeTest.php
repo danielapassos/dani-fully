@@ -63,6 +63,15 @@ test('refresh throws when the refresh fails', function () {
         ->toThrow(TokenRefreshException::class);
 });
 
+test('refresh rejects a successful response with a malformed token payload', function () {
+    Http::fake([
+        'https://graph.threads.net/refresh_access_token*' => Http::response([], 200),
+    ]);
+
+    expect(fn () => app(ThreadsTokenExchanger::class)->refresh('old-long-token'))
+        ->toThrow(TokenRefreshException::class, 'valid access_token and expires_in');
+});
+
 test('withLongLivedToken immutably replaces the access token and expiry', function () {
     $original = new ConnectedAccountData(
         platform: Platform::Threads,

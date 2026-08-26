@@ -177,6 +177,8 @@ class HandleInertiaRequests extends Middleware
                 'max_video_duration_seconds' => $account->maxVideoDurationSeconds(),
                 'x_premium' => $account->hasXPremium(),
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
+                'publishing_ready' => $account->canPublish(),
+                'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
             ])->values()->all();
     }
 
