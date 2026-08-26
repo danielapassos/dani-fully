@@ -24,7 +24,6 @@ class YouTubeProvider extends AbstractProvider
     protected $scopes = [
         'https://www.googleapis.com/auth/youtube.readonly',
         'https://www.googleapis.com/auth/yt-analytics.readonly',
-        'https://www.googleapis.com/auth/youtube.upload',
     ];
 
     protected function getAuthUrl($state): string

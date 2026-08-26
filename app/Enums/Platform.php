@@ -75,14 +75,14 @@ enum Platform: string
                 'instagram_business_content_publish',
                 'instagram_business_manage_comments',
             ],
-            // Metrikz's TikTok integration uses the creator-inbox handoff instead
-            // of claiming a direct publish. The user completes native posting
-            // choices in TikTok after the video.upload transfer succeeds.
-            self::TikTok => ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.list', 'video.upload'],
+            // Upload permissions are appended by OAuthConnectionController only
+            // after the matching publishing readiness flag is enabled. Keeping
+            // the base connection read-only avoids a provider rejecting the
+            // entire authorization before app review is complete.
+            self::TikTok => ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.list'],
             self::YouTube => [
                 'https://www.googleapis.com/auth/youtube.readonly',
                 'https://www.googleapis.com/auth/yt-analytics.readonly',
-                'https://www.googleapis.com/auth/youtube.upload',
             ],
             // `threads_delete` is required for DELETE /{threads-media-id}; without it
             // Graph returns 403 and the post remains on Threads.

@@ -11,7 +11,7 @@ beforeEach(function () {
     config()->set('services.tiktok.redirect', 'https://app.test/accounts/callback/tiktok');
 });
 
-test('the tiktok driver resolves and requests inbox publishing scopes', function () {
+test('the tiktok driver resolves with read-only account scopes by default', function () {
     expect(Socialite::driver('tiktok'))->toBeInstanceOf(TikTokProvider::class);
 
     $location = Socialite::driver('tiktok')->stateless()->redirect()->getTargetUrl();
@@ -21,7 +21,8 @@ test('the tiktok driver resolves and requests inbox publishing scopes', function
     expect($location)->toStartWith('https://www.tiktok.com/v2/auth/authorize/')
         ->and($query['client_key'])->toBe('tiktok-client-key')
         ->and(explode(',', (string) $query['scope']))
-        ->toContain('video.upload', 'video.list', 'user.info.stats');
+        ->toContain('video.list', 'user.info.stats')
+        ->not->toContain('video.upload');
 });
 
 test('the tiktok driver maps the creator profile', function () {

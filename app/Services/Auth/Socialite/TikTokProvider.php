@@ -22,7 +22,7 @@ class TikTokProvider extends AbstractProvider
 
     /** @var array<int, string> */
     #[Override]
-    protected $scopes = ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.list', 'video.upload'];
+    protected $scopes = ['user.info.basic', 'user.info.profile', 'user.info.stats', 'video.list'];
 
     protected function getAuthUrl($state): string
     {

@@ -9,6 +9,8 @@ it('publishes generated app icon assets at expected sizes', function (): void {
         'apple-touch-icon.png' => [180, 180],
         'android-chrome-192x192.png' => [192, 192],
         'android-chrome-512x512.png' => [512, 512],
+        'icon-maskable-192.png' => [192, 192],
+        'icon-maskable-512.png' => [512, 512],
         'mstile-150x150.png' => [150, 150],
     ];
 
@@ -47,8 +49,6 @@ it('uses the current source artwork bounds for the app icon', function (): void 
         }
     }
 
-    imagedestroy($image);
-
     expect($left)->toBe(51);
     expect($right)->toBe(460);
     expect($top)->toBe(50);
@@ -65,6 +65,7 @@ it('references the generated icons from Laravel HTML entry points', function ():
         $contents = file_get_contents($view);
 
         expect($contents)
+            ->toContain('width=device-width, initial-scale=1')
             ->toContain('/favicon.ico')
             ->toContain('/favicon.svg')
             ->toContain('/apple-touch-icon.png')
@@ -77,14 +78,72 @@ it('publishes a web app manifest using the generated icons', function (): void {
 
     expect($manifest)
         ->toHaveKey('name', 'shoutrrr')
+        ->toHaveKey('id', '/')
+        ->toHaveKey('start_url', '/')
+        ->toHaveKey('scope', '/')
+        ->toHaveKey('display', 'standalone')
         ->toHaveKey('theme_color', '#101010');
 
     expect(collect($manifest['icons'])->pluck('src')->all())->toEqual([
         '/android-chrome-192x192.png',
         '/android-chrome-512x512.png',
-        '/icon-192.png',
-        '/icon-512.png',
+        '/icon-maskable-192.png',
+        '/icon-maskable-512.png',
     ]);
+});
+
+it('publishes an offline fallback and a navigation-only service worker', function (): void {
+    expect(public_path('offline.html'))->toBeFile();
+    expect(public_path('sw.js'))->toBeFile();
+
+    $worker = file_get_contents(public_path('sw.js'));
+
+    expect($worker)
+        ->toContain("request.method !== 'GET'")
+        ->toContain("request.mode !== 'navigate'")
+        ->toContain('url.origin !== self.location.origin')
+        ->toContain('caches.match(OFFLINE_URL)');
+});
+
+it('uses opaque install icons with maskable artwork inside the safe zone', function (): void {
+    foreach (['apple-touch-icon.png', 'icon-maskable-192.png', 'icon-maskable-512.png'] as $file) {
+        $image = imagecreatefrompng(public_path($file));
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $centerX = ($width - 1) / 2;
+        $centerY = ($height - 1) / 2;
+        $safeRadius = $width * 0.4;
+        $background = imagecolorat($image, 0, 0) & 0x00FFFFFF;
+        $isOpaque = true;
+        $pixelsOutsideSafeZone = 0;
+
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $pixel = imagecolorat($image, $x, $y);
+                $alpha = ($pixel & 0x7F000000) >> 24;
+
+                if ($alpha !== 0) {
+                    $isOpaque = false;
+                }
+
+                if ($file === 'apple-touch-icon.png' || ($pixel & 0x00FFFFFF) === $background) {
+                    continue;
+                }
+
+                $distance = sqrt((($x - $centerX) ** 2) + (($y - $centerY) ** 2));
+
+                if ($distance > $safeRadius) {
+                    $pixelsOutsideSafeZone++;
+                }
+            }
+        }
+
+        expect($isOpaque)->toBeTrue();
+
+        if ($file !== 'apple-touch-icon.png') {
+            expect($pixelsOutsideSafeZone)->toBe(0);
+        }
+    }
 });
 
 it('renders the app logo as an inline svg that inherits the current color', function (): void {

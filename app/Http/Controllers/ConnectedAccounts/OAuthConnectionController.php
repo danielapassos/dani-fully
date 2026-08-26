@@ -273,11 +273,32 @@ class OAuthConnectionController extends Controller
             ];
         }
 
-        if ($platform->supportsDirectMessages() && $this->settings->directMessagesEnabled()) {
+        if ($platform === Platform::TikTok && config('services.tiktok.inbox_enabled')) {
+            $scopes[] = 'video.upload';
+        }
+
+        if ($platform === Platform::YouTube && config('services.youtube.publishing_enabled')) {
+            $scopes[] = 'https://www.googleapis.com/auth/youtube.upload';
+        }
+
+        if ($platform->supportsDirectMessages() && $this->shouldRequestDirectMessageScopes($platform)) {
             $scopes = [...$scopes, ...$this->directMessageScopeDeltas($platform)];
         }
 
         return array_values(array_unique($scopes));
+    }
+
+    private function shouldRequestDirectMessageScopes(Platform $platform): bool
+    {
+        if (! $this->settings->directMessagesEnabled()) {
+            return false;
+        }
+
+        if ($platform === Platform::Instagram) {
+            return (bool) config('services.instagram.direct_messages_enabled');
+        }
+
+        return true;
     }
 
     /**

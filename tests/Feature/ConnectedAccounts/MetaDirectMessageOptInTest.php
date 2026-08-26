@@ -9,13 +9,32 @@ use App\Http\Controllers\ConnectedAccounts\MetaConnectionController;
 test('meta scopes include ig and fb dm scopes when direct messages enabled', function () {
     config()->set('services.facebook.client_id', 'cid');
     config()->set('services.facebook.client_secret', 'secret');
+    config()->set('services.instagram.direct_messages_enabled', true);
     config()->set('messages.direct_messages_enabled', true);
 
     $controller = app(MetaConnectionController::class);
-    $scopes = (fn () => $this->scopes())->call($controller);
+    $scopes = (function (): array {
+        return $this->scopes();
+    })->call($controller);
 
     expect($scopes)
         ->toContain('instagram_business_manage_messages')
+        ->toContain('pages_messaging');
+});
+
+test('meta scopes keep instagram dm permission gated until provider approval', function () {
+    config()->set('services.facebook.client_id', 'cid');
+    config()->set('services.facebook.client_secret', 'secret');
+    config()->set('services.instagram.direct_messages_enabled', false);
+    config()->set('messages.direct_messages_enabled', true);
+
+    $controller = app(MetaConnectionController::class);
+    $scopes = (function (): array {
+        return $this->scopes();
+    })->call($controller);
+
+    expect($scopes)
+        ->not->toContain('instagram_business_manage_messages')
         ->toContain('pages_messaging');
 });
 
@@ -25,7 +44,9 @@ test('meta scopes exclude ig and fb dm scopes when direct messages disabled', fu
     config()->set('messages.direct_messages_enabled', false);
 
     $controller = app(MetaConnectionController::class);
-    $scopes = (fn () => $this->scopes())->call($controller);
+    $scopes = (function (): array {
+        return $this->scopes();
+    })->call($controller);
 
     expect($scopes)
         ->not->toContain('instagram_business_manage_messages')
@@ -34,6 +55,7 @@ test('meta scopes exclude ig and fb dm scopes when direct messages disabled', fu
 
 test('buildAccountData sets dm_enabled true for instagram alongside page_id when enabled', function () {
     config()->set('messages.direct_messages_enabled', true);
+    config()->set('services.instagram.direct_messages_enabled', true);
 
     $data = MetaConnectionController::buildAccountData([
         'pageId' => 'PAGE1',
@@ -47,6 +69,25 @@ test('buildAccountData sets dm_enabled true for instagram alongside page_id when
     expect($data->capabilities)->toMatchArray([
         'page_id' => 'PAGE1',
         'dm_enabled' => true,
+    ]);
+});
+
+test('buildAccountData keeps instagram dm disabled until provider approval', function () {
+    config()->set('messages.direct_messages_enabled', true);
+    config()->set('services.instagram.direct_messages_enabled', false);
+
+    $data = MetaConnectionController::buildAccountData([
+        'pageId' => 'PAGE1',
+        'pageName' => 'My Page',
+        'pageAccessToken' => 'PGT1',
+        'igUserId' => 'IG1',
+        'igUsername' => 'myig',
+        'igAvatarUrl' => null,
+    ], Platform::Instagram);
+
+    expect($data->capabilities)->toMatchArray([
+        'page_id' => 'PAGE1',
+        'dm_enabled' => false,
     ]);
 });
 

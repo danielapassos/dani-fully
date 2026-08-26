@@ -22,7 +22,7 @@ export default function SaveIndicator({
     return (
         <div
             className={cn(
-                'hidden shrink-0 items-center gap-1.5 pr-3 text-[11.5px] sm:flex',
+                'flex shrink-0 items-center gap-1.5 pr-3 text-[11.5px]',
                 state === 'dirty' && 'text-amber-700 dark:text-amber-500',
                 state === 'conflict' && 'text-destructive',
                 state === 'offline' && 'text-amber-700 dark:text-amber-500',
@@ -57,7 +57,7 @@ export function formatSaveLabel(
         return 'Conflict';
     }
     if (state === 'offline') {
-        return 'Offline — saved locally';
+        return 'Offline — keep this page open';
     }
     if (!lastSavedAt) {
         return 'Saved';

@@ -69,6 +69,7 @@ return [
         'client_secret' => env('INSTAGRAM_APP_SECRET'),
         'redirect' => env('INSTAGRAM_REDIRECT_URI'),
         'graph_version' => env('INSTAGRAM_GRAPH_API_VERSION', 'v25.0'),
+        'direct_messages_enabled' => filter_var(env('INSTAGRAM_DIRECT_MESSAGES_ENABLED', false), FILTER_VALIDATE_BOOL),
     ],
 
     'threads' => [

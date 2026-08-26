@@ -113,15 +113,15 @@ test('every platform is launched', function () {
         ->and(Platform::Discord->isLaunched())->toBeTrue();
 });
 
-test('tiktok and youtube scopes cover publishing and metrics', function () {
+test('tiktok and youtube base scopes cover profiles and metrics without unreviewed uploads', function () {
     expect(Platform::TikTok->scopes())
-        ->toContain('video.upload')
         ->toContain('video.list')
         ->toContain('user.info.stats')
+        ->not->toContain('video.upload')
         ->and(Platform::YouTube->scopes())
-        ->toContain('https://www.googleapis.com/auth/youtube.upload')
         ->toContain('https://www.googleapis.com/auth/youtube.readonly')
-        ->toContain('https://www.googleapis.com/auth/yt-analytics.readonly');
+        ->toContain('https://www.googleapis.com/auth/yt-analytics.readonly')
+        ->not->toContain('https://www.googleapis.com/auth/youtube.upload');
 });
 
 test('tiktok and youtube use independent oauth credentials', function () {

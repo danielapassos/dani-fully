@@ -11,7 +11,7 @@ beforeEach(function () {
     config()->set('services.youtube.redirect', 'https://app.test/accounts/callback/youtube');
 });
 
-test('the youtube driver requests offline publishing and analytics access', function () {
+test('the youtube driver requests durable read and analytics access by default', function () {
     expect(Socialite::driver('youtube'))->toBeInstanceOf(YouTubeProvider::class);
 
     request()->setLaravelSession(app('session')->driver());
@@ -24,10 +24,10 @@ test('the youtube driver requests offline publishing and analytics access', func
         ->and($query['prompt'])->toBe('consent')
         ->and(explode(' ', (string) $query['scope']))
         ->toContain(
-            'https://www.googleapis.com/auth/youtube.upload',
             'https://www.googleapis.com/auth/youtube.readonly',
             'https://www.googleapis.com/auth/yt-analytics.readonly',
-        );
+        )
+        ->not->toContain('https://www.googleapis.com/auth/youtube.upload');
 });
 
 test('the youtube driver maps exactly one owned channel', function () {
