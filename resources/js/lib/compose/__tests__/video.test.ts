@@ -18,6 +18,7 @@ function limits(
         maxBytes: null,
         maxMedia: 1,
         requiresMedia: false,
+        requiresVideo: false,
         maxMediaBytes: 0,
         allowedMime: [],
         threadMax: null,

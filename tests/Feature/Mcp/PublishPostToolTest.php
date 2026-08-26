@@ -1,9 +1,11 @@
 <?php
 
+use App\Enums\Platform;
 use App\Enums\PostStatus;
 use App\Enums\PostTargetStatus;
 use App\Mcp\Servers\ShoutrrrServer;
 use App\Mcp\Tools\PublishPostTool;
+use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\PostTarget;
 use App\Models\User;
@@ -31,7 +33,12 @@ test('publish_post_now with confirm sets status to publishing', function (): voi
     bindTokenToWorkspace($user, $workspace);
 
     $post = Post::factory()->for($workspace)->create();
-    PostTarget::factory()->for($post)->create(['status' => PostTargetStatus::Pending->value]);
+    $account = ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::X->value]);
+    PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::X->value,
+        'status' => PostTargetStatus::Pending->value,
+    ]);
 
     $response = ShoutrrrServer::actingAs($user)->tool(PublishPostTool::class, [
         'post_id' => $post->id,

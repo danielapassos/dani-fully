@@ -60,6 +60,8 @@ final class PostView
                     'status' => $target->status->value,
                     'error_kind' => $target->error_kind?->value,
                     'error_message' => $target->error_message,
+                    'can_retry' => $target->canRetryManually(),
+                    'retry_blocked_reason' => $target->manualRetryBlockedReason(),
                     'attempts' => $target->attempts,
                     'remote_id' => $target->remote_id,
                     'issues' => $splitter->validateSections(

@@ -97,11 +97,17 @@ class OAuthConnectionController extends Controller
             }
         }
 
-        if ($resolved === Platform::Instagram) {
-            $data = $data->withCapabilities([
-                'instagram_login' => true,
+        if (in_array($resolved, [Platform::Instagram, Platform::TikTok, Platform::YouTube], true)) {
+            $capabilities = [
+                ...($data->capabilities ?? []),
                 'oauth_scopes' => array_values((array) $oauthUser->approvedScopes),
-            ]);
+            ];
+
+            if ($resolved === Platform::Instagram) {
+                $capabilities['instagram_login'] = true;
+            }
+
+            $data = $data->withCapabilities($capabilities);
         }
 
         if ($resolved->supportsDirectMessages()) {
@@ -111,7 +117,7 @@ class OAuthConnectionController extends Controller
             // rather than 403ing at poll time).
             $granted = array_values((array) $oauthUser->approvedScopes);
             $required = $this->directMessageScopeDeltas($resolved);
-            $dmGranted = $required !== [] && array_intersect($required, $granted) !== [];
+            $dmGranted = $required !== [] && array_diff($required, $granted) === [];
 
             $data = $data->withCapabilities([...($data->capabilities ?? []), 'dm_enabled' => $dmGranted]);
         }

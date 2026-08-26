@@ -45,5 +45,7 @@ test('posts index payload includes per-target status and published_at', function
                 ->where('posts.data.0.targets.0.status', 'failed')
                 ->where('posts.data.0.targets.0.error_kind', 'rate_limited')
                 ->where('posts.data.0.targets.0.error_message', 'slow down')
+                ->where('posts.data.0.targets.0.can_retry', true)
+                ->where('posts.data.0.targets.0.retry_blocked_reason', null)
                 ->where('posts.data.0.targets.0.attempts', 3)));
 });

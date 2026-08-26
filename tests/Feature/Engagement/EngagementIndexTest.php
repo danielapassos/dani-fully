@@ -85,6 +85,33 @@ test('the inbox exposes which engagement platforms are disabled', function (): v
             ->where('engagementEnabled.linkedin', true));
 });
 
+test('the inbox exposes readiness for every launched engagement platform', function (): void {
+    app(InstanceSettings::class)->update([
+        'engagement_polling_enabled' => [
+            'x' => true,
+            'bluesky' => true,
+            'linkedin' => true,
+            'facebook' => true,
+            'instagram' => true,
+            'threads' => true,
+        ],
+        'linkedin_community_management_enabled' => true,
+    ]);
+
+    $this->actingAs($this->user)
+        ->get(route('engagement.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('engagement/index')
+            ->has('engagementEnabled', 6)
+            ->where('engagementEnabled.x', true)
+            ->where('engagementEnabled.bluesky', true)
+            ->where('engagementEnabled.linkedin', true)
+            ->where('engagementEnabled.facebook', true)
+            ->where('engagementEnabled.instagram', true)
+            ->where('engagementEnabled.threads', true));
+});
+
 test('the inbox exposes whether the LinkedIn community management scope is enabled', function (): void {
     $this->actingAs($this->user)
         ->get(route('engagement.index'))

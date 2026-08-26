@@ -1,10 +1,12 @@
 <?php
 
+use App\Enums\ErrorKind;
 use App\Enums\Platform;
 use App\Enums\PostStatus;
 use App\Enums\PostTargetStatus;
 use App\Enums\WorkspaceRole;
 use App\Jobs\PublishPostTarget;
+use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\PostTarget;
 use App\Models\User;
@@ -28,11 +30,20 @@ function publishingMember(): array
     return [$user, $workspace];
 }
 
+function publishingAccountFor(Workspace $workspace, Platform $platform = Platform::X): ConnectedAccount
+{
+    return ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => $platform->value,
+    ]);
+}
+
 test('publish-now sets the post publishing and dispatches targets', function () {
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Draft]);
-    PostTarget::factory()->for($post)->create();
+    $account = publishingAccountFor($workspace);
+    PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id]);
 
     test()->postJson("/posts/{$post->id}/publish")
         ->assertOk()
@@ -78,6 +89,25 @@ test('per-target retry resets a failed target to pending and dispatches it', fun
         ->and($target->error_message)->toBeNull();
 
     Bus::assertDispatched(PublishPostTarget::class, fn (PublishPostTarget $job): bool => $job->target->is($target));
+});
+
+test('per-target retry requires manual review for an unconfirmed provider outcome', function () {
+    Bus::fake();
+    [$user, $workspace] = publishingMember();
+    $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Failed]);
+    $target = PostTarget::factory()->for($post)->failed()->create([
+        'error_kind' => ErrorKind::Unknown->value,
+        'error_message' => 'Instagram may already have published this post.',
+    ]);
+
+    test()->postJson("/posts/{$post->id}/targets/{$target->id}/retry")
+        ->assertStatus(409)
+        ->assertJsonPath('message', 'The provider outcome is unconfirmed and may already be live. Check the connected platform before taking any further action.');
+
+    expect($target->refresh()->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::Unknown)
+        ->and($target->error_message)->toBe('Instagram may already have published this post.');
+    Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
 test('per-target retry redirects after an Inertia retry request', function () {
@@ -162,7 +192,9 @@ test('publish-now is blocked (422) for an empty post and does not dispatch', fun
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Draft]);
+    $account = publishingAccountFor($workspace);
     PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
         'platform' => Platform::X->value,
         'sections' => [''],
     ]);
@@ -179,7 +211,9 @@ test('publish-now is blocked (422) for an Instagram target with a caption but no
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Draft]);
+    $account = publishingAccountFor($workspace, Platform::Instagram);
     PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
         'platform' => Platform::Instagram->value,
         'sections' => ['Test'],
     ]);
@@ -197,7 +231,9 @@ test('publish-now is blocked (422) when a target is over the limit and does not 
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Draft]);
+    $account = publishingAccountFor($workspace, Platform::Bluesky);
     PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
         'platform' => Platform::Bluesky->value,
         'sections' => [str_repeat('x', 400)],
         'auto_split' => false,

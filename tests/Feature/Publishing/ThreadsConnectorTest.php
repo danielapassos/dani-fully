@@ -7,6 +7,8 @@ use App\Models\ConnectedAccount;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Publishing\Connectors\ThreadsConnector;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -106,6 +108,81 @@ test('threads resumes a partial chain from persisted remote_ids, continuing at t
 
     // Segment 1 must not be re-created; only segment 2's container + publish + poll fire.
     Http::assertSentCount(3);
+});
+
+test('threads resumes by published ordinal when an authored segment was skipped', function () {
+    Http::fake([
+        'https://graph.threads.net/v1.0/threads123/threads' => Http::response(['id' => 'container-3']),
+        'https://graph.threads.net/v1.0/container-3*' => Http::response(['status' => 'FINISHED']),
+        'https://graph.threads.net/v1.0/threads123/threads_publish' => Http::response(['id' => 'post-3']),
+    ]);
+
+    $context = threadsContext(['', 'second', 'third'], [], [
+        'remote_id' => 'post-2',
+        'remote_ids' => ['post-2'],
+    ]);
+
+    $result = app(ThreadsConnector::class)->publish($context);
+
+    expect($result->isSuccessful())->toBeTrue()
+        ->and($result->remoteIds)->toBe(['post-2', 'post-3']);
+
+    Http::assertSent(fn ($request) => str_contains($request->url(), '/threads123/threads')
+        && ! str_contains($request->url(), 'threads_publish')
+        && $request['text'] === 'third'
+        && $request['reply_to_id'] === 'post-2');
+    Http::assertNotSent(fn ($request) => ($request['text'] ?? null) === 'second');
+    Http::assertSentCount(3);
+});
+
+test('threads persists a manual-review gate when the final publish response is lost', function () {
+    $context = threadsContext(['lost response'], [], [
+        'media_upload_state' => [
+            'segment-0' => ['remote_ref' => 'container-existing', 'state' => 'processing'],
+        ],
+    ]);
+
+    Http::fake(function (Request $request) {
+        if (str_contains($request->url(), '/container-existing')) {
+            return Http::response(['status' => 'FINISHED']);
+        }
+
+        throw new ConnectionException('connection lost after publish');
+    });
+
+    $result = app(ThreadsConnector::class)->publish($context);
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse()
+        ->and($context->target->fresh()->media_upload_state['segment-0']['metadata']['publish_outcome_unknown'])->toBeTrue();
+
+    $retryCalledProvider = false;
+    Http::fake(function () use (&$retryCalledProvider) {
+        $retryCalledProvider = true;
+
+        return Http::response([], 500);
+    });
+
+    $retry = app(ThreadsConnector::class)->publish($context);
+
+    expect($retry->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($retryCalledProvider)->toBeFalse();
+});
+
+test('threads does not republish a container Meta already reports as published', function () {
+    Http::fake([
+        'https://graph.threads.net/v1.0/container-published*' => Http::response(['status' => 'PUBLISHED']),
+    ]);
+
+    $result = app(ThreadsConnector::class)->publish(threadsContext(['already published'], [], [
+        'media_upload_state' => [
+            'segment-0' => ['remote_ref' => 'container-published', 'state' => 'processing'],
+        ],
+    ]));
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorMessage)->toContain('Check Threads');
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'threads_publish'));
 });
 
 test('threads publishes a single image as an IMAGE container', function () {

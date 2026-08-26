@@ -61,6 +61,22 @@ test('a remote s3 disk allowlists its configured endpoint origin for uploads and
         ->and($csp)->not->toContain('connect-src \'self\' blob: https:;');
 });
 
+test('an arbitrarily named s3 disk allowlists its own storage origins', function () {
+    config([
+        'filesystems.default' => 'r2',
+        'filesystems.disks.r2' => [
+            'driver' => 's3',
+            'url' => 'https://media.example.com',
+            'endpoint' => 'https://r2-api.example.com',
+        ],
+    ]);
+
+    $csp = $this->get('/login')->headers->get('Content-Security-Policy');
+
+    expect($csp)->toContain('connect-src \'self\' blob: https://media.example.com https://r2-api.example.com')
+        ->and($csp)->toContain('media-src \'self\' blob: https://media.example.com https://r2-api.example.com');
+});
+
 test('a vanilla s3 disk with no endpoint falls back to https: so uploads still work', function () {
     config([
         'filesystems.default' => 's3',

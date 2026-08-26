@@ -10,6 +10,7 @@ import {
     type TargetTone,
     targetStatusMeta,
 } from '@/lib/compose/publish-status';
+import { targetCanRetry } from '@/lib/posts/capabilities';
 import { platformLabel, postPermalink } from '@/lib/posts/permalink';
 import { cn } from '@/lib/utils';
 import type { TargetView } from '@/types/compose';
@@ -29,7 +30,14 @@ const TONE_CLASS: Record<TargetTone, string> = {
  */
 export type ChipTarget = Pick<
     TargetView,
-    'id' | 'platform' | 'status' | 'error_message' | 'attempts'
+    | 'id'
+    | 'platform'
+    | 'status'
+    | 'error_kind'
+    | 'error_message'
+    | 'can_retry'
+    | 'retry_blocked_reason'
+    | 'attempts'
 > &
     Partial<Pick<TargetView, 'handle' | 'display_name' | 'remote_id'>>;
 
@@ -59,6 +67,11 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
                 const meta = targetStatusMeta(target.status);
                 const isFailed = target.status === 'failed';
                 const isSkipped = target.status === 'skipped';
+                const canRetry = targetCanRetry(target);
+                const requiresManualReview =
+                    (isFailed || isSkipped) &&
+                    !canRetry &&
+                    target.error_kind === 'unknown';
                 const isRetrying = retryingIds?.has(target.id) ?? false;
                 const attempts = target.attempts ?? 0;
                 const errorMessage = target.error_message
@@ -149,7 +162,18 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
                                 </Tooltip>
                             </span>
                         )}
-                        {(isFailed || isSkipped) && onRetry && (
+                        {requiresManualReview && (
+                            <span
+                                title={
+                                    target.retry_blocked_reason ??
+                                    'The provider outcome is unconfirmed. Check the connected platform before taking any further action.'
+                                }
+                                className="ml-auto inline-flex h-6 shrink-0 items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2 text-[11.5px] font-medium text-amber-700 dark:text-amber-300"
+                            >
+                                Manual review
+                            </span>
+                        )}
+                        {(isFailed || isSkipped) && canRetry && onRetry && (
                             <button
                                 type="button"
                                 disabled={isRetrying}

@@ -18,6 +18,7 @@ use App\Models\Workspace;
 use App\Support\InstanceSettings;
 use App\Support\LinkedInOrg;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 
@@ -70,6 +71,30 @@ class DraftService
      */
     public function resolveDestinationAccountIds(string $workspaceId, array $destination): array
     {
+        $ids = $this->rawDestinationAccountIds($workspaceId, $destination);
+
+        $frozen = $this->frozenPlatformValues();
+
+        $ids = ConnectedAccount::withoutGlobalScopes()
+            ->whereKey($ids)
+            ->enabled()
+            ->when($frozen !== [], fn (Builder $query): Builder => $query->whereNotIn('platform', $frozen))
+            ->pluck('id');
+
+        return $this->defaultFirst($workspaceId, $ids->map(static fn (mixed $id): string => (string) $id)->all());
+    }
+
+    /**
+     * Resolve the destination descriptor before applying availability gates.
+     * Updates use this raw membership only to preserve targets the post already
+     * owns; create/new selections still go through resolveDestinationAccountIds().
+     *
+     * @param  array{kind: string, id?: string|null, ids?: list<string>}  $destination
+     * @return list<string>
+     */
+    private function rawDestinationAccountIds(string $workspaceId, array $destination): array
+    {
+        /** @var Collection<int, mixed> $ids */
         $ids = match ($destination['kind']) {
             'account' => isset($destination['id'])
                 ? ConnectedAccount::withoutGlobalScopes()
@@ -92,14 +117,6 @@ class DraftService
                 ->where('workspace_id', $workspaceId)
                 ->pluck('id'),
         };
-
-        $frozen = $this->frozenPlatformValues();
-
-        $ids = ConnectedAccount::withoutGlobalScopes()
-            ->whereKey($ids->all())
-            ->enabled()
-            ->when($frozen !== [], fn (Builder $query): Builder => $query->whereNotIn('platform', $frozen))
-            ->pluck('id');
 
         return $this->defaultFirst($workspaceId, $ids->map(static fn (mixed $id): string => (string) $id)->all());
     }
@@ -344,6 +361,16 @@ class DraftService
                 'ids' => $data->destinationIds,
             ];
             $accountIds = $this->resolveDestinationAccountIds($post->workspace_id, $destination);
+            $rawDestinationIds = $this->rawDestinationAccountIds($post->workspace_id, $destination);
+            $preservedTargetIds = $post->targets()
+                ->whereIn('connected_account_id', $rawDestinationIds)
+                ->pluck('connected_account_id')
+                ->map(static fn (mixed $id): string => (string) $id)
+                ->all();
+            $accountIds = $this->defaultFirst(
+                $post->workspace_id,
+                array_values(array_unique([...$accountIds, ...$preservedTargetIds])),
+            );
 
             // Only carry an explicitly-sent override/auto-split into the merge;
             // otherwise syncTargets preserves the survivor's existing value.

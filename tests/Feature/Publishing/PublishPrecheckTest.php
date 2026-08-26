@@ -94,6 +94,85 @@ test('blockingTargets passes an Instagram target with text and media', function 
     expect($blocked)->toBe([]);
 });
 
+test('blockingTargets requires a video for TikTok even when an image is attached', function () {
+    config()->set('services.tiktok.inbox_enabled', true);
+    $post = Post::factory()->create();
+    PostMedia::factory()->for($post)->create(['kind' => 'image']);
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::TikTok,
+        'capabilities' => ['oauth_scopes' => ['video.upload']],
+    ]);
+    PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::TikTok->value,
+        'sections' => ['TikTok caption'],
+    ]);
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+
+    expect($blocked)->toHaveCount(1)
+        ->and($blocked[0]['issues'])->toBe(['video_required']);
+});
+
+test('blockingTargets passes a publish-ready YouTube target with a video', function () {
+    config()->set('services.youtube.publishing_enabled', true);
+    $post = Post::factory()->create();
+    PostMedia::factory()->for($post)->video()->create();
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::YouTube,
+        'capabilities' => ['oauth_scopes' => ['https://www.googleapis.com/auth/youtube.upload']],
+    ]);
+    PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::YouTube->value,
+        'sections' => ['YouTube caption'],
+    ]);
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+
+    expect($blocked)->toBe([]);
+});
+
+test('blockingTargets rejects a read-only YouTube connection before dispatch', function () {
+    config()->set('services.youtube.publishing_enabled', true);
+    $post = Post::factory()->create();
+    PostMedia::factory()->for($post)->video()->create();
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::YouTube,
+        'capabilities' => ['oauth_scopes' => ['https://www.googleapis.com/auth/youtube.readonly']],
+    ]);
+    PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::YouTube->value,
+        'sections' => ['YouTube caption'],
+    ]);
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+
+    expect($blocked)->toHaveCount(1)
+        ->and($blocked[0]['issues'])->toBe(['publishing_unavailable']);
+});
+
+test('blockingTargets rejects TikTok while instance publishing is disabled', function () {
+    config()->set('services.tiktok.inbox_enabled', false);
+    $post = Post::factory()->create();
+    PostMedia::factory()->for($post)->video()->create();
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::TikTok,
+        'capabilities' => ['oauth_scopes' => ['video.upload']],
+    ]);
+    PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::TikTok->value,
+        'sections' => ['TikTok caption'],
+    ]);
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+
+    expect($blocked)->toHaveCount(1)
+        ->and($blocked[0]['issues'])->toBe(['publishing_unavailable']);
+});
+
 test('blockingTargets passes a text-only target on a platform that does not require media', function () {
     $post = Post::factory()->create();
     PostTarget::factory()->for($post)->create([

@@ -26,6 +26,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { platformLabel } from '@/lib/platforms';
 import { cn } from '@/lib/utils';
 import { index as engagementRoute } from '@/routes/engagement';
 import type { PlatformName } from '@/types/compose';
@@ -36,26 +37,21 @@ type Props = {
     filters: EngagementFilters;
     accounts: AccountFacet[];
     posts: PostFacet[];
+    platforms: PlatformName[];
 };
 
-const PLATFORMS: { value: PlatformName; label: string }[] = [
-    { value: 'bluesky', label: 'Bluesky' },
-    { value: 'x', label: 'X' },
-    { value: 'linkedin', label: 'LinkedIn' },
-];
-
-export function ReplyFilters({ filters, accounts, posts }: Props) {
+export function ReplyFilters({ filters, accounts, posts, platforms }: Props) {
     const [postPickerOpen, setPostPickerOpen] = useState(false);
     const activePost = posts.find((p) => p.id === filters.post);
 
     const platformItems = [
         { value: 'all', label: 'All platforms' },
-        ...PLATFORMS.map((p) => ({
-            value: p.value,
+        ...platforms.map((platform) => ({
+            value: platform,
             label: (
                 <>
-                    <PlatformGlyph platform={p.value} />
-                    {p.label}
+                    <PlatformGlyph platform={platform} />
+                    {platformLabel(platform)}
                 </>
             ),
         })),

@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\ErrorKind;
 use App\Enums\PostTargetStatus;
+use App\Jobs\PublishPostTarget;
 use App\Mcp\Servers\ShoutrrrServer;
 use App\Mcp\Tools\RetryPostTargetTool;
 use App\Models\Post;
@@ -64,4 +66,28 @@ test('retry_post_target rejects a non-failed target', function (): void {
 
     $response->assertHasErrors();
     expect($target->fresh()->status)->toBe(PostTargetStatus::Published);
+});
+
+test('retry_post_target requires manual review for an unconfirmed provider outcome', function (): void {
+    Queue::fake();
+    $user = User::factory()->create();
+    $workspace = Workspace::factory()->create();
+    $user->forceFill(['current_workspace_id' => $workspace->id])->save();
+    bindTokenToWorkspace($user, $workspace);
+
+    $post = Post::factory()->for($workspace)->create();
+    $target = PostTarget::factory()->for($post)->failed()->create([
+        'error_kind' => ErrorKind::Unknown->value,
+    ]);
+
+    $response = ShoutrrrServer::actingAs($user)->tool(RetryPostTargetTool::class, [
+        'post_id' => $post->id,
+        'target_id' => $target->id,
+        'confirm' => true,
+    ]);
+
+    $response->assertHasErrors(['provider outcome is unconfirmed']);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::Unknown);
+    Queue::assertNotPushed(PublishPostTarget::class);
 });

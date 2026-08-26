@@ -1,4 +1,6 @@
-# Production deployment: pulls the prebuilt image from GHCR (no local build).
+# Production deployment: pulls a prebuilt image from GHCR (no local build).
+# Forks must point SHOUTRRR_IMAGE at their own published image so Compose never
+# silently deploys upstream code instead of the checked-out fork.
 # `pull_policy: always` makes `up` re-pull the latest published image. One
 # container whose supervisord runs the Octane web server plus the queue worker,
 # scheduler, and (when toggled) SSR.
@@ -54,7 +56,7 @@ x-environment: &app-env
 
 services:
     app:
-        image: "ghcr.io/coollabsio/shoutrrr:latest"
+        image: "${SHOUTRRR_IMAGE:-ghcr.io/danielapassos/dani-fully:latest}"
         pull_policy: always
         restart: unless-stopped
         # Put any extra config in your .env (X_*, LINKEDIN_*, AWS_*,

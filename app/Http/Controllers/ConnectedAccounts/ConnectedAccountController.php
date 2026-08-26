@@ -72,6 +72,8 @@ class ConnectedAccountController extends Controller
                 'disabled' => $account->isDisabled(),
                 'pds_url' => $this->customPdsUrl($account),
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
+                'publishing_ready' => $account->canPublish(),
+                'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
             ])
             ->values()
             ->all();

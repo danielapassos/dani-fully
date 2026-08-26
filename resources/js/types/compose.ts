@@ -59,6 +59,10 @@ export type Account = {
     x_premium: boolean;
     /** Account-level Auto-boost opt-in; per-post boost is a no-op without it. */
     auto_repost_enabled?: boolean;
+    /** False when this connection cannot currently accept publish jobs. */
+    publishing_ready?: boolean;
+    /** Actionable explanation shown beside a connection that cannot publish. */
+    publishing_unavailable_reason?: string | null;
 };
 
 export type AccountSet = {
@@ -74,6 +78,8 @@ export type PlatformLimits = {
     maxMedia: number;
     /** Platform rejects a post with no image or video (Instagram). */
     requiresMedia: boolean;
+    /** Platform accepts video posts only (TikTok and YouTube). */
+    requiresVideo: boolean;
     maxMediaBytes: number;
     allowedMime: string[];
     threadMax: number | null;
@@ -156,6 +162,9 @@ export type TargetView = {
     status: TargetStatus;
     error_kind: string | null;
     error_message: string | null;
+    /** Server-authoritative manual retry gate. Optional for older/partial payloads. */
+    can_retry?: boolean;
+    retry_blocked_reason?: string | null;
     attempts: number;
     remote_id: string | null;
     segment_breaks?: string[];

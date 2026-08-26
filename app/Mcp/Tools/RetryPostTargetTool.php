@@ -17,7 +17,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Retry a failed or skipped publish target. Outward-facing (re-attempts a live post). Requires confirm=true.')]
+#[Description('Retry a safely retryable failed or skipped publish target. An unconfirmed provider outcome requires manual review and cannot be retried. Outward-facing (re-attempts a live post). Requires confirm=true.')]
 class RetryPostTargetTool extends WorkspaceTool
 {
     public function handle(Request $request, PostStatusRollup $rollup): Response
@@ -47,8 +47,8 @@ class RetryPostTargetTool extends WorkspaceTool
             return Response::error('No such target on that post.');
         }
 
-        if (! $target->status->isRetryable()) {
-            return Response::error('Only failed or skipped targets can be retried.');
+        if (! $target->canRetryManually()) {
+            return Response::error($target->manualRetryBlockedReason() ?? 'Only failed or skipped targets can be retried.');
         }
 
         if ($unconfirmed = $this->requireConfirmation($request, 'This will re-attempt publishing to the connected account.')) {
@@ -78,7 +78,7 @@ class RetryPostTargetTool extends WorkspaceTool
     {
         return [
             'post_id' => $schema->string()->description('Post id.')->required(),
-            'target_id' => $schema->string()->description('Failed or skipped target id.')->required(),
+            'target_id' => $schema->string()->description('Safely retryable failed or skipped target id. Unconfirmed provider outcomes require manual review.')->required(),
             'confirm' => $schema->boolean()->description('Must be true to retry.'),
         ];
     }

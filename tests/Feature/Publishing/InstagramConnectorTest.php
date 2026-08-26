@@ -7,6 +7,8 @@ use App\Models\ConnectedAccount;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Publishing\Connectors\InstagramConnector;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -170,6 +172,56 @@ test('instagram resumes from a persisted container id, skipping re-creation', fu
         && ! str_contains($request->url(), 'media_publish'));
 
     Http::assertSentCount(2);
+});
+
+test('instagram persists a manual-review gate when the media publish response is lost', function () {
+    $context = igContext(
+        ['lost response'],
+        [PostMedia::factory()->create()],
+        ['media_upload_state' => ['container' => ['remote_ref' => 'container-existing', 'state' => 'processing']]],
+    );
+
+    Http::fake(function (Request $request) {
+        if (str_contains($request->url(), '/container-existing')) {
+            return Http::response(['status_code' => 'FINISHED']);
+        }
+
+        throw new ConnectionException('connection lost after publish');
+    });
+
+    $result = app(InstagramConnector::class)->publish($context);
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse()
+        ->and($context->target->fresh()->media_upload_state['container']['metadata']['publish_outcome_unknown'])->toBeTrue();
+
+    $retryCalledProvider = false;
+    Http::fake(function () use (&$retryCalledProvider) {
+        $retryCalledProvider = true;
+
+        return Http::response([], 500);
+    });
+
+    $retry = app(InstagramConnector::class)->publish($context);
+
+    expect($retry->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($retryCalledProvider)->toBeFalse();
+});
+
+test('instagram does not republish a container Meta already reports as published', function () {
+    Http::fake([
+        'https://graph.facebook.com/*/container-published*' => Http::response(['status_code' => 'PUBLISHED']),
+    ]);
+
+    $result = app(InstagramConnector::class)->publish(igContext(
+        ['already published'],
+        [PostMedia::factory()->create()],
+        ['media_upload_state' => ['container' => ['remote_ref' => 'container-published', 'state' => 'processing']]],
+    ));
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorMessage)->toContain('Check Instagram');
+    Http::assertNotSent(fn (Request $request): bool => str_contains($request->url(), 'media_publish'));
 });
 
 test('instagram builds a carousel from two images then publishes the parent container', function () {

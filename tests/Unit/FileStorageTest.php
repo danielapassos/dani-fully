@@ -43,3 +43,14 @@ test('it returns a temporary url for a private disk', function () {
         ->toContain('media/video.mp4')
         ->toContain('expiration=');
 });
+
+test('it builds a stable provider url from the configured public media base', function () {
+    config(['media.public_url' => 'https://media.example.com/verified-prefix/']);
+
+    expect(FileStorage::publicMediaUrl('/media/Dani clip #1.mp4', 's3'))
+        ->toBe('https://media.example.com/verified-prefix/media/Dani%20clip%20%231.mp4');
+});
+
+test('the public images disk does not force an object acl', function () {
+    expect(array_key_exists('visibility', config('filesystems.disks.public-images')))->toBeFalse();
+});

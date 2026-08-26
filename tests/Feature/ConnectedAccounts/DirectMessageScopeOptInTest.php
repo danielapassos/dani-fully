@@ -97,6 +97,25 @@ test('x callback records dm_enabled false when the dm scopes are not granted', f
         ->and($account->canReceiveDirectMessages())->toBeFalse();
 });
 
+test('x callback requires both read and write dm scopes', function () {
+    config()->set('services.x.client_id', 'cid');
+    config()->set('services.x.client_secret', 'secret');
+    config()->set('messages.direct_messages_enabled', true);
+    ownerActingIn();
+    fakeOAuthUser('x', [
+        'id' => 'x-dm-partial',
+        'nickname' => 'dmpartial',
+        'token' => 'access',
+        'approvedScopes' => ['users.read', 'tweet.read', 'dm.read'],
+    ]);
+
+    test()->get('/accounts/callback/x')->assertRedirect(route('accounts.index'));
+
+    $account = ConnectedAccount::withoutGlobalScopes()->firstWhere('remote_account_id', 'x-dm-partial');
+    expect($account->capabilities['dm_enabled'])->toBeFalse()
+        ->and($account->canReceiveDirectMessages())->toBeFalse();
+});
+
 test('x callback keeps the dm capability alongside the existing tier capabilities', function () {
     config()->set('services.x.client_id', 'cid');
     config()->set('services.x.client_secret', 'secret');

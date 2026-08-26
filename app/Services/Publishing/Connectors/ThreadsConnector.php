@@ -73,9 +73,15 @@ class ThreadsConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::Validation, 'Threads requires text or media');
         }
 
+        // remote_ids is a dense list of posts that actually exist. Authored
+        // segment indices may contain empty, unpublished gaps, so keep a
+        // separate ordinal for resume bookkeeping rather than indexing this
+        // list with the authored segment index.
         $remoteIds = $context->target->remote_ids ?? [];
         $state = new MediaUploadState($context->target->media_upload_state);
         $previousId = null;
+        $publishedOrdinal = 0;
+        $pendingContainerKey = null;
 
         try {
             // Iterate the ORIGINAL segment indices (not a filtered/re-indexed list) so
@@ -94,13 +100,18 @@ class ThreadsConnector implements PublishConnector
 
                 // Resume: skip segments already published on a prior attempt, keeping
                 // the reply chain anchored to their id.
-                if (isset($remoteIds[$index])) {
-                    $previousId = $remoteIds[$index];
+                if (isset($remoteIds[$publishedOrdinal])) {
+                    $previousId = $remoteIds[$publishedOrdinal];
+                    $publishedOrdinal++;
 
                     continue;
                 }
 
                 $replyToId = $previousId;
+                $containerKey = $this->containerKey($index);
+                if ($this->publishOutcomeUnknown($state, $containerKey)) {
+                    return $this->publishNeedsReview();
+                }
 
                 $containerId = $this->resolveContainerId($context, $state, $threadsUserId, $index, $text, $media, $replyToId, $token);
 
@@ -108,6 +119,13 @@ class ThreadsConnector implements PublishConnector
                 if ($notReady !== null) {
                     return $notReady;
                 }
+
+                // Persist the final-mutation boundary before threads_publish. A
+                // lost response can mean Meta accepted the post; retrying without
+                // a confirmed id would create a duplicate reply in the chain.
+                $this->setPublishOutcomeUnknown($state, $containerKey, true);
+                $this->persistState($context, $state);
+                $pendingContainerKey = $containerKey;
 
                 $publish = $this->http->asForm()->post(self::BASE_URL.'/'.$threadsUserId.'/threads_publish', [
                     'creation_id' => $containerId,
@@ -117,26 +135,38 @@ class ThreadsConnector implements PublishConnector
                 $this->meter(UsageCategory::Publish, UsageOperation::POST, $context->account, $publish);
 
                 if ($publish->failed()) {
+                    if ($publish->serverError()) {
+                        return $this->publishNeedsReview();
+                    }
+
+                    $this->setPublishOutcomeUnknown($state, $containerKey, false);
+                    $this->persistState($context, $state);
+                    $pendingContainerKey = null;
+
                     return $this->mapFailure($publish);
                 }
 
                 $publishedId = (string) $publish->json('id');
 
                 if ($publishedId === '') {
-                    return PublishResult::failure(ErrorKind::ServerError, 'Threads did not return a media id');
+                    return $this->publishNeedsReview();
                 }
 
-                $remoteIds[$index] = $publishedId;
+                $remoteIds[$publishedOrdinal] = $publishedId;
+                $publishedOrdinal++;
                 $previousId = $publishedId;
 
                 // Persist this segment's id BEFORE sending the next one so a mid-thread
                 // death resumes (rather than re-posts) the already-published segments.
                 // reset() (not $remoteIds[0]) because segment 0 may have been skipped
                 // (empty text, no media) — the first PUBLISHED segment is the root.
+                $this->setPublishOutcomeUnknown($state, $containerKey, false);
                 $context->target->forceFill([
                     'remote_id' => reset($remoteIds),
                     'remote_ids' => array_values($remoteIds),
+                    'media_upload_state' => $state->toArray(),
                 ])->save();
+                $pendingContainerKey = null;
             }
         } catch (ThreadsRequestFailed $e) {
             return $this->mapFailure($e->response);
@@ -145,6 +175,10 @@ class ThreadsConnector implements PublishConnector
             // won't change that, so fail with the reason rather than looping.
             return PublishResult::failure(ErrorKind::Unsupported, $e->getMessage());
         } catch (ConnectionException $e) {
+            if ($pendingContainerKey !== null) {
+                return $this->publishNeedsReview();
+            }
+
             return PublishResult::failure(ErrorKind::Network, $e->getMessage());
         }
 
@@ -314,7 +348,8 @@ class ThreadsConnector implements PublishConnector
         $status = (string) $response->json('status');
 
         return match ($status) {
-            'FINISHED', 'PUBLISHED' => null,
+            'FINISHED' => null,
+            'PUBLISHED' => $this->publishNeedsReview(),
             'IN_PROGRESS' => PublishResult::failure(ErrorKind::MediaProcessing, 'Threads is processing the media.', retryAfter: 6),
             default => PublishResult::failure(
                 ErrorKind::ServerError,
@@ -323,6 +358,30 @@ class ThreadsConnector implements PublishConnector
                 $this->excerpt($response),
             ),
         };
+    }
+
+    private function publishOutcomeUnknown(MediaUploadState $state, string $containerKey): bool
+    {
+        return ($state->metadata($containerKey)['publish_outcome_unknown'] ?? false) === true;
+    }
+
+    private function setPublishOutcomeUnknown(MediaUploadState $state, string $containerKey, bool $unknown): void
+    {
+        $metadata = $state->metadata($containerKey);
+        if ($unknown) {
+            $metadata['publish_outcome_unknown'] = true;
+        } else {
+            unset($metadata['publish_outcome_unknown']);
+        }
+        $state->setMetadata($containerKey, $metadata);
+    }
+
+    private function publishNeedsReview(): PublishResult
+    {
+        return PublishResult::failure(
+            ErrorKind::Unknown,
+            'Threads may already have published this segment, but Shoutrrr could not confirm its post id. Check Threads before retrying.',
+        );
     }
 
     public function delete(PostTarget $target, array $credentials): void

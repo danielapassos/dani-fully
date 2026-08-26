@@ -81,9 +81,16 @@ class ThreadsTokenExchanger
      */
     private function tokenPayload(Response $response): array
     {
+        $token = trim((string) $response->json('access_token'));
+        $expiresIn = (int) $response->json('expires_in');
+
+        if ($token === '' || $expiresIn <= 0) {
+            throw new TokenRefreshException('Threads token response did not include a valid access_token and expires_in.');
+        }
+
         return [
-            'token' => (string) $response->json('access_token'),
-            'expiresAt' => Date::now()->addSeconds((int) $response->json('expires_in'))->toImmutable(),
+            'token' => $token,
+            'expiresAt' => Date::now()->addSeconds($expiresIn)->toImmutable(),
         ];
     }
 }

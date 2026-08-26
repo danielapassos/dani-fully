@@ -26,56 +26,74 @@ class ThreadsMetricsConnector implements MetricsConnector
 
     public function fetchPost(ConnectedAccount $account, PostTarget $target, array $credentials): PostMetricsResult
     {
-        $mediaId = $target->remote_id;
+        $mediaIds = $target->remote_ids ?? array_filter([$target->remote_id]);
 
-        if ($mediaId === null) {
-            return PostMetricsResult::failed('Target has no remote id.');
+        if ($mediaIds === []) {
+            return PostMetricsResult::failed('Target has no remote ids.');
         }
 
         $token = (string) ($credentials['access_token'] ?? '');
+        $likes = 0;
+        $replies = 0;
+        $reposts = 0;
+        $impressions = null;
+        $posts = [];
 
-        try {
-            $response = $this->http
-                ->timeout(10)
-                ->connectTimeout(5)
-                ->acceptJson()
-                ->get(self::BASE_URL.'/'.$mediaId.'/insights', [
-                    'metric' => 'views,likes,replies,reposts,quotes,shares',
-                    'access_token' => $token,
-                ]);
-        } catch (ConnectionException $e) {
-            return PostMetricsResult::failed($e->getMessage());
-        }
-
-        $this->meter(UsageCategory::ExternalApi, UsageOperation::METRICS_FETCH_POST, $account, $response);
-
-        if ($response->failed()) {
-            if ($response->status() === 429) {
-                return PostMetricsResult::rateLimited($this->excerpt($response));
+        foreach ($mediaIds as $mediaId) {
+            try {
+                $response = $this->http
+                    ->timeout(10)
+                    ->connectTimeout(5)
+                    ->acceptJson()
+                    ->get(self::BASE_URL.'/'.$mediaId.'/insights', [
+                        'metric' => 'views,likes,replies,reposts,quotes,shares',
+                        'access_token' => $token,
+                    ]);
+            } catch (ConnectionException $e) {
+                return PostMetricsResult::failed($e->getMessage());
             }
 
-            return PostMetricsResult::failed($this->excerpt($response));
-        }
+            $this->meter(UsageCategory::ExternalApi, UsageOperation::METRICS_FETCH_POST, $account, $response);
 
-        $metrics = [];
+            if ($response->failed()) {
+                if ($response->status() === 429) {
+                    return PostMetricsResult::rateLimited($this->excerpt($response));
+                }
 
-        foreach ((array) $response->json('data', []) as $entry) {
-            $name = $entry['name'] ?? null;
-            $value = $entry['values'][0]['value'] ?? null;
-
-            if ($name !== null) {
-                $metrics[$name] = $value;
+                return PostMetricsResult::failed($this->excerpt($response));
             }
+
+            $metrics = [];
+
+            foreach ((array) $response->json('data', []) as $entry) {
+                $name = $entry['name'] ?? null;
+                $value = $entry['values'][0]['value'] ?? null;
+
+                if ($name !== null) {
+                    $metrics[$name] = $value;
+                }
+            }
+
+            $likes += (int) ($metrics['likes'] ?? 0);
+            $replies += (int) ($metrics['replies'] ?? 0);
+            $reposts += (int) ($metrics['reposts'] ?? 0);
+
+            if (is_numeric($metrics['views'] ?? null)) {
+                $impressions = ($impressions ?? 0) + (int) $metrics['views'];
+            }
+
+            $posts[] = [
+                'id' => $mediaId,
+                'insights' => $response->json(),
+            ];
         }
 
-        $likes = (int) ($metrics['likes'] ?? 0);
-        $comments = (int) ($metrics['replies'] ?? 0);
-        $reposts = (int) ($metrics['reposts'] ?? 0);
+        // Every post after the root is a connector-authored reply to the prior
+        // segment. Threads includes those continuations in reply counts, so
+        // remove them while preserving replies from the audience.
+        $comments = max(0, $replies - max(0, count($mediaIds) - 1));
 
-        $impressions = $metrics['views'] ?? null;
-        $impressions = is_numeric($impressions) ? (int) $impressions : null;
-
-        return PostMetricsResult::ok($likes, $comments, $reposts, $impressions, $response->json());
+        return PostMetricsResult::ok($likes, $comments, $reposts, $impressions, ['posts' => $posts]);
     }
 
     public function fetchAccount(ConnectedAccount $account, array $credentials): AccountMetricsResult

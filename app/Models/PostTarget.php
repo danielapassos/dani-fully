@@ -90,6 +90,31 @@ class PostTarget extends Model
     use HasFactory, HasUuids;
 
     /**
+     * Whether this target may be manually dispatched again without risking a
+     * duplicate provider-side post. Unknown failures include deliberately
+     * persisted lost-response markers: the provider may already have accepted
+     * the publish even though Shoutrrr did not receive its id.
+     */
+    public function canRetryManually(): bool
+    {
+        return $this->status->isRetryable()
+            && $this->error_kind !== ErrorKind::Unknown;
+    }
+
+    /**
+     * Explain the only retry block that needs a human decision rather than a
+     * different target status.
+     */
+    public function manualRetryBlockedReason(): ?string
+    {
+        if ($this->status->isRetryable() && $this->error_kind === ErrorKind::Unknown) {
+            return 'The provider outcome is unconfirmed and may already be live. Check the connected platform before taking any further action.';
+        }
+
+        return null;
+    }
+
+    /**
      * @return array<string, string>
      */
     #[Override]

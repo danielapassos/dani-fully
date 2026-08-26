@@ -35,6 +35,8 @@ final class PostListItem
                 'status' => $t->status->value,
                 'error_kind' => $t->error_kind?->value,
                 'error_message' => $t->error_message,
+                'can_retry' => $t->canRetryManually(),
+                'retry_blocked_reason' => $t->manualRetryBlockedReason(),
                 'attempts' => $t->attempts,
             ])->all(),
         ];

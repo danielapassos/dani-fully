@@ -12,10 +12,13 @@ import type {
 
 export type BlockReason =
     | 'empty'
+    | 'publishing_unavailable'
     | 'media_required'
+    | 'video_required'
     | 'section_too_long'
     | 'too_many_sections'
     | 'too_many_media'
+    | 'unplaced_media'
     | 'mixed_video_and_images'
     | 'video_too_long'
     | 'video_too_large'
@@ -28,6 +31,7 @@ export type AccountBlock = {
     handle: string;
     platform: PlatformName;
     reasons: BlockReason[];
+    publishingUnavailableReason?: string | null;
 };
 
 type PrecheckAccountInput = {
@@ -36,6 +40,8 @@ type PrecheckAccountInput = {
     autoSplit: boolean;
     mentions: MentionPlaceholder[];
     mediaCount: number;
+    /** Media counts for each resolved thread post; falls back to mediaCount. */
+    mediaCounts?: number[];
     hasVideo: boolean;
     format: PostFormat;
     limits: PlatformLimits;
@@ -65,6 +71,7 @@ export function precheckAccount({
     autoSplit,
     mentions,
     mediaCount,
+    mediaCounts,
     hasVideo,
     format,
     limits,
@@ -104,11 +111,19 @@ export function precheckAccount({
         reasons.push('too_many_sections');
     }
 
-    if (mediaCount > limits.maxMedia) {
+    if (account.publishing_ready === false) {
+        reasons.push('publishing_unavailable');
+    }
+
+    if (
+        (mediaCounts ?? [mediaCount]).some((count) => count > limits.maxMedia)
+    ) {
         reasons.push('too_many_media');
     }
 
-    if (mediaCount === 0 && limits.requiresMedia) {
+    if (limits.requiresVideo && !hasVideo) {
+        reasons.push('video_required');
+    } else if (mediaCount === 0 && limits.requiresMedia) {
         reasons.push('media_required');
     }
 
@@ -131,19 +146,65 @@ type PrecheckDestinationsInput = {
     media: MediaView[];
     limits: PlatformLimits[];
     formatByAccount: Record<string, PostFormat>;
+    /** Canonical segmentRef -> ordered media ids. */
+    placements?: Record<string, string[]>;
+    /** Per-account placement overrides for targets that diverged. */
+    placementsByAccount?: Record<string, Record<string, string[]>>;
+    /** Ordered segment break ids used to resolve placement refs. */
+    segmentBreaks?: string[];
 };
 
 /**
- * Every target is judged against the FULL post media set (whole-post counts),
- * not a per-segment breakdown. Per-segment media is placed per thread post
- * (post_media_placements) and rides its segment's first sub-post, but the
- * server's PublishPrecheck and the connectors still enforce media caps and the
- * video/image rule per WHOLE post (each connector uploads and caps against the
- * full `$post->media`). Counting per-segment here would let the composer
- * greenlight a post the server then blocks or truncates. Keep this whole-post
- * so the client, the server precheck, and the connectors all agree; per-segment
- * limits move here only once the server enforces them per section.
+ * Resolve this target's media counts the same way the server's publishing
+ * precheck does. Explicit placements are capped per authored thread segment;
+ * a thread-capped platform collapses them into its single published post.
+ * Legacy drafts without placements fall back to one post containing all media.
  */
+function mediaGroupingForTarget(
+    media: MediaView[],
+    limits: PlatformLimits,
+    placements: Record<string, string[]> | undefined,
+    segmentBreaks: string[],
+): { counts: number[]; hasUnplacedMedia: boolean } {
+    if (media.length === 0) {
+        return { counts: [0], hasUnplacedMedia: false };
+    }
+
+    const mediaIds = new Set(media.map((item) => item.id));
+    const placedIds = new Set<string>();
+    const validRefs = new Set(['__head__', ...segmentBreaks]);
+    const counts = new Map<string, number>();
+
+    for (const [segmentRef, ids] of Object.entries(placements ?? {})) {
+        const resolvedRef = validRefs.has(segmentRef) ? segmentRef : '__head__';
+        for (const id of ids) {
+            if (!mediaIds.has(id) || placedIds.has(id)) {
+                continue;
+            }
+            placedIds.add(id);
+            counts.set(resolvedRef, (counts.get(resolvedRef) ?? 0) + 1);
+        }
+    }
+
+    // The server drops invalid placement rows. With no surviving rows it uses
+    // its compatibility fallback and publishes the full media set together.
+    if (placedIds.size === 0) {
+        return { counts: [media.length], hasUnplacedMedia: false };
+    }
+
+    const hasUnplacedMedia = placedIds.size < media.length;
+    if (limits.threadMax !== null) {
+        return {
+            counts: [
+                [...counts.values()].reduce((sum, count) => sum + count, 0),
+            ],
+            hasUnplacedMedia,
+        };
+    }
+
+    return { counts: [...counts.values()], hasUnplacedMedia };
+}
+
 export function precheckDestinations({
     accounts,
     segments,
@@ -153,6 +214,9 @@ export function precheckDestinations({
     media,
     limits,
     formatByAccount,
+    placements,
+    placementsByAccount,
+    segmentBreaks = [],
 }: PrecheckDestinationsInput): AccountBlock[] {
     const blocks: AccountBlock[] = [];
     const mediaCount = media.length;
@@ -166,22 +230,34 @@ export function precheckDestinations({
             continue;
         }
         const accountSegments = overrideByAccount[account.id] ?? segments;
+        const mediaGrouping = mediaGroupingForTarget(
+            media,
+            platformLimits,
+            placementsByAccount?.[account.id] ?? placements,
+            segmentBreaks,
+        );
         const reasons = precheckAccount({
             account,
             segments: accountSegments,
             autoSplit: autoSplitByAccount[account.id] ?? true,
             mentions,
             mediaCount,
+            mediaCounts: mediaGrouping.counts,
             hasVideo,
             format: formatByAccount[account.id] ?? 'feed',
             limits: platformLimits,
         });
+        if (mediaGrouping.hasUnplacedMedia) {
+            reasons.push('unplaced_media');
+        }
         if (reasons.length > 0) {
             blocks.push({
                 accountId: account.id,
                 handle: account.handle,
                 platform: account.platform,
                 reasons,
+                publishingUnavailableReason:
+                    account.publishing_unavailable_reason,
             });
         }
     }
@@ -193,13 +269,21 @@ export function describeReason(
     reason: BlockReason,
     platform: PlatformName,
     limits: PlatformLimits,
+    publishingUnavailableReason?: string | null,
 ): string {
     const label = platformLabel(platform);
     switch (reason) {
         case 'empty':
             return 'add some text or media before publishing';
+        case 'publishing_unavailable':
+            return (
+                publishingUnavailableReason ??
+                `reconnect the ${label} account or enable ${label} publishing before posting`
+            );
         case 'media_required':
             return `${label} needs at least one image or video`;
+        case 'video_required':
+            return `${label} needs exactly one video`;
         case 'section_too_long': {
             const base = `over ${label}'s ${limits.maxLength.toLocaleString()}-character limit`;
 
@@ -214,6 +298,8 @@ export function describeReason(
         }
         case 'too_many_media':
             return `${label} allows only ${limits.maxMedia} media item${limits.maxMedia === 1 ? '' : 's'}`;
+        case 'unplaced_media':
+            return 'some attached media is not placed — remove it or add it to a thread section';
         case 'mixed_video_and_images':
             return 'a post can contain one video or images, not both';
         case 'video_too_long':

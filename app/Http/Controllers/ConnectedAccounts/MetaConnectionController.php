@@ -306,15 +306,17 @@ class MetaConnectionController extends Controller
     /**
      * OAuth scopes required to reach a Meta platform's DM API, requested only
      * when the instance has opted into Messages DM scopes (see `scopes()`).
-     * Mirrors `OAuthConnectionController::directMessageScopeDeltas()`.
+     * Facebook Login uses the Graph API permission names (which differ from
+     * direct Instagram Login) and needs Page webhook-management permission for
+     * both Messenger and linked-Instagram conversations.
      *
      * @return list<string>
      */
     private function directMessageScopeDeltas(Platform $platform): array
     {
         return match ($platform) {
-            Platform::Instagram => ['instagram_business_manage_messages'],
-            Platform::Facebook => ['pages_messaging'],
+            Platform::Instagram => ['instagram_manage_messages', 'pages_manage_metadata'],
+            Platform::Facebook => ['pages_messaging', 'pages_manage_metadata'],
             default => [],
         };
     }

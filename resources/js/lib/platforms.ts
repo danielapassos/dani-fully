@@ -17,13 +17,13 @@ export function platformLabel(platform: string): string {
 }
 
 export function platformKeys(
-    enabled: Record<PlatformName, boolean>,
+    enabled: Partial<Record<PlatformName, boolean>>,
 ): PlatformName[] {
     return Object.keys(enabled) as PlatformName[];
 }
 
 export function disabledPlatformLabels(
-    enabled: Record<PlatformName, boolean>,
+    enabled: Partial<Record<PlatformName, boolean>>,
 ): string[] {
     return platformKeys(enabled)
         .filter((platform) => !enabled[platform])

@@ -69,6 +69,18 @@ it('uses shared disabled platform label helpers', () => {
     expect(platformSource).toContain('Object.keys(enabled)');
 });
 
+it('derives engagement filter rows from the readiness payload', () => {
+    const filtersSource = readFileSync(
+        resolve(import.meta.dirname, 'components/reply-filters.tsx'),
+        'utf8',
+    );
+
+    expect(source).toContain('platforms={platformKeys(engagementEnabled)}');
+    expect(filtersSource).toContain('platforms.map((platform)');
+    expect(filtersSource).toContain('platformLabel(platform)');
+    expect(filtersSource).not.toContain('const PLATFORMS');
+});
+
 it('pins the engagement desk to the viewport, allowing for the inset margin', () => {
     // The sidebar `variant="inset"` gives the <main> an md+ `m-2` (1rem of
     // vertical margin), so the desk subtracts an extra rem on md+ to avoid

@@ -8,6 +8,7 @@ use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Media\PublicMediaUrl;
 use App\Services\Publishing\Connectors\TikTokConnector;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -84,6 +85,31 @@ test('tiktok transfers one video and keeps the target processing until native fi
         && $request['source_info']['video_url'] === 'https://media.example.test/video.mp4');
 });
 
+test('tiktok persists a manual-review gate when the inbox init response is lost', function () {
+    Http::fake(fn () => throw new ConnectionException('connection lost after inbox init'));
+
+    $video = PostMedia::factory()->video()->create();
+    $context = tiktokPublishContext([$video]);
+    $connector = tiktokPublishConnector();
+    $result = $connector->publish($context);
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse()
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['init_outcome_unknown'])->toBeTrue();
+
+    $retryCalledProvider = false;
+    Http::fake(function () use (&$retryCalledProvider) {
+        $retryCalledProvider = true;
+
+        return Http::response([], 500);
+    });
+
+    $retry = $connector->publish($context);
+
+    expect($retry->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($retryCalledProvider)->toBeFalse();
+});
+
 test('tiktok resumes the stored publish and records the public video id', function () {
     Http::fake([
         'https://open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response([
@@ -107,6 +133,79 @@ test('tiktok resumes the stored publish and records the public video id', functi
         ->and($result->remoteIds)->toBe(['7390000000000000042']);
 
     Http::assertSentCount(1);
+});
+
+test('tiktok completes a non-public post without storing the publish tracker as a video id', function () {
+    Http::fake([
+        'https://open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response([
+            'data' => [
+                'status' => 'PUBLISH_COMPLETE',
+                'publicaly_available_post_id' => ['', null],
+            ],
+            'error' => ['code' => 'ok'],
+        ]),
+    ]);
+
+    $video = PostMedia::factory()->video()->create();
+    $context = tiktokPublishContext([$video], [
+        'media_upload_state' => [
+            $video->id => ['remote_ref' => 'publish-42', 'state' => 'processing'],
+        ],
+    ]);
+    $result = tiktokPublishConnector()->publish($context);
+
+    expect($result->isSuccessful())->toBeTrue()
+        ->and($result->remoteIds)->toBe([])
+        ->and($context->target->fresh()->media_upload_state[$video->id]['remote_ref'])->toBe('publish-42');
+
+    Http::assertSentCount(1);
+});
+
+test('tiktok clears a failed publish tracker before retrying a documented transient failure', function () {
+    Http::fake([
+        'https://open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response([
+            'data' => [
+                'status' => 'FAILED',
+                'fail_reason' => 'video_pull_failed',
+            ],
+            'error' => ['code' => 'ok'],
+        ]),
+    ]);
+
+    $video = PostMedia::factory()->video()->create();
+    $context = tiktokPublishContext([$video], [
+        'media_upload_state' => [
+            $video->id => ['remote_ref' => 'publish-42', 'state' => 'processing'],
+        ],
+    ]);
+    $result = tiktokPublishConnector()->publish($context);
+
+    expect($result->errorKind)->toBe(ErrorKind::ServerError)
+        ->and($result->retryAfter)->toBe(30)
+        ->and($context->target->fresh()->media_upload_state)->not->toHaveKey($video->id);
+});
+
+test('tiktok marks removed creator access as an authentication failure', function () {
+    Http::fake([
+        'https://open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response([
+            'data' => [
+                'status' => 'FAILED',
+                'fail_reason' => 'auth_removed',
+            ],
+            'error' => ['code' => 'ok'],
+        ]),
+    ]);
+
+    $video = PostMedia::factory()->video()->create();
+    $context = tiktokPublishContext([$video], [
+        'media_upload_state' => [
+            $video->id => ['remote_ref' => 'publish-42', 'state' => 'processing'],
+        ],
+    ]);
+    $result = tiktokPublishConnector()->publish($context);
+
+    expect($result->errorKind)->toBe(ErrorKind::AuthExpired)
+        ->and($result->errorMessage)->toContain('reconnect');
 });
 
 test('tiktok rejects anything other than one video', function () {

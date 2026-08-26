@@ -76,7 +76,9 @@ class PublishPrecheck
 
         $messages = array_map(static fn (string $issue): string => match ($issue) {
             'empty' => 'Add text or media before publishing.',
+            'publishing_unavailable' => "Reconnect the {$label} account or enable {$label} publishing before posting.",
             'media_required' => "{$label} needs at least one image or video.",
+            'video_required' => "{$label} needs exactly one video for this publishing flow.",
             'section_too_long' => "A section is over {$label}'s length limit.",
             'too_many_sections' => "Too many thread sections for {$label}.",
             'too_many_media' => "Too many media items for {$label}.",
@@ -118,7 +120,13 @@ class PublishPrecheck
             $target->account?->maxTextLength(),
         );
 
-        if ($media->count() === 0 && $platform->requiresMedia()) {
+        if (! $target->account?->canPublish()) {
+            $issues[] = 'publishing_unavailable';
+        }
+
+        if ($platform->requiresVideo() && ! $media->contains(fn (PostMedia $item): bool => $item->isVideo())) {
+            $issues[] = 'video_required';
+        } elseif ($media->count() === 0 && $platform->requiresMedia()) {
             $issues[] = 'media_required';
         }
 

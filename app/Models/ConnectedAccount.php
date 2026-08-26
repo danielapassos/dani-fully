@@ -8,6 +8,7 @@ use App\Concerns\HasWorkspaceScope;
 use App\Enums\ConnectedAccountStatus;
 use App\Enums\MetricsStatus;
 use App\Enums\Platform;
+use App\Support\InstanceSettings;
 use Carbon\CarbonImmutable;
 use Database\Factories\ConnectedAccountFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -175,6 +176,61 @@ class ConnectedAccount extends Model
     public function isDisabled(): bool
     {
         return $this->disabled_at !== null;
+    }
+
+    /**
+     * Whether this particular connection is safe to target for publishing.
+     * TikTok and YouTube can be connected read-only before their upload scopes
+     * are enabled, so both the instance flag and the scope actually granted to
+     * this account must be present. Existing read-only connections then get an
+     * explicit reconnect gate instead of failing after a post is dispatched.
+     */
+    public function canPublish(): bool
+    {
+        if ($this->isDisabled() || $this->status !== ConnectedAccountStatus::Active) {
+            return false;
+        }
+
+        if (! app(InstanceSettings::class)->platformAvailable($this->platform)) {
+            return false;
+        }
+
+        if (! $this->platform->publishingEnabled()) {
+            return false;
+        }
+
+        $requiredScope = $this->platform->requiredPublishingScope();
+        if ($requiredScope === null) {
+            return true;
+        }
+
+        return in_array($requiredScope, (array) ($this->capabilities['oauth_scopes'] ?? []), true);
+    }
+
+    public function publishingUnavailableReason(): ?string
+    {
+        if ($this->isDisabled()) {
+            return 'This account is disabled. Re-enable it before posting.';
+        }
+
+        if ($this->status !== ConnectedAccountStatus::Active) {
+            return "Reconnect {$this->handle} before posting.";
+        }
+
+        if (! app(InstanceSettings::class)->platformAvailable($this->platform)) {
+            return "{$this->platform->label()} is disabled on this installation. Enable it before posting.";
+        }
+
+        if (! $this->platform->publishingEnabled()) {
+            return "{$this->platform->label()} publishing is not enabled on this installation yet.";
+        }
+
+        $requiredScope = $this->platform->requiredPublishingScope();
+        if ($requiredScope !== null && ! in_array($requiredScope, (array) ($this->capabilities['oauth_scopes'] ?? []), true)) {
+            return "Reconnect {$this->handle} to grant {$this->platform->label()} video upload access.";
+        }
+
+        return null;
     }
 
     /**

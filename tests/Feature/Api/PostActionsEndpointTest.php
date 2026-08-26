@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\ErrorKind;
 use App\Enums\PostTargetStatus;
+use App\Jobs\PublishPostTarget;
 use App\Models\Post;
 use App\Models\PostTarget;
 use Illuminate\Support\Facades\Queue;
@@ -59,6 +61,23 @@ test('retrying a failed target dispatches and returns 202', function () {
         ->assertJsonPath('status', 'queued');
 
     expect($target->fresh()->status)->toBe(PostTargetStatus::Pending);
+});
+
+test('retrying an unconfirmed provider outcome is rejected for manual review', function () {
+    Queue::fake();
+    [$user, $workspace, $token] = issuedKey();
+    $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
+    $target = PostTarget::factory()->for($post)->failed()->create([
+        'error_kind' => ErrorKind::Unknown->value,
+    ]);
+
+    $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/targets/{$target->id}/retry")
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'The provider outcome is unconfirmed and may already be live. Check the connected platform before taking any further action.');
+
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::Unknown);
+    Queue::assertNotPushed(PublishPostTarget::class);
 });
 
 test('retrying a non-failed target is rejected', function () {

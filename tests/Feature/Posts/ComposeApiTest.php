@@ -4,10 +4,15 @@ use App\Enums\Platform;
 use App\Enums\WorkspaceRole;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
+use App\Models\PostMedia;
+use App\Models\PostMediaPlacement;
+use App\Models\PostTarget;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
 use App\Models\WorkspaceMention;
+use App\Support\InstanceSettings;
+use Illuminate\Support\Collection;
 use Inertia\Testing\AssertableInertia;
 
 function actingMember(int $accounts = 2): array
@@ -108,6 +113,105 @@ test('PUT /posts/{post} autosaves edits and returns the new baseline', function 
     ]);
 
     $response->assertOk()->assertJsonPath('post.base_text', 'edited');
+});
+
+test('PUT text autosave preserves a targeted disabled account with its override and placements', function () {
+    [$user, $workspace] = actingMember(0);
+    $account = ConnectedAccount::factory()->disabled()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::X,
+        'handle' => '@disabled-draft-target',
+    ]);
+    $post = Post::factory()->create([
+        'workspace_id' => $workspace->id,
+        'author_id' => $user->id,
+        'segments' => ['canonical before'],
+        'base_text' => 'canonical before',
+    ]);
+    $media = PostMedia::factory()->create([
+        'workspace_id' => $workspace->id,
+        'post_id' => $post->id,
+    ]);
+    $override = ['segments' => ['disabled custom copy'], 'media_ids' => [$media->id]];
+    $target = PostTarget::factory()->create([
+        'post_id' => $post->id,
+        'connected_account_id' => $account->id,
+        'platform' => Platform::X,
+        'sections' => ['disabled custom copy'],
+        'content_override' => $override,
+        'segment_breaks' => ['disabled-break'],
+        'section_sources' => [0],
+    ]);
+    PostMediaPlacement::factory()->create([
+        'post_target_id' => $target->id,
+        'post_media_id' => $media->id,
+        'segment_ref' => 'disabled-break',
+        'position' => 0,
+    ]);
+
+    test()->putJson("/posts/{$post->id}", [
+        'segments' => ['canonical after'],
+        'destination' => ['kind' => 'all'],
+        'expected_updated_at' => $post->updated_at->toIso8601String(),
+    ])->assertOk();
+
+    $preserved = PostTarget::withoutGlobalScopes()->find($target->id);
+    expect($preserved)->not->toBeNull()
+        ->and($preserved->content_override)->toBe($override)
+        ->and($preserved->sections)->toBe(['disabled custom copy'])
+        ->and($preserved->segment_breaks)->toBe(['disabled-break'])
+        ->and($preserved->placements()->count())->toBe(1)
+        ->and($preserved->placements()->firstOrFail()->segment_ref)->toBe('disabled-break');
+});
+
+test('PUT text autosave preserves a targeted frozen-platform account with its override and placements', function () {
+    [$user, $workspace] = actingMember(0);
+    $account = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::X,
+        'handle' => '@frozen-draft-target',
+    ]);
+    $post = Post::factory()->create([
+        'workspace_id' => $workspace->id,
+        'author_id' => $user->id,
+        'segments' => ['canonical before'],
+        'base_text' => 'canonical before',
+    ]);
+    $media = PostMedia::factory()->create([
+        'workspace_id' => $workspace->id,
+        'post_id' => $post->id,
+    ]);
+    $override = ['segments' => ['frozen custom copy'], 'media_ids' => [$media->id]];
+    $target = PostTarget::factory()->create([
+        'post_id' => $post->id,
+        'connected_account_id' => $account->id,
+        'platform' => Platform::X,
+        'sections' => ['frozen custom copy'],
+        'content_override' => $override,
+        'segment_breaks' => ['frozen-break'],
+        'section_sources' => [0],
+    ]);
+    PostMediaPlacement::factory()->create([
+        'post_target_id' => $target->id,
+        'post_media_id' => $media->id,
+        'segment_ref' => 'frozen-break',
+        'position' => 0,
+    ]);
+    app(InstanceSettings::class)->update(['platforms_enabled' => ['x' => false]]);
+
+    test()->putJson("/posts/{$post->id}", [
+        'segments' => ['canonical after'],
+        'destination' => ['kind' => 'all'],
+        'expected_updated_at' => $post->updated_at->toIso8601String(),
+    ])->assertOk();
+
+    $preserved = PostTarget::withoutGlobalScopes()->find($target->id);
+    expect($preserved)->not->toBeNull()
+        ->and($preserved->content_override)->toBe($override)
+        ->and($preserved->sections)->toBe(['frozen custom copy'])
+        ->and($preserved->segment_breaks)->toBe(['frozen-break'])
+        ->and($preserved->placements()->count())->toBe(1)
+        ->and($preserved->placements()->firstOrFail()->segment_ref)->toBe('frozen-break');
 });
 
 test('POST /posts accepts the real client payload with segments and no base_text', function () {
@@ -233,7 +337,81 @@ test('GET /posts/{post} renders the composer page for an existing post', functio
             ->where('post.id', $post->id)
             ->where('post.base_text', 'hello')
             ->where('accounts.0.status', 'needs_attention')
+            ->where('accounts.0.publishing_ready', false)
+            ->where('accounts.0.publishing_unavailable_reason', fn (string $reason): bool => str_contains($reason, 'Reconnect'))
             ->where('accounts.0.auto_repost_enabled', true));
+});
+
+test('GET /posts/{post} preserves a targeted disabled account without advertising other disabled accounts', function () {
+    [$user, $workspace, $accounts] = actingMember(1);
+    $targeted = ConnectedAccount::factory()->disabled()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::X,
+        'handle' => '@targeted-disabled',
+    ]);
+    $unrelated = ConnectedAccount::factory()->disabled()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::X,
+        'handle' => '@unrelated-disabled',
+    ]);
+    $post = Post::factory()->create(['workspace_id' => $workspace->id]);
+    PostTarget::factory()->create([
+        'post_id' => $post->id,
+        'connected_account_id' => $targeted->id,
+        'platform' => Platform::X,
+    ]);
+
+    test()->get("/posts/{$post->id}")
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('accounts', function (Collection $items) use ($accounts, $targeted, $unrelated): bool {
+                $byId = $items->keyBy('id');
+
+                return $byId->has($accounts[0]->id)
+                    && $byId->has($targeted->id)
+                    && ! $byId->has($unrelated->id)
+                    && $byId[$targeted->id]['publishing_ready'] === false
+                    && str_contains($byId[$targeted->id]['publishing_unavailable_reason'], 'Re-enable');
+            }));
+});
+
+test('GET /posts/{post} preserves a targeted account on a frozen platform without advertising other frozen accounts', function () {
+    [$user, $workspace] = actingMember(0);
+    $targeted = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::X,
+        'handle' => '@targeted-frozen',
+    ]);
+    $unrelated = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::X,
+        'handle' => '@unrelated-frozen',
+    ]);
+    $available = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::Bluesky,
+        'handle' => '@available',
+    ]);
+    $post = Post::factory()->create(['workspace_id' => $workspace->id]);
+    PostTarget::factory()->create([
+        'post_id' => $post->id,
+        'connected_account_id' => $targeted->id,
+        'platform' => Platform::X,
+    ]);
+    app(InstanceSettings::class)->update(['platforms_enabled' => ['x' => false]]);
+
+    test()->get("/posts/{$post->id}")
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('accounts', function (Collection $items) use ($targeted, $unrelated, $available): bool {
+                $byId = $items->keyBy('id');
+
+                return $byId->has($targeted->id)
+                    && ! $byId->has($unrelated->id)
+                    && $byId->has($available->id)
+                    && $byId[$targeted->id]['publishing_ready'] === false
+                    && str_contains($byId[$targeted->id]['publishing_unavailable_reason'], 'disabled on this installation');
+            }));
 });
 
 test('GET /posts/{post} includes saved workspace mentions', function () {

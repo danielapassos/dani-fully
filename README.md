@@ -6,7 +6,7 @@
 
 **An open-source, self-hostable alternative to Buffer, Typefully & Hootsuite.**
 
-Write once, publish everywhere. Schedule posts to X, Bluesky, LinkedIn, Facebook, Instagram, Threads, and Discord from one calendar — on your own server, with your own data.
+Write once, publish everywhere. Schedule posts to X, Bluesky, LinkedIn, Facebook, Instagram, TikTok, YouTube, Threads, and Discord from one calendar — on your own server, with your own data.
 
 [![License](https://img.shields.io/github/license/coollabsio/shoutrrr?style=for-the-badge&color=4c1)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/coollabsio/shoutrrr?style=for-the-badge&logo=github&color=f5c518)](https://github.com/coollabsio/shoutrrr/stargazers)
@@ -43,7 +43,9 @@ It's built for individuals and teams: invite collaborators into a shared workspa
 | **Bluesky**      | ATProto OAuth or app passwords | ✅ (≤300 graphemes, up to 4 images or 1 video)            | ✅              | likes, reposts, replies              |
 | **LinkedIn**     | OAuth 2.0 (OIDC)               | ✅ (≤3000 chars, up to 9 images or 1 video)               | — (single post) | not available for personal accounts  |
 | **Facebook** (Pages) | OAuth 2.0 (Facebook Login) | ✅ (≤63,206 chars, up to 10 images or 1 video)            | — (single post) | likes, comments, shares, impressions |
-| **Instagram**    | OAuth 2.0 (Facebook Login)     | ✅ (media required, ≤2,200 chars, up to 10 images or 1 video/Reel) | — (single post) | likes, comments, shares, views       |
+| **Instagram**    | Instagram Login or Facebook Login | ✅ (media required, ≤2,200 chars, up to 10 images or 1 video/Reel) | — (single post) | likes, comments, shares, views       |
+| **TikTok**       | OAuth 2.0                      | Creator-inbox video handoff; creator finishes natively           | — (single post) | views, likes, comments, shares       |
+| **YouTube**      | Google OAuth 2.0               | ✅ resumable video upload (private by default)                    | — (single post) | views, likes, comments               |
 | **Threads**      | OAuth 2.0                      | ✅ (≤500 chars, up to 10 images or 1 video)               | ✅              | likes, replies, reposts, views       |
 | **Discord**      | Channel webhook URL            | ✅ (≤2000 chars, up to 10 files ≤10 MiB)                  | ✅              | reactions                            |
 
@@ -53,17 +55,17 @@ It's built for individuals and teams: invite collaborators into a shared workspa
 - 🚀 **Multi-account publishing** — fan one post out to many accounts at once, with optional per-platform overrides. Each target publishes independently and retries on failure.
 - 🗓️ **Queue & calendar** — set recurring posting slots (in your workspace's timezone), drop drafts into the queue, and review everything on a month calendar. Publish instantly whenever you like.
 - 📊 **Analytics** — follower and post-count trends per account, plus per-post engagement (likes, reposts, replies, impressions) where the provider API supports it.
-- 🔗 **Connected accounts** — link accounts via OAuth (X, LinkedIn) or app password (Bluesky), group them into reusable sets, and get nudged when one needs reconnecting. Tokens are stored encrypted and refreshed automatically; a successful authenticated X tier refresh also restores a stale attention state.
+- 🔗 **Connected accounts** — link accounts via OAuth (X, LinkedIn, Meta, TikTok, YouTube) or app password (Bluesky), group them into reusable sets, and get nudged when one needs reconnecting. Tokens are stored encrypted and refreshed automatically; a successful authenticated X tier refresh also restores a stale attention state.
 - 👥 **Workspaces & team** — multiple workspaces with role-based memberships, email invitations, and ownership transfer. Every bit of data is scoped to its workspace.
 - 🔔 **Notifications** — in-app alerts when a post publishes or fails, or when an account needs attention.
 - 🔐 **Secure by default** — email/password with verification, two-factor (TOTP), passkeys (WebAuthn), and optional social login (Google, X, LinkedIn).
 
 ## Self-hosting
 
-The recommended way to host Shoutrrr is the prebuilt Docker image:
+The recommended way to host this fork on one server is its prebuilt Docker image:
 
 ```bash
-docker pull ghcr.io/coollabsio/shoutrrr:latest
+docker pull ghcr.io/danielapassos/dani-fully:latest
 ```
 
 The image runs the web app, queue worker, and scheduler in one container — ideal for a single box. It defaults to SQLite with no external services, and you can switch to Postgres/Redis later if you need to scale out.
@@ -82,7 +84,7 @@ EOF
 Generate an `APP_KEY` and paste it into `.env.prod`:
 
 ```bash
-docker run --rm --entrypoint php ghcr.io/coollabsio/shoutrrr:latest /var/www/html/artisan key:generate --show
+docker run --rm --entrypoint php ghcr.io/danielapassos/dani-fully:latest /var/www/html/artisan key:generate --show
 ```
 
 Start Shoutrrr with persistent volumes:
@@ -97,7 +99,7 @@ docker run -d \
   -p 8080:8080 \
   -v shoutrrr-storage:/var/www/html/storage \
   -v shoutrrr-sqlite:/var/www/html/database/sqlite \
-  ghcr.io/coollabsio/shoutrrr:latest
+  ghcr.io/danielapassos/dani-fully:latest
 ```
 
 Shoutrrr runs its startup tasks automatically, including database migrations. Open `http://localhost:8080`, register the first account, and you're in. The image defaults to production mode, SQLite, database-backed cache/queue/session storage, one in-container queue worker, one scheduler, and SSR disabled.
@@ -115,20 +117,20 @@ docker volume rm shoutrrr-storage shoutrrr-sqlite
 
 ### Docker Compose
 
-If you prefer Compose, use the bundled production file. It pulls the prebuilt image from GHCR (`ghcr.io/coollabsio/shoutrrr:latest`):
+If you prefer Compose, use the bundled production file. `SHOUTRRR_IMAGE` makes the image source explicit so a fork checkout cannot silently run upstream code:
 
 ```bash
-git clone https://github.com/coollabsio/shoutrrr.git
-cd shoutrrr
+git clone https://github.com/danielapassos/dani-fully.git
+cd dani-fully
 cp .env.example.prod .env
 
-# Set APP_KEY and APP_URL in .env before starting.
+# Set APP_KEY, APP_URL, and SHOUTRRR_IMAGE in .env before starting.
 docker compose -f docker-compose.production.yaml run --rm app php artisan key:generate --show
 
 docker compose -f docker-compose.production.yaml up -d
 ```
 
-Shoutrrr runs its startup tasks automatically, including database migrations. `docker-compose.development.yaml` builds the image locally from source instead.
+Shoutrrr runs its startup tasks automatically, including database migrations. The production template also enables first-use Passport key generation; the generated pair lives on the persistent `storage` volume, so API/MCP tokens survive redeploys on this single-server setup. `docker-compose.development.yaml` builds the image locally from source instead.
 
 Set `INERTIA_SSR_ENABLED=true` for server-side rendering. To run the worker/scheduler as separate services in the cloud, set `QUEUE_WORKER_ENABLED=false` / `SCHEDULER_ENABLED=false` and override the container command (e.g. `php artisan queue:work`).
 
@@ -138,7 +140,7 @@ Set `INERTIA_SSR_ENABLED=true` for server-side rendering. To run the worker/sche
 
 > An official Shoutrrr app is coming to the Coolify app directory soon for one-click deploys. Until then, use the manual from-source method below.
 
-1. In Coolify, click **+ New → Resource** and pick **Public Repository** (or Private, via the GitHub App). Enter `https://github.com/coollabsio/shoutrrr`.
+1. In Coolify, click **+ New → Resource** and pick **Public Repository** (or Private, via the GitHub App). Enter `https://github.com/danielapassos/dani-fully`.
 2. Set the **Build Pack** to **Docker Compose** and the **Docker Compose file** to `docker-compose.production.yaml`.
 3. Under the `app` service, add a **Domain** pointing at port **8080**. Coolify provisions the TLS certificate automatically.
 4. Add these **Environment Variables**:
@@ -149,12 +151,26 @@ Set `INERTIA_SSR_ENABLED=true` for server-side rendering. To run the worker/sche
     | `APP_URL`   | your domain, e.g. `https://social.example.com` (must match the domain above) |
     | `APP_ENV`   | `production`                                                                 |
     | `APP_DEBUG` | `false`                                                                      |
+    | `SHOUTRRR_IMAGE` | `ghcr.io/danielapassos/dani-fully:latest`                            |
 
-    Add your `X_*`, `LINKEDIN_*`, `FACEBOOK_*`, `THREADS_*`, and optional `GOOGLE_*` credentials here too (see [Connecting your accounts](#connecting-your-accounts)).
+    Add your `X_*`, `LINKEDIN_*`, `FACEBOOK_*`, `INSTAGRAM_*`, `TIKTOK_*`, `THREADS_*`, and `GOOGLE_*`/`YOUTUBE_*` credentials here too (see [Connecting your accounts](#connecting-your-accounts)).
 
 5. Click **Deploy**.
 
 The Compose file declares named volumes for `storage` and the SQLite database, so your data and uploads survive redeploys. To run against managed Postgres/Redis instead, point the `DB_*` / `REDIS_*` env vars at them and switch `DB_CONNECTION`, `CACHE_STORE`, and `QUEUE_CONNECTION` accordingly.
+
+### Deploy on Laravel Cloud (no Docker required)
+
+Laravel Cloud builds this repository and runs the web app, scheduler, and queues as managed services, so Docker does not need to run on your Mac. Connect this GitHub repository, then:
+
+1. Attach Postgres, a cache, and an object-storage bucket. Configure the bucket through the existing `s3` disk and set `FILESYSTEM_DISK=s3`; if you add another named S3-compatible disk in `config/filesystems.php`, that configured name is supported too.
+2. Use a **public** bucket for media providers that fetch by URL. Copy the bucket's public URL from Cloud into `PUBLIC_MEDIA_URL` (Cloud displays this as `AWS_URL` but does not inject it automatically). Verify that exact HTTPS domain or prefix in the TikTok developer app before enabling `TIKTOK_INBOX_ENABLED`.
+3. Keep Cloud's normal Composer/PHP build steps, replace its default npm asset lines with `npm install -g bun`, `bun install --frozen-lockfile`, and `bun run build`, and run `php artisan migrate --force` as the deploy command.
+4. Enable the scheduler. Every scheduled command uses `onOneServer()`, so an autoscaled environment will not dispatch the same work from every replica.
+5. Add a managed queue. `PublishPostTarget` may run longer than 90 seconds during provider video uploads, so use a Pro managed queue or a worker cluster sized for that job.
+6. Store one stable `PASSPORT_PRIVATE_KEY` / `PASSPORT_PUBLIC_KEY` pair as secrets and keep `PASSPORT_AUTO_GENERATE_KEYS=false`. Cloud filesystems are ephemeral and not shared between replicas.
+
+`APP_URL` and every OAuth redirect must use the final HTTPS Cloud/custom domain. Instagram, TikTok, YouTube, Threads, and the other provider credentials still require their respective developer-console review and consent; attaching Cloud resources does not complete those external gates.
 
 ### Security headers & Content-Security-Policy
 
@@ -175,7 +191,7 @@ The CSP is intentionally **not** sent in `local` (`APP_ENV=local`) because it is
 - **OAuth (recommended)** — users sign in on Bluesky and authorize Shoutrrr without handing over a password. It's zero-config: Shoutrrr publishes an [ATProto OAuth](https://atproto.com/specs/oauth) client-metadata document at `${APP_URL}/oauth/bluesky/client-metadata.json` (with keys at `${APP_URL}/oauth/bluesky/jwks.json`), and Bluesky's authorization server fetches those to identify your instance. The signing key is generated once and stored encrypted — there's nothing to add to `.env`. **The one requirement:** `APP_URL` must be a public HTTPS URL, because Bluesky has to reach those two documents over the internet. (In `local` dev, Shoutrrr falls back to a loopback client so OAuth still works on `localhost`.)
 - **App password** — users paste a Bluesky [app password](https://bsky.app/settings/app-passwords). No setup, and it works anywhere — including private or LAN deployments Bluesky can't reach for OAuth.
 
-**X**, **LinkedIn**, and the **Meta** platforms (Facebook, Instagram, Threads) publish through your own developer app, so you'll register one with each provider and add the credentials to `.env`. The redirect URIs must match what you register (they default to `${APP_URL}/...`):
+**X**, **LinkedIn**, the **Meta** platforms, **TikTok**, and **YouTube** use your own developer apps, so register each callback and add the credentials to `.env`. The redirect URIs must exactly match the public HTTPS URLs:
 
 ```dotenv
 # X — https://developer.x.com
@@ -188,18 +204,33 @@ LINKEDIN_CLIENT_ID=
 LINKEDIN_CLIENT_SECRET=
 LINKEDIN_REDIRECT_URI="${APP_URL}/accounts/callback/linkedin"
 
-# Facebook + Instagram — one Meta app (https://developers.facebook.com).
-# Instagram accounts are discovered via their linked Facebook Pages, so both
-# platforms share these credentials. Publishing to non-test accounts requires
-# Meta App Review + Business Verification.
+# Facebook + linked Instagram — one Meta app (https://developers.facebook.com).
 FACEBOOK_CLIENT_ID=
 FACEBOOK_CLIENT_SECRET=
 FACEBOOK_REDIRECT_URI="${APP_URL}/accounts/callback/meta"
+
+# Direct Instagram Login — Business/Creator accounts, no linked Page required.
+INSTAGRAM_APP_ID=
+INSTAGRAM_APP_SECRET=
+INSTAGRAM_REDIRECT_URI="${APP_URL}/accounts/callback/instagram"
 
 # Threads — a separate Meta app (https://developers.facebook.com).
 THREADS_CLIENT_ID=
 THREADS_CLIENT_SECRET=
 THREADS_REDIRECT_URI="${APP_URL}/accounts/callback/threads"
+
+# TikTok — creator-inbox handoff; requires app review + verified PUBLIC_MEDIA_URL.
+TIKTOK_CLIENT_KEY=
+TIKTOK_CLIENT_SECRET=
+TIKTOK_REDIRECT_URI="${APP_URL}/accounts/callback/tiktok"
+TIKTOK_INBOX_ENABLED=false
+
+# YouTube — shares the Google client credentials below, with its own callback.
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+YOUTUBE_REDIRECT_URI="${APP_URL}/accounts/callback/youtube"
+YOUTUBE_PUBLISHING_ENABLED=false
+YOUTUBE_PRIVACY_STATUS=private
 ```
 
 Optionally, let people sign in with a social account instead of a password:
@@ -250,7 +281,9 @@ A post is composed once, then split into one **target** per connected account. T
 
 ### API & MCP tokens
 
-The REST API and MCP integration authenticate with bearer tokens minted by [Laravel Passport](https://laravel.com/docs/passport), which signs and verifies every token with an RSA keypair. **You don't need to provision these keys** — the first time a workspace issues an API key, Shoutrrr generates the pair automatically (`ApiKeyManager::ensureEncryptionKeysExist()` runs `passport:keys`) and stores it in `storage/oauth-private.key` / `oauth-public.key`. The bundled Docker setups persist `storage` on a named volume, so the keys survive redeploys.
+The REST API and MCP integration authenticate with bearer tokens minted by [Laravel Passport](https://laravel.com/docs/passport), which signs and verifies every token with an RSA keypair. A single-server Docker install can generate the pair automatically (`ApiKeyManager::ensureEncryptionKeysExist()` runs `passport:keys`) and store it in the persistent `storage` volume.
+
+Production environments with ephemeral storage or more than one replica must provision one shared pair through `PASSPORT_PRIVATE_KEY` and `PASSPORT_PUBLIC_KEY`, then set `PASSPORT_AUTO_GENERATE_KEYS=false`. Otherwise one replica can mint tokens that another replica cannot verify, and a redeploy can invalidate every existing API/MCP token.
 
 If you'd rather provision them explicitly — for example to share one keypair across multiple app instances behind a load balancer — do either of the following before issuing keys:
 

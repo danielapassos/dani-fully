@@ -81,7 +81,7 @@ type PageProps = {
     replies?: { data: ReplyItem[] };
     filters: EngagementFilters;
     facets: { accounts: AccountFacet[]; posts: PostFacet[] };
-    engagementEnabled: Record<PlatformName, boolean>;
+    engagementEnabled: Partial<Record<PlatformName, boolean>>;
     linkedinCommunityManagementEnabled: boolean;
     savedMentions: WorkspaceMention[];
 };
@@ -861,6 +861,7 @@ export default function EngagementIndex({
                             filters={filters}
                             accounts={facets.accounts}
                             posts={facets.posts}
+                            platforms={platformKeys(engagementEnabled)}
                         />
                     </div>
                     <div className="relative min-h-0 flex-1">

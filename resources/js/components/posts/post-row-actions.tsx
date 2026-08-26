@@ -20,7 +20,7 @@ import {
 import { MoreHorizontal } from '@/components/ui/icons';
 import { useSchedulingTimezone } from '@/hooks/posts/use-scheduling-timezone';
 import { removeById, replaceById } from '@/lib/optimistic';
-import { postCapabilities } from '@/lib/posts/capabilities';
+import { postCapabilities, targetCanRetry } from '@/lib/posts/capabilities';
 import { retry as retryRoute } from '@/routes/posts/targets';
 import type { PostView } from '@/types/compose';
 
@@ -153,7 +153,9 @@ export function PostRowActions({ post }: Props) {
     }
 
     function handleRetry() {
-        const failedTarget = post.targets.find((t) => t.status === 'failed');
+        const failedTarget = post.targets.find(
+            (target) => target.status === 'failed' && targetCanRetry(target),
+        );
         if (!failedTarget) {
             return;
         }

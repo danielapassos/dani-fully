@@ -18,8 +18,10 @@ test('meta scopes include ig and fb dm scopes when direct messages enabled', fun
     })->call($controller);
 
     expect($scopes)
-        ->toContain('instagram_business_manage_messages')
-        ->toContain('pages_messaging');
+        ->toContain('instagram_manage_messages')
+        ->toContain('pages_messaging')
+        ->toContain('pages_manage_metadata')
+        ->not->toContain('instagram_business_manage_messages');
 });
 
 test('meta scopes keep instagram dm permission gated until provider approval', function () {
@@ -34,7 +36,7 @@ test('meta scopes keep instagram dm permission gated until provider approval', f
     })->call($controller);
 
     expect($scopes)
-        ->not->toContain('instagram_business_manage_messages')
+        ->not->toContain('instagram_manage_messages')
         ->toContain('pages_messaging');
 });
 
@@ -49,7 +51,7 @@ test('meta scopes exclude ig and fb dm scopes when direct messages disabled', fu
     })->call($controller);
 
     expect($scopes)
-        ->not->toContain('instagram_business_manage_messages')
+        ->not->toContain('instagram_manage_messages')
         ->not->toContain('pages_messaging');
 });
 

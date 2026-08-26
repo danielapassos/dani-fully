@@ -15,6 +15,7 @@ use App\Models\WorkspaceMention;
 use App\Support\InstanceSettings;
 use App\Support\MetricsPresenter;
 use App\Support\PostView;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -26,11 +27,22 @@ class ComposerController extends Controller
         $request->user()->can('viewAny', Post::class) ?: abort(403);
         $defaultAccountId = $request->user()->currentWorkspace()->value('default_connected_account_id');
         $settings = app(InstanceSettings::class);
+        $targetAccountIds = $post->targets()
+            ->pluck('connected_account_id')
+            ->map(static fn (mixed $id): string => (string) $id)
+            ->all();
+        $targetAccountLookup = array_fill_keys($targetAccountIds, true);
 
         $accounts = ConnectedAccount::query()
-            ->enabled()
+            ->where(function (Builder $query) use ($targetAccountIds): void {
+                $query->whereNull('disabled_at');
+                if ($targetAccountIds !== []) {
+                    $query->orWhereIn('id', $targetAccountIds);
+                }
+            })
             ->get()
-            ->filter(fn (ConnectedAccount $account): bool => $settings->platformAvailable($account->platform))
+            ->filter(fn (ConnectedAccount $account): bool => isset($targetAccountLookup[$account->id])
+                || $settings->platformAvailable($account->platform))
             ->sortByDesc(fn (ConnectedAccount $account): bool => $account->id === $defaultAccountId)
             ->map(fn (ConnectedAccount $account): array => [
                 'id' => $account->id,
@@ -43,6 +55,8 @@ class ComposerController extends Controller
                 'max_video_duration_seconds' => $account->maxVideoDurationSeconds(),
                 'x_premium' => $account->hasXPremium(),
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
+                'publishing_ready' => $account->canPublish(),
+                'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
             ])->values()->all();
 
         $sets = AccountSet::query()
