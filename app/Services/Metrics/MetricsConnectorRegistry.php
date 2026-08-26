@@ -11,7 +11,9 @@ use App\Services\Metrics\Connectors\FacebookMetricsConnector;
 use App\Services\Metrics\Connectors\InstagramMetricsConnector;
 use App\Services\Metrics\Connectors\LinkedInMetricsConnector;
 use App\Services\Metrics\Connectors\ThreadsMetricsConnector;
+use App\Services\Metrics\Connectors\TikTokMetricsConnector;
 use App\Services\Metrics\Connectors\XMetricsConnector;
+use App\Services\Metrics\Connectors\YouTubeMetricsConnector;
 use App\Services\Metrics\Contracts\MetricsConnector;
 
 class MetricsConnectorRegistry
@@ -24,6 +26,8 @@ class MetricsConnectorRegistry
             Platform::LinkedIn => app(LinkedInMetricsConnector::class),
             Platform::Facebook => app(FacebookMetricsConnector::class),
             Platform::Instagram => app(InstagramMetricsConnector::class),
+            Platform::TikTok => app(TikTokMetricsConnector::class),
+            Platform::YouTube => app(YouTubeMetricsConnector::class),
             Platform::Threads => app(ThreadsMetricsConnector::class),
             Platform::Discord => app(DiscordMetricsConnector::class),
         };

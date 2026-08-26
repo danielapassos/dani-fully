@@ -42,10 +42,18 @@ test('redirect 404s for an unknown or app-password platform', function () {
     test()->get('/accounts/connect/myspace')->assertNotFound();
 });
 
-test('redirect 404s for instagram on the generic route even though it is launched', function () {
-    // Instagram is launched, but it shares a single Facebook Login + Page
-    // selection flow with Facebook via MetaConnectionController. The
-    // generic single-step per-platform route must never handle it.
+test('redirect sends direct instagram login through the generic route', function () {
+    config()->set('services.instagram.client_id', 'instagram-id');
+    config()->set('services.instagram.client_secret', 'instagram-secret');
+    ownerActingIn();
+    fakeOAuthUser('instagram', ['id' => 'ig-1']);
+
+    test()->get('/accounts/connect/instagram')->assertRedirect('https://provider.test/oauth');
+});
+
+test('redirect 404s for instagram when only the linked page flow is configured', function () {
+    config()->set('services.instagram.client_id', null);
+    config()->set('services.instagram.client_secret', null);
     config()->set('services.facebook.client_id', 'cid');
     config()->set('services.facebook.client_secret', 'secret');
     ownerActingIn();
@@ -175,6 +183,38 @@ test('callback maps a linkedin-openid user', function () {
     expect($account->platform)->toBe(Platform::LinkedIn)
         ->and($account->handle)->toBe('Grace Hopper')
         ->and($account->token_expires_at)->not->toBeNull();
+});
+
+test('callback persists a direct instagram account and its connection flow', function () {
+    config()->set('services.instagram.client_id', 'instagram-id');
+    config()->set('services.instagram.client_secret', 'instagram-secret');
+    [$user, $workspace] = ownerActingIn();
+    fakeOAuthUser('instagram', [
+        'id' => 'ig-direct-1',
+        'nickname' => 'danicreator',
+        'name' => 'Dani Creator',
+        'avatar' => 'https://example.test/dani.jpg',
+        'token' => 'long-token',
+        'expiresIn' => 5_184_000,
+        'approvedScopes' => [
+            'instagram_business_basic',
+            'instagram_business_manage_insights',
+            'instagram_business_content_publish',
+            'instagram_business_manage_comments',
+        ],
+    ]);
+
+    test()->get('/accounts/callback/instagram')->assertRedirect(route('accounts.index'));
+
+    $account = ConnectedAccount::withoutGlobalScopes()->firstWhere('remote_account_id', 'ig-direct-1');
+    expect($account)->not->toBeNull()
+        ->and($account->workspace_id)->toBe($workspace->id)
+        ->and($account->platform)->toBe(Platform::Instagram)
+        ->and($account->handle)->toBe('@danicreator')
+        ->and($account->usesInstagramLogin())->toBeTrue()
+        ->and($account->secret->access_token)->toBe('long-token')
+        ->and($account->token_expires_at)->not->toBeNull()
+        ->and($account->capabilities['oauth_scopes'])->toContain('instagram_business_content_publish');
 });
 
 test('linkedin connect requests the community management feed scopes only when enabled', function () {

@@ -16,11 +16,12 @@ function instagramConnector(): InstagramEngagementConnector
     return new InstagramEngagementConnector(app(Factory::class));
 }
 
-function instagramAccount(): ConnectedAccount
+function instagramAccount(bool $direct = false): ConnectedAccount
 {
     return ConnectedAccount::factory()->create([
         'platform' => Platform::Instagram,
         'remote_account_id' => 'IGUSER1',
+        'capabilities' => $direct ? ['instagram_login' => true] : null,
     ]);
 }
 
@@ -56,6 +57,16 @@ test('fetchReplies maps comments to FetchedReply', function () {
 
     Http::assertSent(fn ($req) => str_contains($req->url(), '/MEDIA1/comments')
         && str_contains((string) $req['fields'], 'username'));
+});
+
+test('direct instagram login fetches comments from graph instagram', function () {
+    Http::fake([
+        'graph.instagram.com/*/MEDIA1/comments*' => Http::response(['data' => []]),
+    ]);
+    $target = PostTarget::factory()->create(['platform' => Platform::Instagram, 'remote_id' => 'MEDIA1']);
+
+    expect(instagramConnector()->fetchReplies(instagramAccount(true), $target, ['access_token' => 't'], null)->isOk())->toBeTrue();
+    Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://graph.instagram.com/'));
 });
 
 test('fetchReplies maps 403 to unsupported', function () {

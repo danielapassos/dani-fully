@@ -19,9 +19,13 @@ test('only discord supports the webhook connect flow', function () {
     }
 });
 
-test('discord is the only platform without engagement support', function () {
+test('write-only and publishing-only platforms have no engagement inbox', function () {
     foreach (Platform::cases() as $platform) {
-        expect($platform->supportsEngagement())->toBe($platform !== Platform::Discord);
+        expect($platform->supportsEngagement())->toBe(! in_array(
+            $platform,
+            [Platform::TikTok, Platform::YouTube, Platform::Discord],
+            true,
+        ));
     }
 });
 

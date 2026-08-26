@@ -46,6 +46,11 @@
         <link rel="icon" href="/favicon-48x48.png" type="image/png" sizes="48x48">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
         <link rel="manifest" href="/site.webmanifest">
+        <meta name="application-name" content="shoutrrr">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-status-bar-style" content="black">
+        <meta name="apple-mobile-web-app-title" content="shoutrrr">
         <meta name="theme-color" content="#101010">
 
         @fonts

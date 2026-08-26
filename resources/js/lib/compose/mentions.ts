@@ -16,6 +16,8 @@ const PLATFORMS: PlatformName[] = [
     'linkedin',
     'facebook',
     'instagram',
+    'tiktok',
+    'youtube',
     'threads',
 ];
 // Platforms whose posts auto-link a bare `@handle`, so a real @mention is worth
@@ -25,6 +27,7 @@ const MENTION_PLATFORMS = new Set<PlatformName>([
     'x',
     'bluesky',
     'instagram',
+    'tiktok',
     'threads',
 ]);
 const HANDLE_PATTERN = /(^|\s)@([a-zA-Z0-9_.-]{0,50})(?=\s|$|[.,!?;:])/g;

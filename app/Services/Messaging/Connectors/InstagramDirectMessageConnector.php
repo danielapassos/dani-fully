@@ -45,7 +45,7 @@ class InstagramDirectMessageConnector implements DirectMessageConnector
     public function fetchConversations(ConnectedAccount $account, array $credentials, ?CarbonImmutable $since): ConversationFetchResult
     {
         $token = (string) ($credentials['access_token'] ?? '');
-        $response = $this->http->acceptJson()->get($this->metaGraphBase()."/{$account->remote_account_id}/conversations", [
+        $response = $this->http->acceptJson()->get($this->metaGraphBase($account)."/{$account->remote_account_id}/conversations", [
             'platform' => self::PLATFORM_PARAM,
             'fields' => 'participants,updated_time,messages{id,from,message,created_time}',
             'limit' => 50,

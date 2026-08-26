@@ -12,6 +12,7 @@ use App\Enums\UsageCategory;
 use App\Models\ConnectedAccount;
 use App\Models\PostTarget;
 use App\Models\PostTargetReply;
+use App\Services\ConnectedAccounts\Instagram\InstagramGraphApi;
 use App\Services\Engagement\Contracts\EngagementConnector;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\RetryAfter;
@@ -41,16 +42,6 @@ class InstagramEngagementConnector implements EngagementConnector
 
     public function __construct(private readonly HttpFactory $http) {}
 
-    private function apiVersion(): string
-    {
-        return (string) config('services.facebook.graph_version');
-    }
-
-    private function baseUrl(): string
-    {
-        return sprintf('https://graph.facebook.com/%s', $this->apiVersion());
-    }
-
     public function fetchReplies(ConnectedAccount $account, PostTarget $target, array $credentials, ?CarbonImmutable $since): ReplyFetchResult
     {
         $mediaId = $target->remote_id;
@@ -65,7 +56,7 @@ class InstagramEngagementConnector implements EngagementConnector
         ];
 
         try {
-            $response = $this->http->get($this->baseUrl().'/'.$mediaId.'/comments', $query);
+            $response = $this->http->get(InstagramGraphApi::baseUrl($account).'/'.$mediaId.'/comments', $query);
         } catch (ConnectionException $e) {
             return ReplyFetchResult::failed($e->getMessage());
         }
@@ -115,7 +106,7 @@ class InstagramEngagementConnector implements EngagementConnector
         try {
             $response = $this->http
                 ->asForm()
-                ->post($this->baseUrl().'/'.$parent->remote_reply_id.'/replies', [
+                ->post(InstagramGraphApi::baseUrl($account).'/'.$parent->remote_reply_id.'/replies', [
                     'message' => $text,
                     'access_token' => (string) ($credentials['access_token'] ?? ''),
                 ]);
@@ -142,7 +133,7 @@ class InstagramEngagementConnector implements EngagementConnector
         try {
             $response = $this->http
                 ->asForm()
-                ->post($this->baseUrl().'/'.$account->remote_account_id.'/likes', [
+                ->post(InstagramGraphApi::baseUrl($account).'/'.$account->remote_account_id.'/likes', [
                     'comment_id' => $reply->remote_reply_id,
                     'access_token' => (string) ($credentials['access_token'] ?? ''),
                 ]);
@@ -158,7 +149,7 @@ class InstagramEngagementConnector implements EngagementConnector
     public function unlikeReply(ConnectedAccount $account, PostTargetReply $reply, ?string $likeRemoteId, array $credentials): ReplyActionResult
     {
         try {
-            $response = $this->http->delete($this->baseUrl().'/'.$account->remote_account_id.'/likes', [
+            $response = $this->http->delete(InstagramGraphApi::baseUrl($account).'/'.$account->remote_account_id.'/likes', [
                 'comment_id' => $reply->remote_reply_id,
                 'access_token' => (string) ($credentials['access_token'] ?? ''),
             ]);
@@ -174,7 +165,7 @@ class InstagramEngagementConnector implements EngagementConnector
     public function deleteReply(ConnectedAccount $account, PostTargetReply $reply, array $credentials): ReplyActionResult
     {
         try {
-            $response = $this->http->delete($this->baseUrl().'/'.$reply->remote_reply_id, [
+            $response = $this->http->delete(InstagramGraphApi::baseUrl($account).'/'.$reply->remote_reply_id, [
                 'access_token' => (string) ($credentials['access_token'] ?? ''),
             ]);
         } catch (ConnectionException $e) {

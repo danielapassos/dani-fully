@@ -58,3 +58,18 @@ test('fetchAccount maps followers_count and media_count', function () {
     expect($r->followers)->toBe(42);
     expect($r->postsCount)->toBe(7);
 });
+
+test('direct instagram login fetches account metrics from graph instagram', function () {
+    Http::fake([
+        'graph.instagram.com/*' => Http::response(['id' => '123', 'followers_count' => 42, 'media_count' => 7]),
+    ]);
+
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::Instagram,
+        'remote_account_id' => '123',
+        'capabilities' => ['instagram_login' => true],
+    ]);
+
+    expect($this->connector->fetchAccount($account, ['access_token' => 't'])->isOk())->toBeTrue();
+    Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://graph.instagram.com/'));
+});

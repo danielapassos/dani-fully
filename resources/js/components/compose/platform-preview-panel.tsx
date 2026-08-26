@@ -26,6 +26,8 @@ const PLATFORM_LABELS: Record<PlatformName, string> = {
     linkedin: 'LinkedIn',
     facebook: 'Facebook',
     instagram: 'Instagram',
+    tiktok: 'TikTok',
+    youtube: 'YouTube',
     threads: 'Threads',
     discord: 'Discord',
 };
@@ -36,6 +38,8 @@ const PLATFORM_GLYPH_CLASS: Record<PlatformName, string> = {
     linkedin: 'text-blue-600',
     facebook: 'text-[#1877F2]',
     instagram: 'text-[#E4405F]',
+    tiktok: 'text-foreground',
+    youtube: 'text-[#FF0033]',
     threads: 'text-foreground',
     discord: 'text-[#5865F2]',
 };
@@ -51,6 +55,12 @@ function initials(name: string): string {
 }
 
 function platformActions(platform: PlatformName): string {
+    if (platform === 'tiktok') {
+        return 'Like · Comment · Share · Views';
+    }
+    if (platform === 'youtube') {
+        return 'Like · Comment · Views';
+    }
     if (platform === 'linkedin') {
         return 'Comment · Repost · Like · Analytics';
     }
@@ -66,6 +76,14 @@ function previewSummary(preview: PlatformPreview): string {
 
     if (preview.platform === 'linkedin') {
         return 'Posted as one LinkedIn update.';
+    }
+
+    if (preview.platform === 'tiktok') {
+        return 'Sent to your TikTok inbox so you can finish it in TikTok.';
+    }
+
+    if (preview.platform === 'youtube') {
+        return 'Uploaded as one YouTube video.';
     }
 
     if (preview.autoSplit && preview.items.length > 1) {

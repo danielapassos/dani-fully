@@ -165,6 +165,38 @@ test('reconnecting a facebook account restarts the shared meta login flow, not t
         ->assertRedirect(route('accounts.meta.redirect'));
 });
 
+test('reconnecting a linked page instagram account restarts the meta flow', function () {
+    [$user, $workspace] = ownerWithWorkspace();
+    config()->set('services.facebook.client_id', 'cid');
+    config()->set('services.facebook.client_secret', 'secret');
+
+    $account = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::Instagram->value,
+        'capabilities' => ['page_id' => 'page-1'],
+        'connected_by_user_id' => $user->id,
+    ]);
+
+    test()->post("/accounts/{$account->id}/reconnect")
+        ->assertRedirect(route('accounts.meta.redirect'));
+});
+
+test('reconnecting a direct instagram account restarts instagram login', function () {
+    [$user, $workspace] = ownerWithWorkspace();
+    config()->set('services.instagram.client_id', 'instagram-id');
+    config()->set('services.instagram.client_secret', 'instagram-secret');
+
+    $account = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::Instagram->value,
+        'capabilities' => ['instagram_login' => true],
+        'connected_by_user_id' => $user->id,
+    ]);
+
+    test()->post("/accounts/{$account->id}/reconnect")
+        ->assertRedirect(route('accounts.connect', ['platform' => 'instagram']));
+});
+
 test('disconnect removes both the account and its secret row', function () {
     [$user, $workspace] = ownerWithWorkspace();
     $account = ConnectedAccount::factory()->create([

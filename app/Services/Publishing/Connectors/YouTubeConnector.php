@@ -1,0 +1,476 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Publishing\Connectors;
+
+use App\Dto\Publishing\MediaUploadState;
+use App\Dto\Publishing\PublishContext;
+use App\Dto\Publishing\PublishResult;
+use App\Enums\ErrorKind;
+use App\Enums\UsageCategory;
+use App\Models\PostMedia;
+use App\Models\PostTarget;
+use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
+use App\Services\Publishing\Contracts\PublishConnector;
+use App\Services\Usage\Concerns\TracksUsage;
+use App\Support\UsageOperation;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Storage;
+use RuntimeException;
+
+/** Resumable, one-chunk-per-job YouTube video uploader. */
+class YouTubeConnector implements PublishConnector
+{
+    use MapsHttpErrors, TracksUsage;
+
+    private const string API_URL = 'https://www.googleapis.com/youtube/v3';
+
+    private const string UPLOAD_URL = 'https://www.googleapis.com/upload/youtube/v3/videos';
+
+    private const int CHUNK_BYTES = 8 * 1024 * 1024;
+
+    public function __construct(private readonly HttpFactory $http) {}
+
+    public function publish(PublishContext $context): PublishResult
+    {
+        if (! config('services.youtube.publishing_enabled')) {
+            return PublishResult::failure(
+                ErrorKind::Unsupported,
+                'YouTube publishing is disabled until OAuth review and the publishing declarations are ready.',
+            );
+        }
+
+        $options = $this->options();
+        if ($options === null) {
+            return PublishResult::failure(
+                ErrorKind::Validation,
+                'YouTube publishing needs explicit privacy, audience, synthetic-media, paid-placement, format, and notification declarations.',
+            );
+        }
+
+        $token = (string) ($context->credentials['access_token'] ?? '');
+        if ($token === '') {
+            return PublishResult::failure(ErrorKind::AuthExpired, 'YouTube access token unavailable; reconnect the channel.');
+        }
+
+        if (count($context->media) !== 1 || ! $context->media[0]->isVideo()) {
+            return PublishResult::failure(ErrorKind::Validation, 'YouTube publishing requires exactly one video.');
+        }
+
+        if ($context->target->remote_id !== null) {
+            return $this->processingStatus($context, $token, $context->target->remote_id);
+        }
+
+        $media = $context->media[0];
+        $state = new MediaUploadState($context->target->media_upload_state);
+
+        try {
+            $sealedSession = $state->remoteRef($media->id);
+            if ($sealedSession === null) {
+                $sealedSession = $this->startSession($context, $media, $token, $options, $state);
+            }
+
+            $sessionUrl = $this->sessionUrl(Crypt::decryptString($sealedSession));
+            $metadata = $state->metadata($media->id);
+
+            if (($metadata['outcome_unknown'] ?? false) === true) {
+                $probe = $this->probeSession($context, $token, $sessionUrl, $media, $state);
+                if ($probe !== null) {
+                    return $probe;
+                }
+                $metadata = $state->metadata($media->id);
+            }
+
+            return $this->uploadNextChunk($context, $token, $sessionUrl, $media, $state, $metadata);
+        } catch (ConnectionException $exception) {
+            $metadata = $state->metadata($media->id);
+            $metadata['outcome_unknown'] = true;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
+
+            return PublishResult::failure(ErrorKind::Network, $exception->getMessage(), retryAfter: 10);
+        } catch (RuntimeException $exception) {
+            return PublishResult::failure(ErrorKind::Validation, $exception->getMessage());
+        }
+    }
+
+    /**
+     * @param  array{privacyStatus: string, categoryId: string, formatIntent: string, madeForKids: bool, containsSyntheticMedia: bool, hasPaidProductPlacement: bool, notifySubscribers: bool}  $options
+     */
+    private function startSession(PublishContext $context, PostMedia $media, string $token, array $options, MediaUploadState $state): string
+    {
+        [$title, $description] = $this->copy($context);
+
+        $response = $this->http
+            ->timeout(15)
+            ->connectTimeout(5)
+            ->withToken($token)
+            ->acceptJson()
+            ->withHeaders([
+                'X-Upload-Content-Length' => (string) $media->size_bytes,
+                'X-Upload-Content-Type' => $media->mime,
+            ])
+            ->post(self::UPLOAD_URL.'?'.http_build_query([
+                'uploadType' => 'resumable',
+                'part' => 'snippet,status,paidProductPlacementDetails',
+                'notifySubscribers' => $options['notifySubscribers'] ? 'true' : 'false',
+            ]), [
+                'snippet' => [
+                    'title' => $title,
+                    'description' => $description,
+                    'categoryId' => $options['categoryId'],
+                ],
+                'status' => [
+                    'privacyStatus' => $options['privacyStatus'],
+                    'selfDeclaredMadeForKids' => $options['madeForKids'],
+                    'containsSyntheticMedia' => $options['containsSyntheticMedia'],
+                ],
+                'paidProductPlacementDetails' => [
+                    'hasPaidProductPlacement' => $options['hasPaidProductPlacement'],
+                ],
+            ]);
+
+        $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
+
+        if ($response->failed()) {
+            throw new RuntimeException($this->providerMessage($response, 'YouTube could not start the resumable upload.'));
+        }
+
+        $sessionUrl = $this->sessionUrl($response->header('Location'));
+        $sealed = Crypt::encryptString($sessionUrl);
+
+        $state->markUploaded($media->id, $sealed);
+        $state->setMetadata($media->id, [
+            'uploaded_bytes' => 0,
+            'total_bytes' => $media->size_bytes,
+            'content_type' => $media->mime,
+            'format_intent' => $options['formatIntent'],
+            'outcome_unknown' => false,
+        ]);
+        $this->persistState($context, $state);
+
+        return $sealed;
+    }
+
+    /**
+     * Probe an ambiguous upload before sending another byte. A 308 gives the
+     * authoritative offset; a completed response gives the video id.
+     */
+    private function probeSession(PublishContext $context, string $token, string $sessionUrl, PostMedia $media, MediaUploadState $state): ?PublishResult
+    {
+        $response = $this->http
+            ->timeout(15)
+            ->connectTimeout(5)
+            ->withToken($token)
+            ->withHeaders([
+                'Content-Length' => '0',
+                'Content-Range' => "bytes */{$media->size_bytes}",
+            ])
+            ->withBody('', $media->mime)
+            ->put($sessionUrl);
+
+        $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_STATUS_POLL, $context->account, $response);
+
+        if (in_array($response->status(), [200, 201], true)) {
+            return $this->recordVideoAndPoll($context, $token, $response);
+        }
+
+        if ($response->status() === 308) {
+            $metadata = $state->metadata($media->id);
+            $metadata['uploaded_bytes'] = $this->acknowledgedBytes($response);
+            $metadata['outcome_unknown'] = false;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
+
+            return null;
+        }
+
+        if (in_array($response->status(), [404, 410], true)) {
+            $state->forget($media->id);
+            $this->persistState($context, $state);
+
+            return PublishResult::failure(ErrorKind::MediaProcessing, 'YouTube upload session expired; starting a fresh session.', retryAfter: 1);
+        }
+
+        return $this->httpFailure($response, 'YouTube could not reconcile the resumable upload.');
+    }
+
+    /** @param array<string, mixed> $metadata */
+    private function uploadNextChunk(PublishContext $context, string $token, string $sessionUrl, PostMedia $media, MediaUploadState $state, array $metadata): PublishResult
+    {
+        $offset = max(0, (int) ($metadata['uploaded_bytes'] ?? 0));
+        $remaining = $media->size_bytes - $offset;
+        if ($remaining <= 0) {
+            $metadata['outcome_unknown'] = true;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
+
+            return PublishResult::failure(ErrorKind::MediaProcessing, 'YouTube is finalizing the upload.', retryAfter: 2);
+        }
+
+        $length = min(self::CHUNK_BYTES, $remaining);
+        $last = $offset + $length - 1;
+        $stream = Storage::disk($media->disk)->readStream($media->path);
+        if (! is_resource($stream)) {
+            throw new RuntimeException('The YouTube video could not be opened from storage.');
+        }
+
+        try {
+            $this->seek($stream, $offset);
+            $bytes = stream_get_contents($stream, $length);
+        } finally {
+            fclose($stream);
+        }
+
+        if (! is_string($bytes) || strlen($bytes) !== $length) {
+            throw new RuntimeException('The next YouTube video chunk could not be read from storage.');
+        }
+
+        $response = $this->http
+            ->timeout(120)
+            ->connectTimeout(10)
+            ->withToken($token)
+            ->withHeaders([
+                'Content-Length' => (string) $length,
+                'Content-Range' => "bytes {$offset}-{$last}/{$media->size_bytes}",
+            ])
+            ->withBody($bytes, $media->mime)
+            ->put($sessionUrl);
+
+        $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
+
+        if (in_array($response->status(), [200, 201], true)) {
+            return $this->recordVideoAndPoll($context, $token, $response);
+        }
+
+        if ($response->status() !== 308) {
+            return $this->httpFailure($response, 'YouTube rejected the video chunk.');
+        }
+
+        $metadata['uploaded_bytes'] = max($last + 1, $this->acknowledgedBytes($response));
+        $metadata['outcome_unknown'] = false;
+        $state->setMetadata($media->id, $metadata);
+        $this->persistState($context, $state);
+
+        return PublishResult::failure(ErrorKind::MediaProcessing, 'Uploading the next YouTube video chunk.', retryAfter: 1);
+    }
+
+    private function recordVideoAndPoll(PublishContext $context, string $token, Response $response): PublishResult
+    {
+        $videoId = (string) $response->json('id');
+        if (! preg_match('/^[A-Za-z0-9_-]{6,64}$/', $videoId)) {
+            return PublishResult::failure(ErrorKind::ServerError, 'YouTube completed the upload without a valid video id.');
+        }
+
+        $context->target->forceFill([
+            'remote_id' => $videoId,
+            'remote_ids' => [$videoId],
+        ])->save();
+
+        return $this->processingStatus($context, $token, $videoId);
+    }
+
+    private function processingStatus(PublishContext $context, string $token, string $videoId): PublishResult
+    {
+        $response = $this->http
+            ->timeout(10)
+            ->connectTimeout(5)
+            ->withToken($token)
+            ->acceptJson()
+            ->get(self::API_URL.'/videos', [
+                'part' => 'snippet,status,processingDetails',
+                'id' => $videoId,
+                'maxResults' => 1,
+            ]);
+
+        $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_STATUS_POLL, $context->account, $response);
+
+        if ($response->failed()) {
+            return $this->httpFailure($response, 'YouTube could not read video processing status.');
+        }
+
+        $item = $response->json('items.0');
+        if (! is_array($item)) {
+            return PublishResult::failure(ErrorKind::ServerError, 'YouTube did not return the uploaded video.');
+        }
+
+        $uploadStatus = strtolower((string) ($item['status']['uploadStatus'] ?? ''));
+        $processingStatus = strtolower((string) ($item['processingDetails']['processingStatus'] ?? ''));
+        $privacyStatus = strtolower((string) ($item['status']['privacyStatus'] ?? ''));
+
+        if (in_array($uploadStatus, ['failed', 'rejected'], true) || $processingStatus === 'failed') {
+            $reason = (string) ($item['status']['rejectionReason']
+                ?? $item['status']['failureReason']
+                ?? $item['processingDetails']['processingFailureReason']
+                ?? 'unknown');
+
+            return PublishResult::failure(ErrorKind::Validation, "YouTube could not process the video ({$reason}).");
+        }
+
+        if (in_array($processingStatus, ['processing', 'pending'], true) || in_array($uploadStatus, ['uploaded', 'processing'], true)) {
+            return PublishResult::failure(ErrorKind::MediaProcessing, 'YouTube is processing the uploaded video.', retryAfter: 15);
+        }
+
+        if ($privacyStatus !== 'public') {
+            return PublishResult::failure(
+                ErrorKind::MediaProcessing,
+                'The YouTube video is uploaded but not public yet.',
+                retryAfter: 60,
+            );
+        }
+
+        return PublishResult::success([$videoId]);
+    }
+
+    /** @return array{0: string, 1: string} */
+    private function copy(PublishContext $context): array
+    {
+        $description = trim(implode("\n\n", array_filter(array_map(trim(...), $context->segments))));
+        $firstLine = trim((string) strtok($description, "\n"));
+        $title = $firstLine;
+
+        if ($title === '') {
+            throw new RuntimeException('YouTube requires a video title.');
+        }
+        if (str_contains($title, '<') || str_contains($title, '>') || str_contains($description, '<') || str_contains($description, '>')) {
+            throw new RuntimeException('YouTube titles and descriptions cannot contain angle brackets.');
+        }
+
+        $title = mb_substr($title, 0, 100);
+        $description = mb_strcut($description, 0, 5_000, 'UTF-8');
+
+        return [$title, $description];
+    }
+
+    /**
+     * @return array{privacyStatus: string, categoryId: string, formatIntent: string, madeForKids: bool, containsSyntheticMedia: bool, hasPaidProductPlacement: bool, notifySubscribers: bool}|null
+     */
+    private function options(): ?array
+    {
+        $privacy = (string) config('services.youtube.privacy_status');
+        $category = (string) config('services.youtube.category_id');
+        $format = (string) config('services.youtube.format_intent');
+        $madeForKids = config('services.youtube.made_for_kids');
+        $synthetic = config('services.youtube.contains_synthetic_media');
+        $paid = config('services.youtube.has_paid_product_placement');
+        $notify = config('services.youtube.notify_subscribers');
+
+        if (
+            ! in_array($privacy, ['private', 'unlisted', 'public'], true)
+            || ! preg_match('/^\d{1,3}$/', $category)
+            || ! in_array($format, ['video', 'short'], true)
+            || ! is_bool($madeForKids)
+            || ! is_bool($synthetic)
+            || ! is_bool($paid)
+            || ! is_bool($notify)
+        ) {
+            return null;
+        }
+
+        return [
+            'privacyStatus' => $privacy,
+            'categoryId' => $category,
+            'formatIntent' => $format,
+            'madeForKids' => $madeForKids,
+            'containsSyntheticMedia' => $synthetic,
+            'hasPaidProductPlacement' => $paid,
+            'notifySubscribers' => $notify,
+        ];
+    }
+
+    /** @param resource $stream */
+    private function seek($stream, int $offset): void
+    {
+        if ($offset === 0) {
+            return;
+        }
+
+        if (fseek($stream, $offset) === 0) {
+            return;
+        }
+
+        $remaining = $offset;
+        while ($remaining > 0 && ! feof($stream)) {
+            $discarded = fread($stream, min(1024 * 1024, $remaining));
+            if ($discarded === false || $discarded === '') {
+                break;
+            }
+            $remaining -= strlen($discarded);
+        }
+
+        if ($remaining !== 0) {
+            throw new RuntimeException('The YouTube upload could not resume from the stored offset.');
+        }
+    }
+
+    private function acknowledgedBytes(Response $response): int
+    {
+        $range = $response->header('Range');
+
+        return preg_match('/bytes=0-(\d+)/', $range, $matches) ? ((int) $matches[1] + 1) : 0;
+    }
+
+    private function sessionUrl(string $value): string
+    {
+        $parts = parse_url($value);
+        if (
+            ! is_array($parts)
+            || ($parts['scheme'] ?? null) !== 'https'
+            || ($parts['host'] ?? null) !== 'www.googleapis.com'
+            || ($parts['path'] ?? null) !== '/upload/youtube/v3/videos'
+            || ! str_contains((string) ($parts['query'] ?? ''), 'upload_id=')
+        ) {
+            throw new RuntimeException('YouTube returned an invalid resumable upload session.');
+        }
+
+        return $value;
+    }
+
+    private function persistState(PublishContext $context, MediaUploadState $state): void
+    {
+        $context->target->forceFill(['media_upload_state' => $state->toArray()])->save();
+    }
+
+    private function httpFailure(Response $response, string $fallback): PublishResult
+    {
+        return PublishResult::failure(
+            $this->classifyStatus($response->status()),
+            $this->providerMessage($response, $fallback),
+            $response->status(),
+            $this->excerpt($response),
+            $this->retryAfter($response),
+        );
+    }
+
+    private function providerMessage(Response $response, string $fallback): string
+    {
+        return (string) ($response->json('error.message') ?? $fallback);
+    }
+
+    public function delete(PostTarget $target, array $credentials): void
+    {
+        if ($target->remote_id === null) {
+            return;
+        }
+
+        $response = $this->http
+            ->timeout(10)
+            ->connectTimeout(5)
+            ->withToken((string) ($credentials['access_token'] ?? ''))
+            ->delete(self::API_URL.'/videos', ['id' => $target->remote_id]);
+
+        $this->meter(
+            UsageCategory::Publish,
+            UsageOperation::DELETE,
+            $target->account,
+            $response,
+            succeeded: $response->successful() || $response->status() === 404,
+        );
+
+        $this->throwUnlessDeleteAccepted($response);
+    }
+}

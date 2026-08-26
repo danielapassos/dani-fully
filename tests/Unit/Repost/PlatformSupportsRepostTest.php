@@ -10,6 +10,8 @@ test('only X, LinkedIn and Bluesky support native reposting', function (Platform
     'bluesky' => [Platform::Bluesky, true],
     'facebook' => [Platform::Facebook, false],
     'instagram' => [Platform::Instagram, false],
+    'tiktok' => [Platform::TikTok, false],
+    'youtube' => [Platform::YouTube, false],
     'threads' => [Platform::Threads, false],
     'discord' => [Platform::Discord, false],
 ]);

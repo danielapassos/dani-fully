@@ -30,6 +30,8 @@ const PLATFORM_BRAND: Record<string, { tile: string; glyph: string }> = {
     bluesky: { tile: 'bg-sky-500', glyph: 'text-white!' },
     facebook: { tile: 'bg-[#1877F2]', glyph: 'text-white!' },
     instagram: { tile: 'bg-[#E4405F]', glyph: 'text-white!' },
+    tiktok: { tile: 'bg-black', glyph: 'text-white!' },
+    youtube: { tile: 'bg-[#FF0033]', glyph: 'text-white!' },
     threads: { tile: 'bg-black', glyph: 'text-white!' },
     discord: { tile: 'bg-[#5865F2]', glyph: 'text-white!' },
 };

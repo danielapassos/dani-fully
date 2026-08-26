@@ -18,6 +18,7 @@ function capability(overrides: Partial<Capability>): Capability {
         supportsAppPassword: false,
         supportsWebhook: false,
         configured: true,
+        directlyConfigured: true,
         launched: false,
         enabled: true,
         ...overrides,
@@ -109,7 +110,7 @@ describe('Bluesky connect dialog layout', () => {
 });
 
 describe('Meta connect entry point', () => {
-    it('folds Facebook and Instagram into a single button', () => {
+    it('keeps the linked-page flow while allowing direct Instagram Login', () => {
         const source = readFileSync(
             resolve(
                 process.cwd(),
@@ -118,11 +119,11 @@ describe('Meta connect entry point', () => {
             'utf8',
         );
 
-        // Instagram is filtered out as its own row — it connects through the
-        // Facebook (Meta) entry, which points at the Meta Page-selection flow.
-        expect(source).toContain("c.platform !== 'instagram'");
+        expect(source).toContain('c.directlyConfigured');
+        expect(source).toContain("capability.platform === 'instagram'");
         expect(source).toContain("capability.platform === 'facebook'");
         expect(source).toContain('MetaConnectionController.redirect.url()');
+        expect(source).toContain('OAuthConnectionController.redirect.url');
     });
 
     it('labels the button Facebook-only until Instagram launches', () => {
@@ -140,7 +141,7 @@ describe('Meta connect entry point', () => {
                 capability({ platform: 'facebook', launched: false }),
                 capability({ platform: 'instagram', launched: true }),
             ]),
-        ).toBe('Facebook / Instagram');
+        ).toBe('Facebook / linked Instagram');
     });
 });
 

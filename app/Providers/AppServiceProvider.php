@@ -9,7 +9,10 @@ use App\Listeners\SetSentryUserContext;
 use App\Models\PostMedia;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\Auth\Socialite\InstagramProvider;
 use App\Services\Auth\Socialite\ThreadsProvider;
+use App\Services\Auth\Socialite\TikTokProvider;
+use App\Services\Auth\Socialite\YouTubeProvider;
 use App\Services\Media\ImageCompressor;
 use App\Services\Media\ImageToJpegConverter;
 use Carbon\CarbonImmutable;
@@ -75,6 +78,21 @@ class AppServiceProvider extends ServiceProvider
         Socialite::extend('threads', fn ($app) => Socialite::buildProvider(
             ThreadsProvider::class,
             config('services.threads'),
+        ));
+
+        Socialite::extend('instagram', fn ($app) => Socialite::buildProvider(
+            InstagramProvider::class,
+            config('services.instagram'),
+        ));
+
+        Socialite::extend('tiktok', fn ($app) => Socialite::buildProvider(
+            TikTokProvider::class,
+            config('services.tiktok'),
+        ));
+
+        Socialite::extend('youtube', fn ($app) => Socialite::buildProvider(
+            YouTubeProvider::class,
+            config('services.youtube'),
         ));
 
         // OAuth tokens issued for the MCP/API integration. Without explicit

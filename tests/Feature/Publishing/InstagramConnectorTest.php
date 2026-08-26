@@ -23,14 +23,15 @@ function pngBytes(): string
 /**
  * @param  list<PostMedia>  $media
  * @param  array<string, mixed>  $targetOverrides
+ * @param  array<string, mixed>  $accountOverrides
  */
-function igContext(array $segments, array $media = [], array $targetOverrides = []): PublishContext
+function igContext(array $segments, array $media = [], array $targetOverrides = [], array $accountOverrides = []): PublishContext
 {
     $target = PostTarget::factory()->create(array_merge(['platform' => Platform::Instagram->value], $targetOverrides));
-    $account = ConnectedAccount::factory()->create([
+    $account = ConnectedAccount::factory()->create(array_merge([
         'platform' => Platform::Instagram->value,
         'remote_account_id' => 'ig123',
-    ]);
+    ], $accountOverrides));
 
     return new PublishContext(
         target: $target,
@@ -76,6 +77,30 @@ test('instagram publishes a single image through the container flow', function (
 
     Http::assertSent(fn ($request) => str_contains($request->url(), '/ig123/media_publish')
         && $request['creation_id'] === 'container-1');
+});
+
+test('direct instagram login publishes against graph instagram', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/direct.jpg', 'jpg-bytes');
+    $media = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/direct.jpg', 'mime' => 'image/jpeg']);
+
+    Http::fake([
+        'https://graph.instagram.com/*/ig123/media' => Http::response(['id' => 'direct-container']),
+        'https://graph.instagram.com/*/direct-container*' => Http::response(['status_code' => 'FINISHED']),
+        'https://graph.instagram.com/*/ig123/media_publish' => Http::response(['id' => 'direct-media']),
+    ]);
+
+    $result = app(InstagramConnector::class)->publish(igContext(
+        ['direct caption'],
+        [$media],
+        [],
+        ['capabilities' => ['instagram_login' => true]],
+    ));
+
+    expect($result->isSuccessful())->toBeTrue()
+        ->and($result->remoteIds)->toBe(['direct-media']);
+    Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://graph.instagram.com/'));
+    Http::assertNotSent(fn ($request): bool => str_starts_with($request->url(), 'https://graph.facebook.com/'));
 });
 
 test('instagram converts a non-jpeg image and hands Meta the derived jpeg url', function () {

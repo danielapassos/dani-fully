@@ -86,7 +86,7 @@ class CaptureAccountMetrics implements ShouldBeUnique, ShouldQueue
         // personal LinkedIn accounts return `unsupported` without credentials,
         // so refreshing their token here is wasted work (and a transient refresh
         // failure would wrongly flip them to `Failed` instead of `Unsupported`).
-        $needsFreshToken = in_array($account->platform, [Platform::X, Platform::Facebook, Platform::Instagram, Platform::Threads], true)
+        $needsFreshToken = in_array($account->platform, [Platform::X, Platform::Facebook, Platform::Instagram, Platform::TikTok, Platform::YouTube, Platform::Threads], true)
             || ($account->platform === Platform::LinkedIn && $account->isLinkedInOrganization());
 
         try {

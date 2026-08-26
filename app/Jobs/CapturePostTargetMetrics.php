@@ -86,7 +86,7 @@ class CapturePostTargetMetrics implements ShouldBeUnique, ShouldQueue
         // personal LinkedIn accounts return `unsupported` without credentials, so
         // skip the wasted token refresh (and the spurious `Failed` a transient
         // refresh error would otherwise record instead of `Unsupported`).
-        $needsFreshToken = in_array($account->platform, [Platform::X, Platform::Facebook, Platform::Instagram, Platform::Threads, Platform::Discord], true)
+        $needsFreshToken = in_array($account->platform, [Platform::X, Platform::Facebook, Platform::Instagram, Platform::TikTok, Platform::YouTube, Platform::Threads, Platform::Discord], true)
             || ($account->platform === Platform::LinkedIn && $account->isLinkedInOrganization());
 
         try {

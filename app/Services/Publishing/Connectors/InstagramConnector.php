@@ -13,6 +13,7 @@ use App\Enums\PostFormat;
 use App\Enums\UsageCategory;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
+use App\Services\ConnectedAccounts\Instagram\InstagramGraphApi;
 use App\Services\Media\ImageConversionFailed;
 use App\Services\Media\PublicMediaUrl;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
@@ -44,16 +45,6 @@ class InstagramConnector implements PublishConnector
         private readonly HttpFactory $http,
         private readonly PublicMediaUrl $publicMediaUrl,
     ) {}
-
-    private function apiVersion(): string
-    {
-        return (string) config('services.facebook.graph_version');
-    }
-
-    private function baseUrl(): string
-    {
-        return sprintf('https://graph.facebook.com/%s', $this->apiVersion());
-    }
 
     public function publish(PublishContext $context): PublishResult
     {
@@ -92,7 +83,7 @@ class InstagramConnector implements PublishConnector
                 return $notReady;
             }
 
-            $publish = $this->http->asForm()->post($this->baseUrl().'/'.$igUserId.'/media_publish', [
+            $publish = $this->http->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media_publish', [
                 'creation_id' => $containerId,
                 'access_token' => $token,
             ]);
@@ -164,7 +155,7 @@ class InstagramConnector implements PublishConnector
             $body['image_url'] = $this->publicMediaUrl->for($media, Platform::Instagram);
         }
 
-        $response = $this->http->asForm()->post($this->baseUrl().'/'.$igUserId.'/media', $body);
+        $response = $this->http->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media', $body);
 
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
@@ -183,7 +174,7 @@ class InstagramConnector implements PublishConnector
         ];
         $body[$media->isVideo() ? 'video_url' : 'image_url'] = $this->publicMediaUrl->for($media, Platform::Instagram);
 
-        $response = $this->http->asForm()->post($this->baseUrl().'/'.$igUserId.'/media', $body);
+        $response = $this->http->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media', $body);
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
         if ($response->failed()) {
@@ -199,7 +190,7 @@ class InstagramConnector implements PublishConnector
             throw new InstagramReelNeedsVideo;
         }
 
-        $response = $this->http->asForm()->post($this->baseUrl().'/'.$igUserId.'/media', [
+        $response = $this->http->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media', [
             'media_type' => 'REELS',
             'video_url' => $this->publicMediaUrl->for($video, Platform::Instagram),
             'caption' => $caption,
@@ -248,7 +239,7 @@ class InstagramConnector implements PublishConnector
             $childIds[] = $childId;
         }
 
-        $response = $this->http->asForm()->post($this->baseUrl().'/'.$igUserId.'/media', [
+        $response = $this->http->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media', [
             'media_type' => 'CAROUSEL',
             'children' => implode(',', $childIds),
             'caption' => $caption,
@@ -273,7 +264,7 @@ class InstagramConnector implements PublishConnector
         ];
         $body[$media->isVideo() ? 'video_url' : 'image_url'] = $this->publicMediaUrl->for($media, Platform::Instagram);
 
-        $response = $this->http->asForm()->post($this->baseUrl().'/'.$igUserId.'/media', $body);
+        $response = $this->http->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media', $body);
 
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
@@ -296,7 +287,7 @@ class InstagramConnector implements PublishConnector
      */
     private function pollContainer(PublishContext $context, string $containerId, string $token): ?PublishResult
     {
-        $response = $this->http->get($this->baseUrl().'/'.$containerId, [
+        $response = $this->http->get(InstagramGraphApi::baseUrl($context->account).'/'.$containerId, [
             'fields' => 'status_code',
             'access_token' => $token,
         ]);
@@ -337,7 +328,7 @@ class InstagramConnector implements PublishConnector
         // IG media deletion is generally unsupported via the Graph API; best-effort the
         // call and swallow a 4xx (matches how the API responds to unsupported deletes)
         // rather than failing the whole delete flow over it.
-        $response = $this->http->delete($this->baseUrl().'/'.$id, ['access_token' => $token]);
+        $response = $this->http->delete(InstagramGraphApi::baseUrl($target->account).'/'.$id, ['access_token' => $token]);
 
         $succeeded = $response->successful() || $response->status() === 404 || $response->clientError();
 

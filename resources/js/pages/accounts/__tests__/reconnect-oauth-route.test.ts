@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import BlueskyOAuthController from '@/actions/App/Http/Controllers/ConnectedAccounts/BlueskyOAuthController';
+import MetaConnectionController from '@/actions/App/Http/Controllers/ConnectedAccounts/MetaConnectionController';
 import OAuthConnectionController from '@/actions/App/Http/Controllers/ConnectedAccounts/OAuthConnectionController';
 import type { Account } from '@/components/accounts/types';
 import { reconnectOAuthUrl } from '@/pages/accounts/index';
@@ -25,6 +26,7 @@ function account(overrides: Partial<Account>): Account {
         x_subscription_label: null,
         x_subscription_checked_at: null,
         is_linkedin_page: false,
+        connection_flow: 'oauth',
         is_default: false,
         disabled: false,
         pds_url: null,
@@ -68,6 +70,24 @@ describe('reconnectOAuthUrl', () => {
     it('uses the generic OAuth route for other platforms', () => {
         expect(reconnectOAuthUrl(account({ platform: 'x' }))).toBe(
             OAuthConnectionController.redirect.url({ platform: 'x' }),
+        );
+    });
+
+    it('returns linked-page Instagram accounts to the Meta picker', () => {
+        expect(
+            reconnectOAuthUrl(
+                account({ platform: 'instagram', connection_flow: 'meta' }),
+            ),
+        ).toBe(MetaConnectionController.redirect.url());
+    });
+
+    it('keeps direct Instagram Login on the generic OAuth route', () => {
+        expect(
+            reconnectOAuthUrl(
+                account({ platform: 'instagram', connection_flow: 'oauth' }),
+            ),
+        ).toBe(
+            OAuthConnectionController.redirect.url({ platform: 'instagram' }),
         );
     });
 });

@@ -27,18 +27,16 @@ function actingOwnerInWorkspace(): User
 
 afterEach(fn () => AppVersion::fake(null));
 
-test('cloud defers a billing prop for billing managers and no community prop', function () {
+test('cloud defers a billing prop for billing managers', function () {
     config(['subscriptions.enabled' => true]);
     actingOwnerInWorkspace();
 
     $this->get(route('dashboard'))->assertInertia(fn ($page) => $page
         ->missing('billing')
-        ->missing('community')
         ->missing('updateAvailable')
         ->loadDeferredProps('sidebar', fn ($reload) => $reload
             ->where('billing.subscribed', false)
             ->where('billing.manageUrl', route('billing.index'))
-            ->where('community', null)
             ->where('updateAvailable', false)
         )
     );
@@ -64,23 +62,17 @@ test('members without billing.manage do not receive a billing prop', function ()
     );
 });
 
-test('self-hosted defers a community prop and the update flag, no billing prop', function () {
+test('self-hosted defers the update flag and no billing prop', function () {
     AppVersion::fake('v1.3.0-rc.5');
     config(['subscriptions.enabled' => false]);
     config(['instance.community.repo' => 'coollabsio/shoutrrr']);
-    config(['instance.community.sponsor_url' => 'https://github.com/sponsors/coollabsio']);
-    Cache::put(CommunityStats::StarsCacheKey, 4210);
     Cache::put(CommunityStats::LatestOverallCacheKey, 'v99.0.0');
     actingOwnerInWorkspace();
 
     $this->get(route('dashboard'))->assertInertia(fn ($page) => $page
-        ->missing('community')
         ->missing('updateAvailable')
         ->loadDeferredProps('sidebar', fn ($reload) => $reload
             ->where('billing', null)
-            ->where('community.repoUrl', 'https://github.com/coollabsio/shoutrrr')
-            ->where('community.sponsorUrl', 'https://github.com/sponsors/coollabsio')
-            ->where('community.stars', 4210)
             ->where('updateAvailable', true)
         )
     );

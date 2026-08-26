@@ -37,6 +37,7 @@ function instagramOwnerActingIn(): array
 
 test('posting a stashed page selection creates an instagram connected account and secret', function () {
     instagramOwnerActingIn();
+    config()->set('services.instagram.direct_messages_enabled', true);
 
     expect(Platform::launchedMetaGraphPlatforms())->toBe([Platform::Facebook, Platform::Instagram]);
 
@@ -65,7 +66,7 @@ test('posting a stashed page selection creates an instagram connected account an
         ->and($account->remote_account_id)->toBe('IG1')
         ->and($account->handle)->toBe('@myig')
         ->and($account->auth_method)->toBe('oauth')
-        // dm_enabled mirrors the instance opt-in, which ships on by default.
+        // dm_enabled requires both instance and provider readiness opt-ins.
         ->and($account->capabilities)->toBe(['page_id' => 'PAGE1', 'dm_enabled' => true])
         ->and($account->secret)->not->toBeNull()
         // IG publishing/comments/insights all authenticate with the linked

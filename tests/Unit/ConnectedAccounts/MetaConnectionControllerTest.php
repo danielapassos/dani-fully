@@ -32,7 +32,10 @@ test('builds facebook account data from a stashed page asset', function () {
 });
 
 test('builds instagram account data from a stashed page asset with a linked ig account', function () {
-    config(['messages.direct_messages_enabled' => true]);
+    config([
+        'messages.direct_messages_enabled' => true,
+        'services.instagram.direct_messages_enabled' => true,
+    ]);
 
     $data = MetaConnectionController::buildAccountData([
         'pageId' => 'PAGE1',
@@ -51,6 +54,6 @@ test('builds instagram account data from a stashed page asset with a linked ig a
         // IG publishing authenticates with the linked Page's token.
         ->and($data->accessToken)->toBe('PGT1')
         // The IG connector needs the Page id to address the linked Page.
-        // dm_enabled mirrors the instance opt-in set above.
+        // dm_enabled requires both instance and provider readiness opt-ins.
         ->and($data->capabilities)->toBe(['page_id' => 'PAGE1', 'dm_enabled' => true]);
 });

@@ -52,6 +52,8 @@ const SUPPORTED_PLATFORM_ICONS = [
     'linkedin',
     'facebook',
     'instagram',
+    'tiktok',
+    'youtube',
     'threads',
     'discord',
 ];
@@ -490,21 +492,19 @@ function DiscordConnectDialog({
 }
 
 /**
- * Facebook and Instagram share a single Facebook Login flow
- * (`MetaConnectionController`), so they get one combined entry point instead
- * of two separate buttons. The label mentions Instagram only once it's
- * launched.
+ * Facebook Login can still discover an Instagram account linked to a Page.
+ * Direct Instagram Login gets its own row when that separate app is configured.
  */
 export function metaConnectLabel(capabilities: Capability[]): string {
     const instagram = capabilities.find((c) => c.platform === 'instagram');
 
-    return instagram?.launched ? 'Facebook / Instagram' : 'Facebook';
+    return instagram?.launched ? 'Facebook / linked Instagram' : 'Facebook';
 }
 
 /**
- * Where a platform's connect flow lives: Facebook (and its folded-in Instagram)
- * go through the Meta Page-selection flow; everyone else shares the generic
- * OAuth redirect. Bluesky is handled separately — it opens a dialog, not a link.
+ * Where a platform's connect flow lives: Facebook goes through the Meta Page
+ * picker; direct Instagram and the remaining OAuth platforms use the generic
+ * route. Bluesky opens its own dialog.
  */
 function connectHref(capability: Capability): string {
     return capability.platform === 'facebook'
@@ -528,8 +528,13 @@ export function ConnectButtons({
     const [blueskyOpen, setBlueskyOpen] = useState(false);
     const [discordOpen, setDiscordOpen] = useState(false);
 
-    // Instagram connects through the Facebook (Meta) entry, so it isn't its own row.
-    const platforms = capabilities.filter((c) => c.platform !== 'instagram');
+    const facebook = capabilities.find((c) => c.platform === 'facebook');
+    const platforms = capabilities.filter(
+        (c) =>
+            c.platform !== 'instagram' ||
+            c.directlyConfigured ||
+            !facebook?.configured,
+    );
 
     return (
         <>
@@ -589,7 +594,12 @@ export function ConnectButtons({
                             );
                         }
 
-                        if (!capability.launched || !capability.configured) {
+                        const directlyConnectable =
+                            capability.platform === 'instagram'
+                                ? capability.directlyConfigured
+                                : capability.configured;
+
+                        if (!capability.launched || !directlyConnectable) {
                             return (
                                 <DropdownMenuItem
                                     key={capability.platform}

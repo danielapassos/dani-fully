@@ -8,6 +8,8 @@ export type PlatformName =
     | 'linkedin'
     | 'facebook'
     | 'instagram'
+    | 'tiktok'
+    | 'youtube'
     | 'threads'
     | 'discord';
 

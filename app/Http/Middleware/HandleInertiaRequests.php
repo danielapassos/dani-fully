@@ -95,7 +95,6 @@ class HandleInertiaRequests extends Middleware
                 'isOwner' => $request->user()?->isInstanceOwner() ?? false,
             ],
             'billing' => Inertia::defer(fn () => $this->billingData($request->user()), 'sidebar'),
-            'community' => Inertia::defer(fn () => $this->communityData(), 'sidebar')->once(),
             'updateAvailable' => Inertia::defer(fn () => $resolveUpdate()['updateAvailable'], 'sidebar')->once(),
             'latestVersion' => Inertia::defer(fn () => $resolveUpdate()['latestVersion'], 'sidebar')->once(),
             'latestReleaseUrl' => Inertia::defer(fn () => $resolveUpdate()['latestReleaseUrl'], 'sidebar')->once(),
@@ -275,24 +274,6 @@ class HandleInertiaRequests extends Middleware
         return [
             'subscribed' => $membership->workspace->subscribed('default'),
             'manageUrl' => route('billing.index'),
-        ];
-    }
-
-    /**
-     * @return array{repoUrl: string, sponsorUrl: string, stars: ?int}|null
-     */
-    private function communityData(): ?array
-    {
-        if (config('subscriptions.enabled')) {
-            return null;
-        }
-
-        $repo = (string) config('instance.community.repo');
-
-        return [
-            'repoUrl' => "https://github.com/{$repo}",
-            'sponsorUrl' => (string) config('instance.community.sponsor_url'),
-            'stars' => CommunityStats::stars(),
         ];
     }
 

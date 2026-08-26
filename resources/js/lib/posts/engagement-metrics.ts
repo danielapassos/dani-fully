@@ -51,6 +51,17 @@ const LAYOUT: Record<PlatformName, Slot[]> = {
         { key: 'likes', label: 'likes' },
         { key: 'comments', label: 'comments' },
     ],
+    tiktok: [
+        { key: 'likes', label: 'likes' },
+        { key: 'comments', label: 'comments' },
+        { key: 'reposts', label: 'shares' },
+        { key: 'views', label: 'views' },
+    ],
+    youtube: [
+        { key: 'likes', label: 'likes' },
+        { key: 'comments', label: 'comments' },
+        { key: 'views', label: 'views' },
+    ],
     threads: [
         { key: 'likes', label: 'likes' },
         { key: 'comments', label: 'replies' },

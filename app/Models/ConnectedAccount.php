@@ -240,6 +240,13 @@ class ConnectedAccount extends Model
             && ($this->capabilities['linkedin_account_type'] ?? 'person') === 'organization';
     }
 
+    /** Whether this Instagram account uses a direct Instagram User token. */
+    public function usesInstagramLogin(): bool
+    {
+        return $this->platform === Platform::Instagram
+            && ($this->capabilities['instagram_login'] ?? false) === true;
+    }
+
     /**
      * The LinkedIn author/actor URN for this account: an organization URN for a
      * Page, otherwise a person URN. Single source of truth for the publish and

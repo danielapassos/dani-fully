@@ -227,14 +227,15 @@ class MetaConnectionController extends Controller
      */
     public static function buildAccountData(array $stashedAsset, Platform $platform): ConnectedAccountData
     {
-        // `dm_enabled` is driven by the instance opt-in flag rather than a
-        // granted-scope check (contrast `OAuthConnectionController`, which
-        // reads `approvedScopes`): Meta's OAuth token exchange doesn't
-        // reliably echo back the granted scope list, so there is nothing
-        // trustworthy to intersect against here. A real 403 on send/poll is
-        // still mapped to authExpired/unsupported and logged as a runtime
-        // backstop (see the DM connectors), so this stays a safe default.
-        $dmEnabled = app(InstanceSettings::class)->directMessagesEnabled();
+        // `dm_enabled` is driven by the instance opt-in plus Instagram's
+        // provider-readiness flag rather than a granted-scope check (contrast
+        // `OAuthConnectionController`, which reads `approvedScopes`): Meta's
+        // OAuth token exchange doesn't reliably echo back the granted scope
+        // list, so there is nothing trustworthy to intersect against here. A
+        // real 403 on send/poll is still mapped to authExpired/unsupported and
+        // logged as a runtime backstop (see the DM connectors).
+        $dmEnabled = app(InstanceSettings::class)->directMessagesEnabled()
+            && ($platform !== Platform::Instagram || (bool) config('services.instagram.direct_messages_enabled'));
 
         if ($platform === Platform::Instagram) {
             return new ConnectedAccountData(
@@ -269,7 +270,8 @@ class MetaConnectionController extends Controller
      * The union of the launched Meta platforms' scopes, deduped, so a single
      * Facebook Login only asks for the permissions a launched platform
      * actually needs. DM scope deltas are appended only when the instance has
-     * opted into Messages DM scopes — mirrors `OAuthConnectionController::scopesFor()`.
+     * opted into Messages DM scopes and the provider is ready — mirrors
+     * `OAuthConnectionController::scopesFor()`.
      *
      * @return list<string>
      */
@@ -278,14 +280,27 @@ class MetaConnectionController extends Controller
         $scopes = [];
 
         foreach (Platform::availableMetaGraphPlatforms() as $platform) {
-            array_push($scopes, ...$platform->scopes());
+            array_push($scopes, ...$platform->metaGraphScopes());
 
-            if ($platform->supportsDirectMessages() && $this->settings->directMessagesEnabled()) {
+            if ($platform->supportsDirectMessages() && $this->shouldRequestDirectMessageScopes($platform)) {
                 array_push($scopes, ...$this->directMessageScopeDeltas($platform));
             }
         }
 
         return array_values(array_unique($scopes));
+    }
+
+    private function shouldRequestDirectMessageScopes(Platform $platform): bool
+    {
+        if (! $this->settings->directMessagesEnabled()) {
+            return false;
+        }
+
+        if ($platform === Platform::Instagram) {
+            return (bool) config('services.instagram.direct_messages_enabled');
+        }
+
+        return true;
     }
 
     /**

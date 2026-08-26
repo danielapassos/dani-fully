@@ -1,21 +1,9 @@
 import { Link, usePage } from '@inertiajs/react';
 
 import { Button } from '@/components/ui/button';
-import { Heart, Star } from '@/components/ui/icons';
-
-export function formatStars(count: number): string {
-    if (count < 1000) {
-        return String(count);
-    }
-
-    const thousands = count / 1000;
-    const rounded = Math.round(thousands * 10) / 10;
-
-    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}k`;
-}
 
 export function SidebarFooterCard() {
-    const { features, billing, community } = usePage().props;
+    const { features, billing } = usePage().props;
 
     if (features?.billing) {
         // Only surface the upgrade nudge for unsubscribed workspaces. A subscribed
@@ -44,35 +32,5 @@ export function SidebarFooterCard() {
         );
     }
 
-    if (!community) {
-        return null;
-    }
-
-    return (
-        <div className="flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
-            <a
-                href={community.repoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            >
-                <Star className="h-4 w-4" aria-hidden="true" />
-                <span>Star on GitHub</span>
-                {community.stars !== null && (
-                    <span className="ml-auto text-[11px] text-sidebar-foreground/50">
-                        {formatStars(community.stars)}
-                    </span>
-                )}
-            </a>
-            <a
-                href={community.sponsorUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-            >
-                <Heart className="h-4 w-4" aria-hidden="true" />
-                <span>Sponsor</span>
-            </a>
-        </div>
-    );
+    return null;
 }
