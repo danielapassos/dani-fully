@@ -234,6 +234,34 @@ class ConnectedAccount extends Model
     }
 
     /**
+     * Identify who can resolve the current publishing gate so the UI does not
+     * recommend reconnecting when only an installation setting can help.
+     *
+     * @return 'enable_account'|'reconnect'|'operator_configuration'|null
+     */
+    public function publishingRecoveryKind(): ?string
+    {
+        if ($this->isDisabled()) {
+            return 'enable_account';
+        }
+
+        if ($this->status !== ConnectedAccountStatus::Active) {
+            return 'reconnect';
+        }
+
+        if (! app(InstanceSettings::class)->platformAvailable($this->platform) || ! $this->platform->publishingEnabled()) {
+            return 'operator_configuration';
+        }
+
+        $requiredScope = $this->platform->requiredPublishingScope();
+        if ($requiredScope !== null && ! in_array($requiredScope, (array) ($this->capabilities['oauth_scopes'] ?? []), true)) {
+            return 'reconnect';
+        }
+
+        return null;
+    }
+
+    /**
      * Whether this account's credentials can read replies for the engagement
      * inbox. Only LinkedIn is capability-gated: reading member comments needs the
      * restricted `r_member_social_feed` scope, recorded at connect. Accounts

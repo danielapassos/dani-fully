@@ -16,7 +16,7 @@ final class DraftData
      * @param  list<string>  $destinationIds
      * @param  list<string>  $mediaIds
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
-     * @param  array<string, array{auto_split?: bool, format?: string, content_override?: array{segments: list<string>, media_ids: list<string>}|null, placements?: list<array{media_id: string, segment_ref: string, position: int}>, segment_breaks?: list<string>}>  $targetsByAccount
+     * @param  array<string, array{auto_split?: bool, format?: string, content_override?: array{segments: list<string>, media_ids?: list<string>}|null, placements?: list<array{media_id: string, segment_ref: string, position: int}>, segment_breaks?: list<string>}>  $targetsByAccount
      * @param  list<string>  $segmentBreaks
      * @param  list<array{media_id: string, segment_ref: string, position: int}>  $placements
      */
@@ -126,7 +126,7 @@ final class DraftData
     }
 
     /**
-     * @return array{segments: list<string>, media_ids: list<string>}|null
+     * @return array{segments: list<string>, media_ids?: list<string>}|null
      */
     public function overrideFor(string $accountId): ?array
     {
@@ -192,7 +192,7 @@ final class DraftData
     }
 
     /**
-     * @return array{segments: list<string>, media_ids: list<string>}|null
+     * @return array{segments: list<string>, media_ids?: list<string>}|null
      */
     private static function readOverride(mixed $override): ?array
     {
@@ -208,10 +208,13 @@ final class DraftData
             ? array_values(array_map(static fn (mixed $s): string => (string) $s, $override['segments']))
             : [(string) ($override['text'] ?? '')];
 
-        return [
-            'segments' => $segments,
-            'media_ids' => array_values($override['media_ids'] ?? []),
-        ];
+        $normalized = ['segments' => $segments];
+
+        if (array_key_exists('media_ids', $override)) {
+            $normalized['media_ids'] = array_values(is_array($override['media_ids']) ? $override['media_ids'] : []);
+        }
+
+        return $normalized;
     }
 
     /**

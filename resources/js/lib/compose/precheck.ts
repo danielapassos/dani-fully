@@ -115,8 +115,12 @@ export function precheckAccount({
         reasons.push('publishing_unavailable');
     }
 
+    const formatRequiresSingleMedia = format === 'reels' || format === 'story';
     if (
-        (mediaCounts ?? [mediaCount]).some((count) => count > limits.maxMedia)
+        (mediaCounts ?? [mediaCount]).some(
+            (count) => count > limits.maxMedia,
+        ) ||
+        (formatRequiresSingleMedia && mediaCount > 1)
     ) {
         reasons.push('too_many_media');
     }
@@ -165,9 +169,9 @@ function mediaGroupingForTarget(
     limits: PlatformLimits,
     placements: Record<string, string[]> | undefined,
     segmentBreaks: string[],
-): { counts: number[]; hasUnplacedMedia: boolean } {
+): { counts: number[]; mediaIds: string[] } {
     if (media.length === 0) {
-        return { counts: [0], hasUnplacedMedia: false };
+        return { counts: [0], mediaIds: [] };
     }
 
     const mediaIds = new Set(media.map((item) => item.id));
@@ -186,23 +190,25 @@ function mediaGroupingForTarget(
         }
     }
 
-    // The server drops invalid placement rows. With no surviving rows it uses
-    // its compatibility fallback and publishes the full media set together.
+    // Only a missing placement map is legacy. A defined empty map (or one whose
+    // rows no longer resolve) is an explicit account-specific exclusion and
+    // must never silently put every attachment back.
     if (placedIds.size === 0) {
-        return { counts: [media.length], hasUnplacedMedia: false };
+        return placements === undefined
+            ? { counts: [media.length], mediaIds: media.map(({ id }) => id) }
+            : { counts: [0], mediaIds: [] };
     }
 
-    const hasUnplacedMedia = placedIds.size < media.length;
     if (limits.threadMax !== null) {
         return {
             counts: [
                 [...counts.values()].reduce((sum, count) => sum + count, 0),
             ],
-            hasUnplacedMedia,
+            mediaIds: [...placedIds],
         };
     }
 
-    return { counts: [...counts.values()], hasUnplacedMedia };
+    return { counts: [...counts.values()], mediaIds: [...placedIds] };
 }
 
 export function precheckDestinations({
@@ -219,9 +225,6 @@ export function precheckDestinations({
     segmentBreaks = [],
 }: PrecheckDestinationsInput): AccountBlock[] {
     const blocks: AccountBlock[] = [];
-    const mediaCount = media.length;
-    const hasVideo = media.some((item) => item.kind === 'video');
-
     for (const account of accounts) {
         const platformLimits = limits.find(
             (item) => item.platform === account.platform,
@@ -236,20 +239,19 @@ export function precheckDestinations({
             placementsByAccount?.[account.id] ?? placements,
             segmentBreaks,
         );
+        const effectiveIds = new Set(mediaGrouping.mediaIds);
+        const targetMedia = media.filter(({ id }) => effectiveIds.has(id));
         const reasons = precheckAccount({
             account,
             segments: accountSegments,
             autoSplit: autoSplitByAccount[account.id] ?? true,
             mentions,
-            mediaCount,
+            mediaCount: targetMedia.length,
             mediaCounts: mediaGrouping.counts,
-            hasVideo,
+            hasVideo: targetMedia.some((item) => item.kind === 'video'),
             format: formatByAccount[account.id] ?? 'feed',
             limits: platformLimits,
         });
-        if (mediaGrouping.hasUnplacedMedia) {
-            reasons.push('unplaced_media');
-        }
         if (reasons.length > 0) {
             blocks.push({
                 accountId: account.id,

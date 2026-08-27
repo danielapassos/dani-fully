@@ -63,6 +63,37 @@ test('media attaches to the section the resolver assigned, not always the first'
         ->and($secondRecord['embed']['images'][0]['image']['ref']['$link'] ?? null)->toBe('bafblob');
 });
 
+test('media excluded from this target is never uploaded', function (): void {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/excluded.jpg', 'excluded-bytes');
+    Storage::disk('public')->put('media/selected.jpg', 'selected-bytes');
+
+    $excluded = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/excluded.jpg', 'mime' => 'image/jpeg']);
+    $selected = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/selected.jpg', 'mime' => 'image/jpeg']);
+    $target = PostTarget::factory()->create(['platform' => Platform::Bluesky->value]);
+    $account = ConnectedAccount::factory()->bluesky()->create(['remote_account_id' => 'did:plc:me']);
+    $context = new PublishContext(
+        target: $target,
+        segments: ['selected only'],
+        media: [$excluded, $selected],
+        account: $account,
+        credentials: ['session' => ['accessJwt' => 'jwt', 'pds' => 'https://bsky.social']],
+        mediaBySection: [0 => [$selected]],
+    );
+
+    Http::fake([
+        '*com.atproto.repo.uploadBlob' => Http::response([
+            'blob' => ['$type' => 'blob', 'ref' => ['$link' => 'bafblob'], 'mimeType' => 'image/jpeg', 'size' => 14],
+        ]),
+        '*com.atproto.repo.createRecord' => Http::response(['uri' => 'at://r/1', 'cid' => 'cid1']),
+    ]);
+
+    expect(app(BlueskyPublishConnector::class)->publish($context)->isSuccessful())->toBeTrue();
+    Http::assertSent(fn ($request): bool => str_contains($request->url(), 'com.atproto.repo.uploadBlob')
+        && $request->body() === 'selected-bytes');
+    Http::assertNotSent(fn ($request): bool => $request->body() === 'excluded-bytes');
+});
+
 test('a resumed publish still uploads and embeds images for a not-yet-posted section', function (): void {
     Storage::fake('public');
     Storage::disk('public')->put('media/cat.jpg', 'image-bytes');

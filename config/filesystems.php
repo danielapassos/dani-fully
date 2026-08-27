@@ -74,6 +74,9 @@ return [
             'region' => env('AWS_DEFAULT_REGION'),
             'bucket' => env('PUBLIC_IMAGES_BUCKET', env('AWS_BUCKET')),
             'url' => env('PUBLIC_IMAGES_URL', env('AWS_URL')),
+            // An explicitly configured public base means these bucket-level
+            // public objects have stable URLs without per-object ACL headers.
+            'public_url' => env('PUBLIC_IMAGES_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
             // Cloudflare R2 and Laravel Cloud set visibility at bucket level and

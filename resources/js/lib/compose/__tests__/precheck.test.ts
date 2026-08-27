@@ -164,6 +164,54 @@ function mediaItem(over: Partial<MediaView> & { id: string }): MediaView {
 }
 
 describe('precheckDestinations', () => {
+    it('does not restore media for a defined empty account placement map', () => {
+        const image = mediaItem({ id: 'image' });
+        const video = mediaItem({
+            id: 'video',
+            kind: 'video',
+            mime: 'video/mp4',
+        });
+        const blocks = precheckDestinations({
+            accounts: [accountFor({ id: 'x1', platform: 'x' })],
+            segments: ['text-only target'],
+            mentions: [],
+            autoSplitByAccount: {},
+            overrideByAccount: {},
+            formatByAccount: {},
+            media: [image, video],
+            limits: [limitsFor({ platform: 'x', maxLength: 280 })],
+            placements: { __head__: ['image', 'video'] },
+            placementsByAccount: { x1: {} },
+        });
+
+        expect(blocks).toEqual([]);
+    });
+
+    it('still enforces video requirements for an explicit empty target map', () => {
+        const blocks = precheckDestinations({
+            accounts: [accountFor({ id: 'tt1', platform: 'tiktok' })],
+            segments: ['caption'],
+            mentions: [],
+            autoSplitByAccount: {},
+            overrideByAccount: {},
+            formatByAccount: {},
+            media: [
+                mediaItem({ id: 'video', kind: 'video', mime: 'video/mp4' }),
+            ],
+            limits: [
+                limitsFor({
+                    platform: 'tiktok',
+                    requiresMedia: true,
+                    requiresVideo: true,
+                    threadMax: 1,
+                }),
+            ],
+            placementsByAccount: { tt1: {} },
+        });
+
+        expect(blocks[0]?.reasons).toContain('video_required');
+    });
+
     it('returns one block per failing account with its handle', () => {
         const blocks = precheckDestinations({
             accounts: [
@@ -292,7 +340,7 @@ describe('precheckDestinations', () => {
         expect(blocks).toEqual([]);
     });
 
-    it('blocks when an explicit placement map leaves attached media unplaced', () => {
+    it('treats media omitted from an explicit placement map as excluded for that target', () => {
         const media = [mediaItem({ id: 'm1' }), mediaItem({ id: 'm2' })];
         const blocks = precheckDestinations({
             accounts: [accountFor({ id: 'x1', platform: 'x', handle: '@x' })],
@@ -307,7 +355,37 @@ describe('precheckDestinations', () => {
             segmentBreaks: ['break1'],
         });
 
-        expect(blocks[0]?.reasons).toContain('unplaced_media');
+        expect(blocks).toEqual([]);
+    });
+
+    it('validates a video-only target against its placed subset', () => {
+        const media = [
+            mediaItem({ id: 'video', kind: 'video' }),
+            mediaItem({ id: 'excluded-image', kind: 'image' }),
+        ];
+        const blocks = precheckDestinations({
+            accounts: [
+                accountFor({ id: 'yt1', platform: 'youtube', handle: '@yt' }),
+            ],
+            segments: ['Video caption'],
+            mentions: [],
+            autoSplitByAccount: { yt1: true },
+            overrideByAccount: {},
+            formatByAccount: {},
+            media,
+            limits: [
+                limitsFor({
+                    platform: 'youtube',
+                    maxMedia: 1,
+                    requiresMedia: true,
+                    requiresVideo: true,
+                    threadMax: 1,
+                }),
+            ],
+            placementsByAccount: { yt1: { __head__: ['video'] } },
+        });
+
+        expect(blocks).toEqual([]);
     });
 });
 
@@ -424,6 +502,47 @@ describe('precheckAccount media-first platforms', () => {
             }),
         });
         expect(reasons).toEqual([]);
+    });
+
+    it('requires a video for a reel format', () => {
+        const reasons = precheckAccount({
+            account: accountFor({ platform: 'instagram' }),
+            segments: ['Reel caption'],
+            autoSplit: false,
+            mentions: [],
+            mediaCount: 1,
+            hasVideo: false,
+            format: 'reels',
+            limits: limitsFor({
+                platform: 'instagram',
+                requiresMedia: true,
+                maxMedia: 10,
+                threadMax: 1,
+            }),
+        });
+
+        expect(reasons).toContain('reels_requires_video');
+    });
+
+    it('blocks multiple attachments for a single-media format', () => {
+        const reasons = precheckAccount({
+            account: accountFor({ platform: 'instagram' }),
+            segments: ['Story'],
+            autoSplit: false,
+            mentions: [],
+            mediaCount: 2,
+            mediaCounts: [2],
+            hasVideo: false,
+            format: 'story',
+            limits: limitsFor({
+                platform: 'instagram',
+                requiresMedia: true,
+                maxMedia: 10,
+                threadMax: 1,
+            }),
+        });
+
+        expect(reasons).toContain('too_many_media');
     });
 
     it('reports empty rather than media_required when there is no text either', () => {

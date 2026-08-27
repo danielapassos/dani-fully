@@ -5,15 +5,13 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\PostStatus;
-use App\Enums\PostTargetStatus;
+use App\Exceptions\PostTargetRetryRejected;
 use App\Http\Controllers\Api\V1\Concerns\ResolvesWorkspacePost;
 use App\Http\Controllers\Controller;
-use App\Jobs\PublishPostTarget;
 use App\Models\PostTarget;
 use App\Models\Workspace;
 use App\Services\Posts\NextSlotResolver;
-use App\Services\Posts\PublishPrecheck;
-use App\Services\Publishing\PostStatusRollup;
+use App\Services\Publishing\ManualPostTargetRetry;
 use App\Services\Publishing\PublishDispatcher;
 use App\Support\PostView;
 use Illuminate\Http\JsonResponse;
@@ -66,12 +64,16 @@ class PostActionsController extends Controller
         return response()->json(['post' => PostView::make($model->fresh(['targets.account', 'media']))]);
     }
 
-    public function publish(string $id, PublishDispatcher $dispatcher, PublishPrecheck $precheck): JsonResponse
+    public function publish(string $id, PublishDispatcher $dispatcher): JsonResponse
     {
         $model = $this->findPostOrFail($id);
         $this->authorize('update', $model);
 
-        $blocked = $precheck->blockingTargets($model->loadMissing(['targets.account', 'media']));
+        if (! $dispatcher->hasRunnableTargets($model)) {
+            return response()->json(['message' => PublishDispatcher::NO_RUNNABLE_MESSAGE], 422);
+        }
+
+        $blocked = $dispatcher->blockingTargets($model);
         if ($blocked !== []) {
             return response()->json([
                 'message' => "Some accounts can't be published yet.",
@@ -89,7 +91,7 @@ class PostActionsController extends Controller
         ], 202);
     }
 
-    public function retry(string $id, string $targetId, PostStatusRollup $rollup): JsonResponse
+    public function retry(string $id, string $targetId, ManualPostTargetRetry $retry): JsonResponse
     {
         $model = $this->findPostOrFail($id);
         $this->authorize('update', $model);
@@ -100,19 +102,11 @@ class PostActionsController extends Controller
             abort(404, 'No such target on that post.');
         }
 
-        if (! $postTarget->canRetryManually()) {
-            abort(422, $postTarget->manualRetryBlockedReason() ?? 'Only failed or skipped targets can be retried.');
+        try {
+            $retry->dispatch($postTarget);
+        } catch (PostTargetRetryRejected $exception) {
+            abort(422, $exception->getMessage());
         }
-
-        $postTarget->forceFill([
-            'status' => PostTargetStatus::Pending->value,
-            'error_kind' => null,
-            'error_message' => null,
-            'next_attempt_at' => null,
-        ])->save();
-
-        PublishPostTarget::dispatch($postTarget);
-        $rollup->recompute($model);
 
         return response()->json([
             'status' => 'queued',

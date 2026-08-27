@@ -50,7 +50,7 @@ test('workspace photo uses the configured public image disk', function () {
         'filesystems.default' => 's3',
         'filesystems.public_images' => 'public-images',
         'filesystems.disks.public-images.url' => 'https://cdn.shoutrrr.com',
-        'filesystems.disks.public-images.visibility' => 'public',
+        'filesystems.disks.public-images.public_url' => 'https://cdn.shoutrrr.com',
     ]);
     Storage::fake('s3');
     Storage::fake('public-images', ['url' => 'https://cdn.shoutrrr.com']);

@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace App\Mcp\Tools;
 
-use App\Enums\PostTargetStatus;
-use App\Jobs\PublishPostTarget;
+use App\Exceptions\PostTargetRetryRejected;
 use App\Mcp\Tools\Concerns\WorkspaceTool;
 use App\Models\Post;
 use App\Models\PostTarget;
-use App\Services\Publishing\PostStatusRollup;
+use App\Services\Publishing\ManualPostTargetRetry;
 use App\Support\PostView;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -20,7 +19,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 #[Description('Retry a safely retryable failed or skipped publish target. An unconfirmed provider outcome requires manual review and cannot be retried. Outward-facing (re-attempts a live post). Requires confirm=true.')]
 class RetryPostTargetTool extends WorkspaceTool
 {
-    public function handle(Request $request, PostStatusRollup $rollup): Response
+    public function handle(Request $request, ManualPostTargetRetry $retry): Response
     {
         if ($this->bindWorkspace($request) === null) {
             return Response::error('This connection is not bound to a workspace. Reconnect and select a workspace.');
@@ -47,23 +46,15 @@ class RetryPostTargetTool extends WorkspaceTool
             return Response::error('No such target on that post.');
         }
 
-        if (! $target->canRetryManually()) {
-            return Response::error($target->manualRetryBlockedReason() ?? 'Only failed or skipped targets can be retried.');
-        }
-
         if ($unconfirmed = $this->requireConfirmation($request, 'This will re-attempt publishing to the connected account.')) {
             return $unconfirmed;
         }
 
-        $target->forceFill([
-            'status' => PostTargetStatus::Pending->value,
-            'error_kind' => null,
-            'error_message' => null,
-            'next_attempt_at' => null,
-        ])->save();
-
-        PublishPostTarget::dispatch($target);
-        $rollup->recompute($post);
+        try {
+            $retry->dispatch($target);
+        } catch (PostTargetRetryRejected $exception) {
+            return Response::error($exception->getMessage());
+        }
 
         return Response::text(json_encode([
             'status' => 'queued',

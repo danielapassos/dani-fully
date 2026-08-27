@@ -18,10 +18,16 @@ final class SegmentMediaResolver
      * @param  list<PostMedia>  $allMedia
      * @return array<int, list<PostMedia>>
      */
-    public function resolve(array $sections, array $sectionSources, array $segmentBreaks, array $placements, array $allMedia): array
-    {
+    public function resolve(
+        array $sections,
+        array $sectionSources,
+        array $segmentBreaks,
+        array $placements,
+        array $allMedia,
+        bool $placementsExplicit = false,
+    ): array {
         if ($placements === []) {
-            return [0 => $allMedia];
+            return [0 => $placementsExplicit ? [] : $allMedia];
         }
 
         $mediaById = [];
@@ -59,7 +65,10 @@ final class SegmentMediaResolver
 
         ksort($out);
 
-        return $out;
+        // Non-empty input rows are explicit even if every referenced media row
+        // was concurrently detached or deleted. Preserve "none" rather than
+        // returning the bare sentinel that PublishContext treats as legacy-all.
+        return $out === [] ? [0 => []] : $out;
     }
 
     /**

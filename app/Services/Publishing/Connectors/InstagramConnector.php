@@ -58,7 +58,7 @@ class InstagramConnector implements PublishConnector
             return PublishResult::success($context->target->remote_ids ?? [$context->target->remote_id]);
         }
 
-        if ($context->media === []) {
+        if ($context->effectiveMedia() === []) {
             return PublishResult::failure(ErrorKind::Validation, 'Instagram requires at least one image or video');
         }
 
@@ -159,7 +159,7 @@ class InstagramConnector implements PublishConnector
             return $existing;
         }
 
-        $media = array_slice($context->media, 0, Platform::Instagram->maxMedia());
+        $media = array_slice($context->effectiveMedia(), 0, Platform::Instagram->maxMedia());
 
         $containerId = match (true) {
             $format === PostFormat::Story => $this->createStoryContainer($context, $media[0], $igUserId, $token),

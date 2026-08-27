@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\Platform;
+use App\Enums\PostFormat;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\PostMedia;
@@ -92,6 +93,40 @@ test('blockingTargets passes an Instagram target with text and media', function 
     $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
 
     expect($blocked)->toBe([]);
+});
+
+test('blockingTargets requires video for a Meta reel format', function () {
+    $post = Post::factory()->create();
+    PostMedia::factory()->for($post)->create(['kind' => 'image']);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::Instagram]);
+    PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::Instagram->value,
+        'format' => PostFormat::Reels->value,
+        'sections' => ['Reel caption'],
+    ]);
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+
+    expect($blocked)->toHaveCount(1)
+        ->and($blocked[0]['issues'])->toContain('video_required');
+});
+
+test('blockingTargets prevents single-media formats from silently dropping attachments', function () {
+    $post = Post::factory()->create();
+    PostMedia::factory()->for($post)->count(2)->create(['kind' => 'image']);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::Instagram]);
+    PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::Instagram->value,
+        'format' => PostFormat::Story->value,
+        'sections' => [''],
+    ]);
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+
+    expect($blocked)->toHaveCount(1)
+        ->and($blocked[0]['issues'])->toContain('too_many_media');
 });
 
 test('blockingTargets requires a video for TikTok even when an image is attached', function () {
@@ -497,7 +532,7 @@ test('blockingTargets flags 5 images placed on a single thread section as too_ma
         ->and($blocked[0]['issues'])->toContain('too_many_media');
 });
 
-test('blockingTargets flags attached media with no placement as unplaced_media', function () {
+test('blockingTargets treats media omitted from explicit placements as a target-specific exclusion', function () {
     $post = Post::factory()->create();
     $placed = PostMedia::factory()->for($post)->create(['kind' => 'image']);
     PostMedia::factory()->for($post)->create(['kind' => 'image']);
@@ -514,9 +549,43 @@ test('blockingTargets flags attached media with no placement as unplaced_media',
 
     $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'targets.placements', 'media']));
 
-    expect($blocked)->toHaveCount(1)
-        ->and($blocked[0]['issues'])->toContain('unplaced_media');
+    expect($blocked)->toBe([]);
 });
+
+test('blockingTargets validates TikTok and YouTube against each targets placed video subset', function (
+    Platform $platform,
+    string $configKey,
+    string $scope,
+) {
+    config()->set($configKey, true);
+    $post = Post::factory()->create();
+    $video = PostMedia::factory()->for($post)->video()->create();
+    PostMedia::factory()->for($post)->create(['kind' => 'image']);
+    $account = ConnectedAccount::factory()->create([
+        'platform' => $platform,
+        'capabilities' => ['oauth_scopes' => [$scope]],
+    ]);
+    $target = PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => $platform,
+        'sections' => ['Video caption'],
+    ]);
+    PostMediaPlacement::factory()->create([
+        'post_target_id' => $target->id,
+        'post_media_id' => $video->id,
+        'segment_ref' => SegmentMediaResolver::HEAD,
+        'position' => 0,
+    ]);
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets(
+        $post->fresh(['targets.account', 'targets.placements', 'media']),
+    );
+
+    expect($blocked)->toBe([]);
+})->with([
+    'TikTok' => [Platform::TikTok, 'services.tiktok.inbox_enabled', 'video.upload'],
+    'YouTube' => [Platform::YouTube, 'services.youtube.publishing_enabled', 'https://www.googleapis.com/auth/youtube.upload'],
+]);
 
 test('blockingTargets passes a target whose placements cover all attached media', function () {
     $post = Post::factory()->create();
@@ -542,6 +611,54 @@ test('blockingTargets passes a target whose placements cover all attached media'
     $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'targets.placements', 'media']));
 
     expect($blocked)->toBe([]);
+});
+
+test('blockingTargets treats an explicit empty placement set as text-only while preserving the legacy fallback', function (): void {
+    $post = Post::factory()->create(['segments' => ['hello'], 'base_text' => 'hello']);
+    PostMedia::factory()->for($post)->create(['kind' => 'image']);
+    PostMedia::factory()->for($post)->video()->create();
+    $target = PostTarget::factory()->for($post)->create([
+        'platform' => Platform::X->value,
+        'sections' => ['hello'],
+        'placements_explicit' => true,
+    ]);
+
+    $explicit = app(PublishPrecheck::class)->blockingTargets(
+        $post->fresh(['targets.account', 'targets.placements', 'media']),
+    );
+    expect($explicit)->toBe([]);
+
+    $target->forceFill(['placements_explicit' => false])->save();
+    $legacy = app(PublishPrecheck::class)->blockingTargets(
+        $post->fresh(['targets.account', 'targets.placements', 'media']),
+    );
+    expect($legacy)->toHaveCount(1)
+        ->and($legacy[0]['issues'])->toContain('mixed_video_and_images');
+});
+
+test('blockingTargets honors legacy per-account media subsets and empty selections', function (): void {
+    $post = Post::factory()->create(['segments' => ['hello'], 'base_text' => 'hello']);
+    $image = PostMedia::factory()->for($post)->create(['kind' => 'image']);
+    PostMedia::factory()->for($post)->video()->create();
+    $target = PostTarget::factory()->for($post)->create([
+        'platform' => Platform::X->value,
+        'sections' => ['hello'],
+        'placements_explicit' => false,
+        'content_override' => ['segments' => ['hello'], 'media_ids' => [$image->id]],
+    ]);
+
+    $subset = app(PublishPrecheck::class)->blockingTargets(
+        $post->fresh(['targets.account', 'targets.placements', 'media']),
+    );
+    expect($subset)->toBe([]);
+
+    $target->forceFill([
+        'content_override' => ['segments' => ['hello'], 'media_ids' => []],
+    ])->save();
+    $empty = app(PublishPrecheck::class)->blockingTargets(
+        $post->fresh(['targets.account', 'targets.placements', 'media']),
+    );
+    expect($empty)->toBe([]);
 });
 
 test('blockingTargets allows a GIF mixed with an image on LinkedIn', function () {

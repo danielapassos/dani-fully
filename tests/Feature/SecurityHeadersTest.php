@@ -90,6 +90,19 @@ test('a vanilla s3 disk with no endpoint falls back to https: so uploads still w
         ->and($csp)->toContain('media-src \'self\' blob: https:');
 });
 
+test('an s3 disk with only a public url still permits its separate presigned upload host', function () {
+    config([
+        'filesystems.default' => 's3',
+        'filesystems.disks.s3.url' => 'https://cdn.example.com',
+        'filesystems.disks.s3.endpoint' => null,
+    ]);
+
+    $csp = $this->get('/login')->headers->get('Content-Security-Policy');
+
+    expect($csp)->toContain("connect-src 'self' blob: https://cdn.example.com https:")
+        ->and($csp)->toContain("media-src 'self' blob: https://cdn.example.com https:");
+});
+
 test('a configured frontend Sentry DSN is allowlisted in connect-src', function () {
     config(['sentry-browser.dsn' => 'https://public@o123.ingest.sentry.io/456']);
 

@@ -12,7 +12,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('List connected social accounts (X, LinkedIn, Bluesky) in the bound workspace with their connection status.')]
+#[Description('List every connected social account in the bound workspace with its platform and connection status.')]
 class ListConnectedAccountsTool extends WorkspaceTool
 {
     public function handle(Request $request): Response

@@ -21,7 +21,7 @@ class PublicShareController extends Controller
         $post = $share
             ?->post()
             ->withoutGlobalScopes()
-            ->with(['targets.account', 'media'])
+            ->with(['targets.account', 'targets.placements', 'media'])
             ->first();
 
         return Inertia::render('share/show', [

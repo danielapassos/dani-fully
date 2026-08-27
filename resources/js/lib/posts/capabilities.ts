@@ -12,7 +12,10 @@ export function targetCanRetry(target: RetryTarget): boolean {
         return false;
     }
 
-    return target.can_retry ?? target.error_kind !== 'unknown';
+    return (
+        target.can_retry ??
+        (target.error_kind !== undefined && target.error_kind !== 'unknown')
+    );
 }
 
 export interface PostCapabilities {
@@ -37,9 +40,7 @@ const NONE: PostCapabilities = {
 
 export function postCapabilities(post: PostView): PostCapabilities {
     // Tolerate partial Inertia payloads that omit targets (e.g. lighter feed rows).
-    const hasFailedTarget = (post.targets ?? []).some(
-        (target) => target.status === 'failed' && targetCanRetry(target),
-    );
+    const hasRetryableTarget = (post.targets ?? []).some(targetCanRetry);
     switch (post.status) {
         case 'draft':
             return {
@@ -72,7 +73,7 @@ export function postCapabilities(post: PostView): PostCapabilities {
             return {
                 ...NONE,
                 canDelete: true,
-                canRetry: hasFailedTarget,
+                canRetry: hasRetryableTarget,
                 canDuplicate: true,
             };
         default:

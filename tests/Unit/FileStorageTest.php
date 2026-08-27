@@ -44,6 +44,15 @@ test('it returns a temporary url for a private disk', function () {
         ->toContain('expiration=');
 });
 
+test('it returns a stable encoded url when a disk has an explicit public base', function () {
+    config(['filesystems.disks.public-images.public_url' => 'https://cdn.example.com/avatars/']);
+    Storage::fake('public-images');
+
+    expect(FileStorage::url('/profile photos/Dani #1.jpg', 'public-images'))
+        ->toBe('https://cdn.example.com/avatars/profile%20photos/Dani%20%231.jpg')
+        ->not->toContain('expiration=');
+});
+
 test('it builds a stable provider url from the configured public media base', function () {
     config(['media.public_url' => 'https://media.example.com/verified-prefix/']);
 

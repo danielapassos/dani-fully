@@ -47,6 +47,15 @@ class PublishPostTool extends WorkspaceTool
             return Response::error('This workspace requires an active subscription before publishing.');
         }
 
+        if (! $dispatcher->hasRunnableTargets($post)) {
+            return Response::error(PublishDispatcher::NO_RUNNABLE_MESSAGE);
+        }
+
+        $blocked = $dispatcher->blockingTargets($post);
+        if ($blocked !== []) {
+            return Response::error("Some accounts can't be published yet: ".json_encode($blocked, JSON_THROW_ON_ERROR));
+        }
+
         $post->forceFill(['status' => PostStatus::Publishing->value])->save();
         $dispatcher->dispatchForPost($post);
 

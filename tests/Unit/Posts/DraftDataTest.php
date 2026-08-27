@@ -19,8 +19,22 @@ test('it builds from a full payload', function () {
         ->and($data->mediaIds)->toBe(['m1', 'm2'])
         ->and($data->autoSplitFor('acc-1'))->toBeFalse()
         ->and($data->hasOverrideFor('acc-1'))->toBeTrue()
-        ->and($data->overrideFor('acc-1'))->toBe(['segments' => ['hi x'], 'media_ids' => []])
+        ->and($data->overrideFor('acc-1'))->toBe(['segments' => ['hi x']])
         ->and($data->expectedUpdatedAt)->toBe('2026-06-12T10:00:00+00:00');
+});
+
+test('it preserves the difference between omitted and explicitly empty override media', function () {
+    $data = DraftData::fromArray([
+        'base_text' => 'hello',
+        'destination' => ['kind' => 'all'],
+        'targets' => [
+            ['connected_account_id' => 'inherit', 'content_override' => ['text' => 'same media']],
+            ['connected_account_id' => 'none', 'content_override' => ['text' => 'text only', 'media_ids' => []]],
+        ],
+    ]);
+
+    expect($data->overrideFor('inherit'))->toBe(['segments' => ['same media']])
+        ->and($data->overrideFor('none'))->toBe(['segments' => ['text only'], 'media_ids' => []]);
 });
 
 test('it prefers segments over base_text when both are sent', function () {

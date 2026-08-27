@@ -69,7 +69,7 @@ class ThreadsConnector implements PublishConnector
         // A caption-less media post is valid on Threads (an IMAGE/VIDEO/CAROUSEL
         // container with empty text), matching Facebook/Instagram — only a post
         // with neither text nor media anywhere is a real error.
-        if (! $hasText && $context->media === []) {
+        if (! $hasText && $context->effectiveMedia() === []) {
             return PublishResult::failure(ErrorKind::Validation, 'Threads requires text or media');
         }
 

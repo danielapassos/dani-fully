@@ -51,11 +51,13 @@ class TikTokConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::AuthExpired, 'TikTok access token unavailable; reconnect the account.');
         }
 
-        if (count($context->media) !== 1 || ! $context->media[0]->isVideo()) {
+        $media = $context->effectiveMedia();
+
+        if (count($media) !== 1 || ! $media[0]->isVideo()) {
             return PublishResult::failure(ErrorKind::Validation, 'TikTok inbox publishing requires exactly one video.');
         }
 
-        $media = $context->media[0];
+        $media = $media[0];
         $state = new MediaUploadState($context->target->media_upload_state);
         $publishId = $state->remoteRef($media->id);
         $initializing = false;

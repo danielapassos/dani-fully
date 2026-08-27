@@ -62,21 +62,24 @@ class BlueskyPublishConnector implements PublishConnector, RepostConnector
         $rootCid = null;
         $parentUri = $rootUri;
         $parentCid = null;
+        $publishRequestInFlight = false;
 
         try {
+            $media = $context->effectiveMedia();
+
             // Within a single section, video/gif take precedence over images (Bluesky's
             // per-record rule: one video or images, never both — enforced per thread
             // segment since each segment publishes as its own record; see
             // PublishPrecheck::mixIssues). But different sections publish as different
             // records, so one section's video and another section's images are readied
             // independently below rather than being treated as mutually exclusive.
-            $videoMedia = array_values(array_filter($context->media, fn (PostMedia $m): bool => $m->isVideo()));
+            $videoMedia = array_values(array_filter($media, fn (PostMedia $m): bool => $m->isVideo()));
             $gifMedia = array_values(array_filter(
-                $context->media,
+                $media,
                 fn (PostMedia $m): bool => ! $m->isVideo() && $m->mime === 'image/gif',
             ));
             $imageMedia = array_values(array_filter(
-                $context->media,
+                $media,
                 fn (PostMedia $m): bool => ! $m->isVideo() && $m->mime !== 'image/gif',
             ));
 
@@ -159,11 +162,13 @@ class BlueskyPublishConnector implements PublishConnector, RepostConnector
                     ];
                 }
 
+                $publishRequestInFlight = true;
                 $response = $this->postJsonAuthorized($pds.'/xrpc/com.atproto.repo.createRecord', $jwt, $session, [
                     'repo' => $did,
                     'collection' => 'app.bsky.feed.post',
                     'record' => $record,
                 ]);
+                $publishRequestInFlight = false;
 
                 $this->meter(UsageCategory::Publish, UsageOperation::POST, $context->account, $response);
 
@@ -173,6 +178,12 @@ class BlueskyPublishConnector implements PublishConnector, RepostConnector
 
                 $uri = (string) $response->json('uri');
                 $cid = (string) $response->json('cid');
+                if ($uri === '' || $cid === '') {
+                    return PublishResult::failure(
+                        ErrorKind::Unknown,
+                        'Bluesky accepted the publish request but returned no post reference. The post may already be live; check Bluesky before taking further action.',
+                    );
+                }
                 $remoteIds[$index] = $uri;
 
                 // Persist this segment's uri BEFORE sending the next one so a mid-thread
@@ -195,7 +206,12 @@ class BlueskyPublishConnector implements PublishConnector, RepostConnector
         } catch (BlueskyValidationFailed $e) {
             return PublishResult::failure(ErrorKind::Validation, $e->getMessage());
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return $publishRequestInFlight
+                ? PublishResult::failure(
+                    ErrorKind::Unknown,
+                    'The connection closed after Bluesky received the publish request. The post may already be live; check Bluesky before taking further action.',
+                )
+                : PublishResult::failure(ErrorKind::Network, $e->getMessage());
         }
 
         return PublishResult::success(array_values($remoteIds));
@@ -346,7 +362,7 @@ class BlueskyPublishConnector implements PublishConnector, RepostConnector
      */
     private function ensureGifVideoReady(PublishContext $context, array $media, string $pds, string $jwt, string $did, array $session): PublishResult
     {
-        if (count($context->media) > 1 || count($media) > 1) {
+        if (count($context->effectiveMedia()) > 1 || count($media) > 1) {
             return PublishResult::failure(
                 ErrorKind::Validation,
                 'Bluesky supports one animated GIF per post, and it cannot be mixed with other media.',

@@ -24,6 +24,11 @@ export type Account = {
     auto_repost_enabled: boolean;
     publishing_ready: boolean;
     publishing_unavailable_reason: string | null;
+    publishing_recovery_kind:
+        | 'enable_account'
+        | 'reconnect'
+        | 'operator_configuration'
+        | null;
 };
 
 export type Capability = {

@@ -12,7 +12,6 @@ use App\Enums\ErrorKind;
 use App\Enums\Platform;
 use App\Enums\PostTargetStatus;
 use App\Exceptions\TokenRefreshException;
-use App\Models\PostMediaPlacement;
 use App\Models\PostTarget;
 use App\Models\PostTargetAttempt;
 use App\Notifications\AccountNeedsAttentionNotification;
@@ -23,17 +22,20 @@ use App\Services\Publishing\BackoffSchedule;
 use App\Services\Publishing\PostStatusRollup;
 use App\Services\Publishing\PublishConnectorRegistry;
 use App\Services\Publishing\SegmentMediaResolver;
+use App\Services\Publishing\TargetMediaSelection;
 use App\Services\Publishing\TokenManager;
 use App\Support\InstanceSettings;
+use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
-class PublishPostTarget implements ShouldQueue
+class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
     use Queueable;
 
@@ -58,14 +60,50 @@ class PublishPostTarget implements ShouldQueue
      */
     public int $timeout = 900;
 
+    /** Keep duplicate pending jobs collapsed until the winning job starts. */
+    public int $uniqueFor = 1260;
+
     private const array TERMINAL = [
         PostTargetStatus::Published,
+        PostTargetStatus::Failed,
         PostTargetStatus::Skipped,
         PostTargetStatus::Deleting,
         PostTargetStatus::Deleted,
     ];
 
+    private const array RUNNABLE = [
+        PostTargetStatus::Pending,
+        PostTargetStatus::Publishing,
+    ];
+
     public function __construct(public PostTarget $target) {}
+
+    public function uniqueId(): string
+    {
+        return (string) $this->target->getKey();
+    }
+
+    /**
+     * One target may involve a long upload plus several delayed poll jobs. Keep
+     * workers from mutating the same remote post concurrently; a duplicate job
+     * is discarded because the target's persisted state remains authoritative.
+     * Sync queues execute delayed self-dispatches inline, so they cannot use a
+     * lock that the parent invocation still owns.
+     *
+     * @return list<WithoutOverlapping>
+     */
+    public function middleware(): array
+    {
+        if (config('queue.default') === 'sync') {
+            return [];
+        }
+
+        return [
+            (new WithoutOverlapping("publish-post-target:{$this->target->getKey()}"))
+                ->dontRelease()
+                ->expireAfter($this->timeout + 60),
+        ];
+    }
 
     public function handle(
         PublishConnectorRegistry $registry,
@@ -86,6 +124,13 @@ class PublishPostTarget implements ShouldQueue
             return;
         }
 
+        // Manual retries must first atomically move Failed/Skipped back to
+        // Pending. A stale duplicate job must never turn a completed failure
+        // into an implicit retry after the overlap lock has been released.
+        if (! in_array($target->status, self::RUNNABLE, true)) {
+            return;
+        }
+
         if (! $settings->platformAvailable($target->platform)) {
             $target->forceFill([
                 'status' => PostTargetStatus::Skipped->value,
@@ -99,11 +144,29 @@ class PublishPostTarget implements ShouldQueue
             return;
         }
 
-        if ($target->account()->first()?->isDisabled()) {
+        $account = $target->account()->firstOrFail();
+
+        if ($account->isDisabled()) {
             $target->forceFill([
                 'status' => PostTargetStatus::Skipped->value,
                 'error_kind' => null,
                 'error_message' => 'This account is disabled in the workspace.',
+                'next_attempt_at' => null,
+            ])->save();
+
+            $rollup->recompute($target->post()->firstOrFail());
+
+            return;
+        }
+
+        // Re-check provider flags and upload scopes at execution time. They can
+        // change after the request was queued, and the connector must not be the
+        // first place an unavailable publishing capability is discovered.
+        if ($account->status === ConnectedAccountStatus::Active && ! $account->canPublish()) {
+            $target->forceFill([
+                'status' => PostTargetStatus::Skipped->value,
+                'error_kind' => null,
+                'error_message' => $account->publishingUnavailableReason() ?? 'This account is not ready to publish.',
                 'next_attempt_at' => null,
             ])->save();
 
@@ -129,8 +192,6 @@ class PublishPostTarget implements ShouldQueue
                 'started_at' => Date::now(),
             ]);
         });
-
-        $account = $target->account()->firstOrFail();
 
         $workspace = $target->post()->firstOrFail()->workspace()->firstOrFail();
 
@@ -285,10 +346,16 @@ class PublishPostTarget implements ShouldQueue
 
     private function markFailed(PostTarget $target, Throwable $e): void
     {
-        $this->closeOpenAttempt($target, 'failed', Str::limit($e->getMessage(), 1000));
+        $this->closeOpenAttempt(
+            $target,
+            'failed',
+            Str::limit($e->getMessage(), 1000),
+            ErrorKind::Unknown,
+        );
 
         $target->forceFill([
             'status' => PostTargetStatus::Failed->value,
+            'error_kind' => ErrorKind::Unknown->value,
             'error_message' => Str::limit($e->getMessage(), 1000),
             'next_attempt_at' => null,
         ])->save();
@@ -301,8 +368,12 @@ class PublishPostTarget implements ShouldQueue
     /**
      * Close the currently-open attempt row (the one this dead run left unfinished).
      */
-    private function closeOpenAttempt(PostTarget $target, string $status, ?string $errorMessage = null): void
-    {
+    private function closeOpenAttempt(
+        PostTarget $target,
+        string $status,
+        ?string $errorMessage = null,
+        ?ErrorKind $errorKind = null,
+    ): void {
         $attempt = $target->attemptLogs()->whereNull('finished_at')->latest('id')->first();
 
         if ($attempt === null) {
@@ -313,6 +384,10 @@ class PublishPostTarget implements ShouldQueue
 
         if ($errorMessage !== null) {
             $fields['error_message'] = $errorMessage;
+        }
+
+        if ($errorKind !== null) {
+            $fields['error_kind'] = $errorKind->value;
         }
 
         $attempt->forceFill($fields)->save();
@@ -326,19 +401,18 @@ class PublishPostTarget implements ShouldQueue
         $post = $target->post()->firstOrFail();
         $media = array_values($post->media()->get()->all());
 
-        $placements = array_values($target->placements()->get()
-            ->map(fn (PostMediaPlacement $p): array => [
-                'post_media_id' => $p->post_media_id,
-                'segment_ref' => $p->segment_ref,
-                'position' => $p->position,
-            ])->all());
+        $selection = app(TargetMediaSelection::class)->resolve(
+            $target,
+            $target->placements()->get(),
+        );
 
         $mediaBySection = app(SegmentMediaResolver::class)->resolve(
             sections: $target->sections,
             sectionSources: $target->section_sources ?? [],
             segmentBreaks: $target->segment_breaks ?? [],
-            placements: $placements,
+            placements: $selection['placements'],
             allMedia: $media,
+            placementsExplicit: $selection['explicit'],
         );
 
         return new PublishContext(

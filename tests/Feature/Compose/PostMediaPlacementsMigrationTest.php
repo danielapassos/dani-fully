@@ -8,5 +8,5 @@ test('placements table and target provenance columns exist', function (): void {
     expect(Schema::hasColumns('post_media_placements', [
         'id', 'post_target_id', 'post_media_id', 'segment_ref', 'position', 'created_at', 'updated_at',
     ]))->toBeTrue();
-    expect(Schema::hasColumns('post_targets', ['segment_breaks', 'section_sources']))->toBeTrue();
+    expect(Schema::hasColumns('post_targets', ['segment_breaks', 'section_sources', 'placements_explicit']))->toBeTrue();
 });

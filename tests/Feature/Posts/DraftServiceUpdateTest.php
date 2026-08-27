@@ -60,7 +60,7 @@ test('updateDraft applies a per-account override and re-splits only that target'
     $target = $updated->targets->firstWhere('connected_account_id', $first->id);
 
     expect($target->sections)->toBe(['custom for x'])
-        ->and($target->content_override)->toBe(['segments' => ['custom for x'], 'media_ids' => []]);
+        ->and($target->content_override)->toBe(['segments' => ['custom for x']]);
 });
 
 test('switching destination preserves surviving accounts edits (smart merge)', function () {
@@ -85,7 +85,7 @@ test('switching destination preserves surviving accounts edits (smart merge)', f
     ]));
 
     expect($narrowed->targets)->toHaveCount(1)
-        ->and($narrowed->targets->first()->content_override)->toBe(['segments' => ['kept text'], 'media_ids' => []]);
+        ->and($narrowed->targets->first()->content_override)->toBe(['segments' => ['kept text']]);
 });
 
 test('switching to a custom accounts destination preserves selected account edits', function () {
@@ -110,7 +110,7 @@ test('switching to a custom accounts destination preserves selected account edit
 
     expect($updated->account_set_id)->toBeNull()
         ->and($updated->targets)->toHaveCount(2)
-        ->and($updated->targets->firstWhere('connected_account_id', $keep->id)->content_override)->toBe(['segments' => ['kept text'], 'media_ids' => []]);
+        ->and($updated->targets->firstWhere('connected_account_id', $keep->id)->content_override)->toBe(['segments' => ['kept text']]);
 });
 
 test('updateDraft attaches and orders media', function () {

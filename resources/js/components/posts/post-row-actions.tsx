@@ -153,14 +153,12 @@ export function PostRowActions({ post }: Props) {
     }
 
     function handleRetry() {
-        const failedTarget = post.targets.find(
-            (target) => target.status === 'failed' && targetCanRetry(target),
-        );
-        if (!failedTarget) {
+        const retryableTarget = post.targets.find(targetCanRetry);
+        if (!retryableTarget) {
             return;
         }
         router.post(
-            retryRoute({ post: post.id, target: failedTarget.id }).url,
+            retryRoute({ post: post.id, target: retryableTarget.id }).url,
             {},
             {
                 preserveScroll: true,
@@ -169,7 +167,7 @@ export function PostRowActions({ post }: Props) {
                         replaceById(list, post.id, (p) => ({
                             ...p,
                             targets: p.targets.map((t) =>
-                                t.id === failedTarget.id
+                                t.id === retryableTarget.id
                                     ? { ...t, status: 'pending' }
                                     : t,
                             ),

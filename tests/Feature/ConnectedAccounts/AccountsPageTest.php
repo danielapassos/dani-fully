@@ -55,6 +55,7 @@ test('the accounts page lists accounts and exposes capabilities and canManage to
             ->where('accounts.0.max_video_duration_seconds', 14_400)
             ->where('accounts.0.publishing_ready', true)
             ->where('accounts.0.publishing_unavailable_reason', null)
+            ->where('accounts.0.publishing_recovery_kind', null)
             ->where('accounts.0.is_default', false)
             ->missing('accounts.0.secret'),
         );

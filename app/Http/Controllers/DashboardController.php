@@ -36,7 +36,7 @@ class DashboardController extends Controller
                     ->all()
                 : [],
             'posts' => Inertia::defer(fn (): array => Post::query()
-                ->with(['author:id,name', 'targets', 'media'])
+                ->with(['author:id,name', 'workspace:id,is_initial', 'targets.account', 'media'])
                 ->latest('updated_at')
                 ->limit(25)
                 ->get()

@@ -7,6 +7,7 @@ namespace App\Support;
 use App\Models\Post;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
+use App\Services\Publishing\ManualRetryEligibility;
 
 final class PostListItem
 {
@@ -15,6 +16,8 @@ final class PostListItem
      */
     public static function make(Post $post): array
     {
+        $retryEligibility = app(ManualRetryEligibility::class);
+
         return [
             'id' => $post->id,
             'base_text' => $post->base_text,
@@ -29,16 +32,23 @@ final class PostListItem
             'published_at' => $post->published_at?->toIso8601String(),
             'platforms' => $post->targets->pluck('platform')
                 ->map(fn ($p): string => $p->value)->unique()->values()->all(),
-            'targets' => $post->targets->map(fn (PostTarget $t): array => [
-                'id' => $t->id,
-                'platform' => $t->platform->value,
-                'status' => $t->status->value,
-                'error_kind' => $t->error_kind?->value,
-                'error_message' => $t->error_message,
-                'can_retry' => $t->canRetryManually(),
-                'retry_blocked_reason' => $t->manualRetryBlockedReason(),
-                'attempts' => $t->attempts,
-            ])->all(),
+            'targets' => $post->targets->map(function (PostTarget $target) use ($post, $retryEligibility): array {
+                $retry = $retryEligibility->evaluate($target, $post);
+
+                return [
+                    'id' => $target->id,
+                    'platform' => $target->platform->value,
+                    'status' => $target->status->value,
+                    'error_kind' => $target->error_kind?->value,
+                    'error_message' => $target->error_message,
+                    'can_retry' => $retry['allowed'],
+                    'retry_blocked_reason' => ! $retry['allowed'] && $target->status->isRetryable()
+                        ? $retry['reason']
+                        : null,
+                    'retry_recovery_kind' => $retry['recovery_kind'],
+                    'attempts' => $target->attempts,
+                ];
+            })->all(),
         ];
     }
 

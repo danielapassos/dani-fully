@@ -124,6 +124,49 @@ test('cloned target is pending with overrides preserved and media ids remapped',
         ->and($target->content_override['media_ids'])->toBe([$newMedia->id]);
 });
 
+test('cloned target preserves placement provenance and remaps placement media ids', function (): void {
+    $post = publishedPostWithMediaAndTarget($this->workspace, $this->user);
+    $sourceTarget = $post->targets()->firstOrFail();
+    $sourceMedia = $post->media()->firstOrFail();
+    $sourceTarget->forceFill([
+        'segment_breaks' => ['b1'],
+        'section_sources' => [0],
+        'placements_explicit' => true,
+    ])->save();
+    $sourceTarget->placements()->create([
+        'post_media_id' => $sourceMedia->id,
+        'segment_ref' => 'b1',
+        'position' => 0,
+    ]);
+
+    $this->actingAs($this->user)->post(route('posts.duplicate', $post));
+
+    $draft = Post::query()->where('status', PostStatus::Draft->value)->firstOrFail();
+    $target = $draft->targets()->firstOrFail();
+    $newMedia = $draft->media()->firstOrFail();
+    $placement = $target->placements()->sole();
+
+    expect($target->placements_explicit)->toBeTrue()
+        ->and($target->segment_breaks)->toBe(['b1'])
+        ->and($target->section_sources)->toBe([0])
+        ->and($placement->post_media_id)->toBe($newMedia->id)
+        ->and($placement->post_media_id)->not->toBe($sourceMedia->id)
+        ->and($placement->segment_ref)->toBe('b1');
+});
+
+test('cloned target preserves an explicit empty placement set', function (): void {
+    $post = publishedPostWithMediaAndTarget($this->workspace, $this->user);
+    $post->targets()->firstOrFail()->forceFill(['placements_explicit' => true])->save();
+
+    $this->actingAs($this->user)->post(route('posts.duplicate', $post));
+
+    $draft = Post::query()->where('status', PostStatus::Draft->value)->firstOrFail();
+    $target = $draft->targets()->firstOrFail();
+
+    expect($target->placements_explicit)->toBeTrue()
+        ->and($target->placements()->count())->toBe(0);
+});
+
 test('targets for deleted accounts are skipped', function (): void {
     $post = publishedPostWithMediaAndTarget($this->workspace, $this->user);
     $post->targets()->firstOrFail()->account->forceDelete();

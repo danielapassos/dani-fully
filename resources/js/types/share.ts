@@ -1,10 +1,13 @@
+import type { PlatformName } from '@/types/compose';
+
 export type PublicTarget = {
-    platform: 'x' | 'bluesky' | 'linkedin';
+    platform: PlatformName;
     sections: string[];
     status: string; // 'pending'|'publishing'|'published'|'failed'|'deleting'|'deleted'
     handle: string | null;
     display_name: string | null;
     avatar_url: string | null;
+    media_by_section: PublicMedia[][];
 };
 
 export type PublicMedia = {

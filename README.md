@@ -136,9 +136,9 @@ Set `INERTIA_SSR_ENABLED=true` for server-side rendering. To run the worker/sche
 
 ### Deploy with Coolify
 
-[Coolify](https://coolify.io) deploys Shoutrrr straight from this repo using the bundled Compose file — it handles the domain, HTTPS, and persistent volumes for you.
+[Coolify](https://coolify.io) reads the bundled Compose file from this repo and runs a prebuilt GHCR image — it handles the domain, HTTPS, and persistent volumes for you. The Compose file does not build the checked-out source.
 
-> An official Shoutrrr app is coming to the Coolify app directory soon for one-click deploys. Until then, use the manual from-source method below.
+> Publish the fork's image before deploying: a merge to `main` alone does not create or update `:latest`. Publish a GitHub Release for the versioned and `latest` tags, or manually run the Release workflow and set `SHOUTRRR_IMAGE` to its generated `sha-*` tag.
 
 1. In Coolify, click **+ New → Resource** and pick **Public Repository** (or Private, via the GitHub App). Enter `https://github.com/danielapassos/dani-fully`.
 2. Set the **Build Pack** to **Docker Compose** and the **Docker Compose file** to `docker-compose.production.yaml`.
@@ -163,7 +163,7 @@ The Compose file declares named volumes for `storage` and the SQLite database, s
 
 Laravel Cloud builds this repository and runs the web app, scheduler, and queues as managed services, so Docker does not need to run on your Mac. Connect this GitHub repository, then:
 
-1. Attach Postgres, a cache, and an object-storage bucket. Configure the bucket through the existing `s3` disk and set `FILESYSTEM_DISK=s3`; if you add another named S3-compatible disk in `config/filesystems.php`, that configured name is supported too.
+1. Attach Postgres, a cache, and an object-storage bucket. Configure the bucket through the existing `s3` disk and set `FILESYSTEM_DISK=s3`; if you add another named S3-compatible disk in `config/filesystems.php`, that configured name is supported too. Its CORS policy must allow browser `PUT` and `GET` from `APP_URL` and expose `ETag`, because the editor reads the uploaded source back directly.
 2. Use a **public** bucket for media providers that fetch by URL. Copy the bucket's public URL from Cloud into `PUBLIC_MEDIA_URL` (Cloud displays this as `AWS_URL` but does not inject it automatically). Verify that exact HTTPS domain or prefix in the TikTok developer app before enabling `TIKTOK_INBOX_ENABLED`.
 3. Keep Cloud's normal Composer/PHP build steps, replace its default npm asset lines with `npm install -g bun`, `bun install --frozen-lockfile`, and `bun run build`, and run `php artisan migrate --force` as the deploy command.
 4. Enable the scheduler. Every scheduled command uses `onOneServer()`, so an autoscaled environment will not dispatch the same work from every replica.

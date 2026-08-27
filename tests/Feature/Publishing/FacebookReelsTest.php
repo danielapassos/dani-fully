@@ -77,7 +77,7 @@ test('a reel drives the video_reels start, upload, and finish phases with the de
         && ($r->data()['video_state'] ?? null) === 'PUBLISHED');
 });
 
-test('a reel finish response with success false maps to a server error', function () {
+test('a reel finish response with success false requires manual reconciliation', function () {
     Http::fake([
         'https://graph.facebook.com/*/video_reels' => Http::sequence()
             ->push(['video_id' => 'v-1', 'upload_url' => 'https://rupload.facebook.com/video-upload/v-1'])
@@ -88,7 +88,8 @@ test('a reel finish response with success false maps to a server error', functio
     $result = app(FacebookConnector::class)->publish(fbReelsContext(fbReelsVideo()));
 
     expect($result->isSuccessful())->toBeFalse()
-        ->and($result->errorKind)->toBe(ErrorKind::ServerError);
+        ->and($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse();
 });
 
 test('a reel start response missing the video id or upload url fails without persisting state', function () {

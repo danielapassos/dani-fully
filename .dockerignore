@@ -19,12 +19,19 @@ bootstrap/cache/services.php
 # Local runtime / secrets / VCS
 .git
 .github
-.env
-*.sqlite
-storage/logs/*.log
-storage/framework/cache/data/*
-storage/framework/sessions/*
-storage/framework/views/*
+/.env*
+!/.env.example
+!/.env.example.full
+!/.env.example.prod
+/auth.json
+*.sqlite*
+/storage/*.key
+/storage/app/**
+/storage/framework/**
+/storage/logs/**
+/storage/pail/**
+/bootstrap/cache/*.php
+/public/storage
 
 # Octane frankenphp binary (image provides it)
 /frankenphp

@@ -2,7 +2,9 @@
 
 use App\Enums\PostStatus;
 use App\Jobs\DeletePostTarget;
+use App\Models\ConnectedAccount;
 use App\Models\Post;
+use App\Models\PostMedia;
 use App\Models\PostTarget;
 use Illuminate\Support\Facades\Queue;
 
@@ -34,6 +36,39 @@ test('updates a draft post', function () {
     ])
         ->assertOk()
         ->assertJsonPath('post.base_text', 'Edited');
+});
+
+test('updates media placements including an explicit empty account selection', function () {
+    [$user, $workspace, $token] = issuedKey();
+    $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
+    $account = ConnectedAccount::factory()->for($workspace)->create();
+    $media = PostMedia::factory()->for($workspace)->create();
+
+    $this->withToken($token)->patchJson("/api/v1/posts/{$post->id}", [
+        'base_text' => 'First\nSecond',
+        'segments' => ['First', 'Second'],
+        'destination' => ['kind' => 'all'],
+        'media_ids' => [$media->id],
+        'segment_breaks' => ['break-1'],
+        'placements' => [[
+            'media_id' => $media->id,
+            'segment_ref' => '__head__',
+            'position' => 0,
+        ]],
+        'targets' => [[
+            'connected_account_id' => $account->id,
+            'segment_breaks' => ['break-1'],
+            'placements' => [],
+        ]],
+    ])
+        ->assertOk()
+        ->assertJsonPath('post.targets.0.placements_explicit', true)
+        ->assertJsonPath('post.targets.0.placements', []);
+
+    $target = $post->targets()->where('connected_account_id', $account->id)->sole();
+    expect($target->placements_explicit)->toBeTrue()
+        ->and($target->placements()->count())->toBe(0)
+        ->and($post->media()->pluck('post_media.id')->all())->toBe([$media->id]);
 });
 
 test('deletes a draft post', function () {

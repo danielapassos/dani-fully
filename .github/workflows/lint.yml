@@ -1,6 +1,7 @@
 name: linter
 
 on:
+  workflow_call:
   push:
     branches:
       - develop
@@ -59,6 +60,12 @@ jobs:
 
       - name: Lint Frontend
         run: bun run lint:check
+
+      - name: Generate Wayfinder Types
+        run: php artisan wayfinder:generate --with-form
+
+      - name: Check Frontend Types
+        run: bun run types:check
 
       # - name: Commit Changes
       #   uses: stefanzweifel/git-auto-commit-action@v7

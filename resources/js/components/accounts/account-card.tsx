@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/input-group';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { shouldEmphasizeReconnect } from '@/lib/accounts/publishing-recovery';
 import { cn } from '@/lib/utils';
 import type { PlatformName } from '@/types/compose';
 
@@ -252,6 +253,7 @@ export function AccountCard({
     const disabled = account.disabled;
     const publishingBlocked =
         !disabled && !needsAttention && !account.publishing_ready;
+    const emphasizeReconnect = shouldEmphasizeReconnect(account);
     const name = account.display_name ?? account.handle;
     const repostCapable = REPOST_CAPABLE_PLATFORMS.includes(account.platform);
 
@@ -485,9 +487,7 @@ export function AccountCard({
                         ) : (
                             <Button
                                 variant={
-                                    needsAttention || publishingBlocked
-                                        ? 'default'
-                                        : 'outline'
+                                    emphasizeReconnect ? 'default' : 'outline'
                                 }
                                 size="sm"
                                 className="h-8 shrink-0"

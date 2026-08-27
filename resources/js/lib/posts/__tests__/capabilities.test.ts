@@ -43,7 +43,13 @@ describe('postCapabilities', () => {
         const c = postCapabilities(
             post({
                 status: 'failed',
-                targets: [{ status: 'failed' } as PostView['targets'][number]],
+                targets: [
+                    {
+                        status: 'failed',
+                        error_kind: 'validation',
+                        can_retry: true,
+                    } as PostView['targets'][number],
+                ],
             }),
         );
         expect(c).toMatchObject({
@@ -91,6 +97,19 @@ describe('postCapabilities', () => {
         expect(targetCanRetry(targets[0])).toBe(false);
         expect(targetCanRetry(targets[1])).toBe(true);
     });
+    it('a partial post can recover a safely retryable skipped target', () => {
+        const skipped = {
+            status: 'skipped',
+            error_kind: 'validation',
+            can_retry: true,
+        } as PostView['targets'][number];
+
+        expect(
+            postCapabilities(post({ status: 'partial', targets: [skipped] }))
+                .canRetry,
+        ).toBe(true);
+        expect(targetCanRetry(skipped)).toBe(true);
+    });
     it('published: delete + duplicate', () => {
         const c = postCapabilities(post({ status: 'published' }));
         expect(c).toMatchObject({
@@ -119,5 +138,9 @@ describe('postCapabilities', () => {
         const partial = { status: 'failed' } as unknown as PostView;
         expect(() => postCapabilities(partial)).not.toThrow();
         expect(postCapabilities(partial).canRetry).toBe(false);
+    });
+    it('fails closed when a partial failed target omits both retry fields', () => {
+        const target = { status: 'failed' } as PostView['targets'][number];
+        expect(targetCanRetry(target)).toBe(false);
     });
 });

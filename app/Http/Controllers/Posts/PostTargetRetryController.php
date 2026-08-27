@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Posts;
 
-use App\Enums\PostTargetStatus;
+use App\Exceptions\PostTargetRetryRejected;
 use App\Http\Controllers\Controller;
-use App\Jobs\PublishPostTarget;
 use App\Models\Post;
 use App\Models\PostTarget;
-use App\Services\Publishing\PostStatusRollup;
+use App\Services\Publishing\ManualPostTargetRetry;
 use App\Support\PostView;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -17,25 +16,20 @@ use Illuminate\Http\Request;
 
 class PostTargetRetryController extends Controller
 {
-    public function store(Request $request, Post $post, PostTarget $target): JsonResponse|RedirectResponse
-    {
+    public function store(
+        Request $request,
+        Post $post,
+        PostTarget $target,
+        ManualPostTargetRetry $retry,
+    ): JsonResponse|RedirectResponse {
         abort_unless($request->user()->can('update', $post), 403);
+        abort_unless($target->post_id === $post->id, 404);
 
-        if (! $target->canRetryManually()) {
-            abort(409, $target->manualRetryBlockedReason() ?? 'Only failed or skipped targets can be retried.');
+        try {
+            $retry->dispatch($target);
+        } catch (PostTargetRetryRejected $exception) {
+            abort(409, $exception->getMessage());
         }
-
-        $target->forceFill([
-            'status' => PostTargetStatus::Pending->value,
-            'error_kind' => null,
-            'error_message' => null,
-            'next_attempt_at' => null,
-        ])->save();
-
-        PublishPostTarget::dispatch($target);
-
-        // Reflect the in-flight retry on the post status immediately.
-        app(PostStatusRollup::class)->recompute($post);
 
         if ($request->headers->has('X-Inertia')) {
             return back();

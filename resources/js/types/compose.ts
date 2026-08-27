@@ -165,9 +165,17 @@ export type TargetView = {
     /** Server-authoritative manual retry gate. Optional for older/partial payloads. */
     can_retry?: boolean;
     retry_blocked_reason?: string | null;
+    retry_recovery_kind?:
+        | 'enable_account'
+        | 'reconnect'
+        | 'operator_configuration'
+        | 'billing'
+        | null;
     attempts: number;
     remote_id: string | null;
     segment_breaks?: string[];
+    section_sources?: number[];
+    placements_explicit?: boolean;
     placements?: Placement[];
 };
 
@@ -185,6 +193,7 @@ export type PostView = {
     targets: TargetView[];
     media: MediaView[];
     segment_breaks?: string[];
+    placements_explicit?: boolean;
     placements?: Placement[];
 };
 

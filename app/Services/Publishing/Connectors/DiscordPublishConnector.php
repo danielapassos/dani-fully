@@ -25,9 +25,10 @@ use RuntimeException;
 /**
  * Publishes to a Discord channel through its webhook URL. Each non-empty segment
  * becomes its own sequential channel message (Discord channels are already a
- * linear feed, so no reply-chaining is needed). Media attaches to the first
- * segment only, uploaded as multipart `files[n]` alongside a `payload_json`
- * content field. `?wait=true` makes Discord return the created message so its id
+ * linear feed, so no reply-chaining is needed). Media is uploaded as multipart
+ * `files[n]` alongside a `payload_json` content field. Explicit placements keep
+ * each attachment on its authored
+ * section. `?wait=true` makes Discord return the created message so its id
  * can be stored for later delete/metrics.
  */
 class DiscordPublishConnector implements PublishConnector
@@ -42,33 +43,41 @@ class DiscordPublishConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::AuthExpired, 'Discord webhook unavailable; reconnect the account.');
         }
 
-        $segments = array_values(array_filter(
-            array_map(static fn (string $segment): string => trim($segment), $context->segments),
-            static fn (string $segment): bool => $segment !== '',
-        ));
+        $messages = [];
+        foreach ($context->segments as $sectionIndex => $segment) {
+            $text = trim($segment);
+            $sectionMedia = array_slice(
+                $context->mediaForSection($sectionIndex),
+                0,
+                Platform::Discord->maxMedia(),
+            );
 
-        if ($segments === []) {
-            if ($context->media === []) {
-                return PublishResult::failure(ErrorKind::Validation, 'Discord requires text or media.');
+            if ($text !== '' || $sectionMedia !== []) {
+                $messages[] = ['text' => $text, 'media' => $sectionMedia];
             }
+        }
 
-            $segments = [''];
+        if ($messages === [] && $context->effectiveMedia() !== []) {
+            $messages[] = [
+                'text' => '',
+                'media' => array_slice($context->effectiveMedia(), 0, Platform::Discord->maxMedia()),
+            ];
+        }
+
+        if ($messages === []) {
+            return PublishResult::failure(ErrorKind::Validation, 'Discord requires text or media.');
         }
 
         $remoteIds = $context->target->remote_ids ?? [];
 
         try {
-            foreach ($segments as $index => $text) {
+            foreach ($messages as $index => $message) {
                 // Resume: skip segments already posted on a prior attempt.
                 if (isset($remoteIds[$index])) {
                     continue;
                 }
 
-                $media = $index === 0
-                    ? array_slice($context->media, 0, Platform::Discord->maxMedia())
-                    : [];
-
-                $response = $this->send($webhookUrl, $text, $media);
+                $response = $this->send($webhookUrl, $message['text'], $message['media']);
 
                 $this->meter(UsageCategory::Publish, UsageOperation::POST, $context->account, $response);
 
@@ -79,7 +88,10 @@ class DiscordPublishConnector implements PublishConnector
                 $messageId = (string) $response->json('id');
 
                 if ($messageId === '') {
-                    return PublishResult::failure(ErrorKind::ServerError, 'Discord did not return a message id.');
+                    return PublishResult::failure(
+                        ErrorKind::Unknown,
+                        'Discord accepted the publish request but returned no message id. The message may already be live; check Discord before taking further action.',
+                    );
                 }
 
                 $remoteIds[$index] = $messageId;
@@ -92,7 +104,10 @@ class DiscordPublishConnector implements PublishConnector
                 ])->save();
             }
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return PublishResult::failure(
+                ErrorKind::Unknown,
+                'The connection closed after Discord received the publish request. The message may already be live; check Discord before taking further action.',
+            );
         }
 
         return PublishResult::success(array_values($remoteIds));

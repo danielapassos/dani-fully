@@ -13,6 +13,8 @@ import {
 import { targetCanRetry } from '@/lib/posts/capabilities';
 import { platformLabel, postPermalink } from '@/lib/posts/permalink';
 import { cn } from '@/lib/utils';
+import { index as accountsRoute } from '@/routes/accounts';
+import { index as billingRoute } from '@/routes/billing';
 import type { TargetView } from '@/types/compose';
 
 const TONE_CLASS: Record<TargetTone, string> = {
@@ -37,6 +39,7 @@ export type ChipTarget = Pick<
     | 'error_message'
     | 'can_retry'
     | 'retry_blocked_reason'
+    | 'retry_recovery_kind'
     | 'attempts'
 > &
     Partial<Pick<TargetView, 'handle' | 'display_name' | 'remote_id'>>;
@@ -72,6 +75,18 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
                     (isFailed || isSkipped) &&
                     !canRetry &&
                     target.error_kind === 'unknown';
+                const requiresAccountRecovery =
+                    (isFailed || isSkipped) &&
+                    !canRetry &&
+                    (target.retry_recovery_kind === 'reconnect' ||
+                        target.retry_recovery_kind === 'enable_account');
+                const requiresBillingRecovery =
+                    (isFailed || isSkipped) &&
+                    !canRetry &&
+                    target.retry_recovery_kind === 'billing';
+                const retryBlockedReason =
+                    target.retry_blocked_reason ??
+                    'The provider outcome is unconfirmed. Check the connected platform before taking any further action.';
                 const isRetrying = retryingIds?.has(target.id) ?? false;
                 const attempts = target.attempts ?? 0;
                 const errorMessage = target.error_message
@@ -163,15 +178,32 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
                             </span>
                         )}
                         {requiresManualReview && (
-                            <span
-                                title={
-                                    target.retry_blocked_reason ??
-                                    'The provider outcome is unconfirmed. Check the connected platform before taking any further action.'
-                                }
-                                className="ml-auto inline-flex h-6 shrink-0 items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2 text-[11.5px] font-medium text-amber-700 dark:text-amber-300"
+                            <details className="group relative ml-auto shrink-0">
+                                <summary className="inline-flex h-6 cursor-pointer list-none items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2 text-[11.5px] font-medium text-amber-700 dark:text-amber-300 [&::-webkit-details-marker]:hidden">
+                                    Manual review
+                                </summary>
+                                <span className="absolute top-7 right-0 z-50 block w-72 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover p-2.5 text-left text-xs leading-relaxed whitespace-normal text-popover-foreground shadow-lg">
+                                    {retryBlockedReason}
+                                </span>
+                            </details>
+                        )}
+                        {requiresAccountRecovery && (
+                            <a
+                                href={accountsRoute().url}
+                                className="ml-auto inline-flex h-6 shrink-0 items-center rounded-md border border-border bg-background px-2 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                title={retryBlockedReason}
                             >
-                                Manual review
-                            </span>
+                                Open accounts
+                            </a>
+                        )}
+                        {requiresBillingRecovery && (
+                            <a
+                                href={billingRoute().url}
+                                className="ml-auto inline-flex h-6 shrink-0 items-center rounded-md border border-border bg-background px-2 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                title={retryBlockedReason}
+                            >
+                                View billing
+                            </a>
                         )}
                         {(isFailed || isSkipped) && canRetry && onRetry && (
                             <button

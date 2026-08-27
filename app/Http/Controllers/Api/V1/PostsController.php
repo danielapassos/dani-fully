@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1;
 
 use App\Dto\Post\DraftData;
+use App\Enums\PostFormat;
 use App\Enums\PostStatus;
 use App\Http\Controllers\Api\V1\Concerns\ResolvesWorkspacePost;
 use App\Http\Controllers\Controller;
@@ -35,7 +36,7 @@ class PostsController extends Controller
         ]);
 
         $paginator = Post::query()
-            ->with(['author:id,name', 'targets', 'media'])
+            ->with(['author:id,name', 'workspace:id,is_initial', 'targets.account', 'media'])
             ->when($validated['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
             ->when($validated['q'] ?? null, fn ($query, $q) => $query->whereLike('base_text', "%{$q}%"))
             ->orderBy('id', 'desc')
@@ -111,17 +112,34 @@ class PostsController extends Controller
             'mentions.*.handles.linkedin' => ['nullable', 'string'],
             'mentions.*.handles.linkedin_urn' => ['nullable', 'string', 'max:255'],
             'destination' => ['required', 'array'],
-            'destination.kind' => ['required', Rule::in(['all', 'set', 'account'])],
+            'destination.kind' => ['required', Rule::in(['all', 'none', 'set', 'account', 'accounts'])],
             'destination.id' => ['nullable', 'string', 'required_if:destination.kind,set,account'],
+            'destination.ids' => ['array', 'required_if:destination.kind,accounts'],
+            'destination.ids.*' => ['string'],
             'targets' => ['array'],
             'targets.*.connected_account_id' => ['required', 'string'],
             'targets.*.auto_split' => ['boolean'],
+            'targets.*.format' => ['nullable', Rule::enum(PostFormat::class)],
             'targets.*.content_override' => ['nullable', 'array'],
             'targets.*.content_override.text' => ['nullable', 'string'],
+            'targets.*.content_override.segments' => ['array'],
+            'targets.*.content_override.segments.*' => ['nullable', 'string'],
             'targets.*.content_override.media_ids' => ['array'],
             'targets.*.content_override.media_ids.*' => ['string'],
+            'targets.*.segment_breaks' => ['nullable', 'array'],
+            'targets.*.segment_breaks.*' => ['string'],
+            'targets.*.placements' => ['nullable', 'array'],
+            'targets.*.placements.*.media_id' => ['required', 'string'],
+            'targets.*.placements.*.segment_ref' => ['required', 'string'],
+            'targets.*.placements.*.position' => ['required', 'integer'],
             'media_ids' => ['array'],
             'media_ids.*' => ['string'],
+            'segment_breaks' => ['array'],
+            'segment_breaks.*' => ['string'],
+            'placements' => ['array'],
+            'placements.*.media_id' => ['required', 'string'],
+            'placements.*.segment_ref' => ['required', 'string'],
+            'placements.*.position' => ['required', 'integer'],
             'auto_repost' => ['sometimes', 'nullable', 'boolean'],
             'expected_updated_at' => ['nullable', 'string'],
         ]);

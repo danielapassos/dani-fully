@@ -40,4 +40,37 @@ final readonly class PublishContext
 
         return $this->mediaBySection[$index] ?? [];
     }
+
+    /**
+     * Ordered media this target actually publishes. Explicit placement maps may
+     * exclude or reorder attachments for one account; single-post connectors
+     * flatten those resolved sections instead of falling back to the post-wide
+     * attachment list.
+     *
+     * @return list<PostMedia>
+     */
+    public function effectiveMedia(): array
+    {
+        if ($this->mediaBySection === []) {
+            return $this->media;
+        }
+
+        $sections = $this->mediaBySection;
+        ksort($sections);
+        $seen = [];
+        $media = [];
+
+        foreach ($sections as $sectionMedia) {
+            foreach ($sectionMedia as $item) {
+                if (isset($seen[$item->id])) {
+                    continue;
+                }
+
+                $seen[$item->id] = true;
+                $media[] = $item;
+            }
+        }
+
+        return $media;
+    }
 }

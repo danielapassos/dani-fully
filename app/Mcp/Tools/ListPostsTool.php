@@ -29,7 +29,7 @@ class ListPostsTool extends WorkspaceTool
         ]);
 
         $posts = Post::query()
-            ->with(['author:id,name', 'targets', 'media'])
+            ->with(['author:id,name', 'workspace:id,is_initial', 'targets.account', 'media'])
             ->when($validated['status'] ?? null, fn ($query, $status) => $query->where('status', $status))
             ->when($validated['q'] ?? null, fn ($query, $q) => $query->whereLike('base_text', "%{$q}%"))
             ->latest()
