@@ -37,7 +37,7 @@ class CalendarController extends Controller
             'yyyymm' => $yyyymm,
             'view' => $view,
             'posts' => Inertia::defer(fn (): array => Post::query()
-                ->with(['author:id,name', 'targets', 'media'])
+                ->with(['author:id,name', 'workspace:id,is_initial', 'targets.account', 'media'])
                 ->whereIn('status', [
                     PostStatus::Scheduled->value, PostStatus::Published->value,
                     PostStatus::Partial->value, PostStatus::Failed->value,

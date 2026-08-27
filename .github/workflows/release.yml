@@ -16,8 +16,27 @@ permissions:
   contents: read
 
 jobs:
+  tests:
+    name: Verify tests
+    uses: ./.github/workflows/tests.yml
+    permissions:
+      contents: read
+
+  linter:
+    name: Verify quality gates
+    uses: ./.github/workflows/lint.yml
+    permissions:
+      contents: read
+
+  security:
+    name: Verify dependency security
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+
   build:
     name: Build ${{ matrix.platform }} image
+    needs: [tests, linter, security]
     strategy:
       fail-fast: false
       matrix:

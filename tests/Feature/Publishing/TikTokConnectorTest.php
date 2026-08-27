@@ -13,8 +13,12 @@ use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
-/** @param list<PostMedia> $media */
-function tiktokPublishContext(array $media, array $targetOverrides = []): PublishContext
+/**
+ * @param  list<PostMedia>  $media
+ * @param  array<string, mixed>  $targetOverrides
+ * @param  array<int, list<PostMedia>>  $mediaBySection
+ */
+function tiktokPublishContext(array $media, array $targetOverrides = [], array $mediaBySection = []): PublishContext
 {
     $target = PostTarget::factory()->create(array_merge([
         'platform' => Platform::TikTok,
@@ -31,6 +35,7 @@ function tiktokPublishContext(array $media, array $targetOverrides = []): Publis
         media: $media,
         account: $account,
         credentials: ['access_token' => 'tiktok-token'],
+        mediaBySection: $mediaBySection,
     );
 }
 
@@ -83,6 +88,31 @@ test('tiktok transfers one video and keeps the target processing until native fi
     Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/inbox/video/init/')
         && $request['source_info']['source'] === 'PULL_FROM_URL'
         && $request['source_info']['video_url'] === 'https://media.example.test/video.mp4');
+});
+
+test('tiktok publishes the placed video while ignoring media excluded for that target', function () {
+    Http::fake(function (Request $request) {
+        if (str_contains($request->url(), '/inbox/video/init/')) {
+            return Http::response([
+                'data' => ['publish_id' => 'publish-subset'],
+                'error' => ['code' => 'ok'],
+            ]);
+        }
+
+        return Http::response([
+            'data' => ['status' => 'SEND_TO_USER_INBOX'],
+            'error' => ['code' => 'ok'],
+        ]);
+    });
+
+    $image = PostMedia::factory()->create(['kind' => 'image']);
+    $video = PostMedia::factory()->video()->create();
+    $result = tiktokPublishConnector()->publish(
+        tiktokPublishContext([$image, $video], [], [0 => [$video]]),
+    );
+
+    expect($result->errorKind)->toBe(ErrorKind::MediaProcessing);
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/inbox/video/init/'));
 });
 
 test('tiktok persists a manual-review gate when the inbox init response is lost', function () {

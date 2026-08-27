@@ -83,7 +83,16 @@ class ApiKeyManager
      */
     private function ensureEncryptionKeysExist(): void
     {
-        if (config('passport.private_key') && config('passport.public_key')) {
+        $hasPrivateKey = filled(config('passport.private_key'));
+        $hasPublicKey = filled(config('passport.public_key'));
+
+        if ($hasPrivateKey !== $hasPublicKey) {
+            throw new RuntimeException(
+                'PASSPORT_PRIVATE_KEY and PASSPORT_PUBLIC_KEY must be configured together.'
+            );
+        }
+
+        if ($hasPrivateKey) {
             return;
         }
 

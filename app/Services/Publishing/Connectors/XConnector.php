@@ -53,6 +53,7 @@ class XConnector implements PublishConnector, RepostConnector
     {
         $token = (string) ($context->credentials['access_token'] ?? '');
         $remoteIds = $context->target->remote_ids ?? [];
+        $publishRequestInFlight = false;
 
         try {
             foreach ($context->segments as $index => $text) {
@@ -119,10 +120,12 @@ class XConnector implements PublishConnector, RepostConnector
                     $body['reply'] = ['in_reply_to_tweet_id' => $previous];
                 }
 
+                $publishRequestInFlight = true;
                 $response = $this->http
                     ->withToken($token)
                     ->acceptJson()
                     ->post(self::TWEETS_URL, $body);
+                $publishRequestInFlight = false;
 
                 $this->meter(
                     UsageCategory::Publish,
@@ -135,7 +138,15 @@ class XConnector implements PublishConnector, RepostConnector
                     return $this->mapFailure($response);
                 }
 
-                $remoteIds[$index] = (string) $response->json('data.id');
+                $remoteId = (string) $response->json('data.id');
+                if ($remoteId === '') {
+                    return PublishResult::failure(
+                        ErrorKind::Unknown,
+                        'X accepted the publish request but returned no post id. The post may already be live; check X before taking further action.',
+                    );
+                }
+
+                $remoteIds[$index] = $remoteId;
 
                 // Persist this segment's id BEFORE sending the next one so a mid-thread
                 // death resumes (rather than re-posts) the already-published segments (spec §4.3).
@@ -147,7 +158,12 @@ class XConnector implements PublishConnector, RepostConnector
         } catch (XRequestFailed $e) {
             return $this->mapFailure($e->response);
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return $publishRequestInFlight
+                ? PublishResult::failure(
+                    ErrorKind::Unknown,
+                    'The connection closed after X received the publish request. The post may already be live; check X before taking further action.',
+                )
+                : PublishResult::failure(ErrorKind::Network, $e->getMessage());
         }
 
         return PublishResult::success(array_values($remoteIds));

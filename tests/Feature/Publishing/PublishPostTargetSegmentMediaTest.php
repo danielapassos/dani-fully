@@ -33,6 +33,7 @@ test('handle() loads real placement rows and wires mediaBySection through the re
 
     $mediaA = PostMedia::factory()->create(['post_id' => $post->id, 'workspace_id' => $post->workspace_id]);
     $mediaB = PostMedia::factory()->create(['post_id' => $post->id, 'workspace_id' => $post->workspace_id]);
+    PostMedia::factory()->create(['post_id' => $post->id, 'workspace_id' => $post->workspace_id]);
 
     // Authored segments map 1:1 onto sections here (no auto-split), so section_sources
     // is the identity mapping and segment_breaks names the two non-head breaks — the
@@ -83,7 +84,9 @@ test('handle() loads real placement rows and wires mediaBySection through the re
     // The third segment has text but no placement targeting it.
     expect($captured->mediaForSection(2))->toBe([]);
 
-    expect($captured->media)->toHaveCount(2);
+    expect($captured->media)->toHaveCount(3);
+    expect(array_map(fn (PostMedia $item): string => $item->id, $captured->effectiveMedia()))
+        ->toBe([$mediaA->id, $mediaB->id]);
 });
 
 test('handle() with no placement rows falls back to all media on the first section', function (): void {
@@ -109,4 +112,85 @@ test('handle() with no placement rows falls back to all media on the first secti
     expect($captured)->not->toBeNull();
     expect($captured->mediaForSection(0))->toHaveCount(1)
         ->and($captured->mediaForSection(0)[0]->id)->toBe($media->id);
+});
+
+test('handle() preserves an explicit empty placement set instead of restoring all media', function (): void {
+    $target = publishTarget(['Text-only for this account']);
+    $post = $target->post()->firstOrFail();
+    PostMedia::factory()->create(['post_id' => $post->id, 'workspace_id' => $post->workspace_id]);
+    $target->forceFill(['placements_explicit' => true])->save();
+
+    $captured = null;
+    bindConnector(function (PublishContext $context) use (&$captured): PublishResult {
+        $captured = $context;
+
+        return PublishResult::success(['111']);
+    });
+
+    (new PublishPostTarget($target->fresh()))->handle(
+        app(PublishConnectorRegistry::class),
+        app(TokenManager::class),
+        app(PostStatusRollup::class),
+        app(BackoffSchedule::class),
+    );
+
+    expect($captured)->not->toBeNull()
+        ->and($captured->mediaForSection(0))->toBe([])
+        ->and($captured->effectiveMedia())->toBe([])
+        ->and($captured->media)->toHaveCount(1);
+});
+
+test('handle() honors a legacy per-account media subset when placement rows do not exist', function (): void {
+    $target = publishTarget(['Legacy override']);
+    $post = $target->post()->firstOrFail();
+    $first = PostMedia::factory()->create(['post_id' => $post->id, 'workspace_id' => $post->workspace_id]);
+    $second = PostMedia::factory()->create(['post_id' => $post->id, 'workspace_id' => $post->workspace_id]);
+    $target->forceFill([
+        'placements_explicit' => false,
+        'content_override' => ['segments' => ['Legacy override'], 'media_ids' => [$second->id]],
+    ])->save();
+
+    $captured = null;
+    bindConnector(function (PublishContext $context) use (&$captured): PublishResult {
+        $captured = $context;
+
+        return PublishResult::success(['111']);
+    });
+
+    (new PublishPostTarget($target->fresh()))->handle(
+        app(PublishConnectorRegistry::class),
+        app(TokenManager::class),
+        app(PostStatusRollup::class),
+        app(BackoffSchedule::class),
+    );
+
+    expect(array_map(fn (PostMedia $item): string => $item->id, $captured->effectiveMedia()))
+        ->toBe([$second->id])
+        ->and($captured->effectiveMedia()[0]->id)->not->toBe($first->id);
+});
+
+test('handle() honors a legacy explicit empty media override', function (): void {
+    $target = publishTarget(['Legacy text only']);
+    $post = $target->post()->firstOrFail();
+    PostMedia::factory()->create(['post_id' => $post->id, 'workspace_id' => $post->workspace_id]);
+    $target->forceFill([
+        'placements_explicit' => false,
+        'content_override' => ['segments' => ['Legacy text only'], 'media_ids' => []],
+    ])->save();
+
+    $captured = null;
+    bindConnector(function (PublishContext $context) use (&$captured): PublishResult {
+        $captured = $context;
+
+        return PublishResult::success(['111']);
+    });
+
+    (new PublishPostTarget($target->fresh()))->handle(
+        app(PublishConnectorRegistry::class),
+        app(TokenManager::class),
+        app(PostStatusRollup::class),
+        app(BackoffSchedule::class),
+    );
+
+    expect($captured->effectiveMedia())->toBe([]);
 });

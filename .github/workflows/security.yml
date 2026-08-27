@@ -1,6 +1,7 @@
 name: security
 
 on:
+  workflow_call:
   push:
     branches:
       - develop

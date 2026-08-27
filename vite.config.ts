@@ -95,6 +95,9 @@ export default defineConfig(({ mode }) => {
             process.env[key] ?? fileEnvironment[key],
         ]),
     ) as Record<(typeof CONFIG_ENV_KEYS)[number], string | undefined>;
+    const skipWayfinderGenerate = ['1', 'true'].includes(
+        (environment.SKIP_WAYFINDER_GENERATE ?? '').toLowerCase(),
+    );
 
     const appUrl = new URL(environment.APP_URL || 'http://localhost');
     // Prefer VITE_HMR_HOST when accessing the app via a hostname other than
@@ -148,7 +151,7 @@ export default defineConfig(({ mode }) => {
                 },
             }),
             tailwindcss(),
-            ...(environment.SKIP_WAYFINDER_GENERATE
+            ...(skipWayfinderGenerate
                 ? []
                 : [
                       wayfinder({

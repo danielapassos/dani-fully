@@ -88,7 +88,7 @@ test('a photo story uploads the photo unpublished then creates the story with no
     });
 });
 
-test('a photo story finish response with success false maps to a server error', function () {
+test('a photo story finish response with success false requires manual reconciliation', function () {
     Http::fake([
         'https://graph.facebook.com/*/photos*' => Http::response(['id' => 'photo-1']),
         'https://graph.facebook.com/*/photo_stories' => Http::response(['success' => false]),
@@ -97,7 +97,8 @@ test('a photo story finish response with success false maps to a server error', 
     $result = app(FacebookConnector::class)->publish(fbStoryContext(fbStoryImage()));
 
     expect($result->isSuccessful())->toBeFalse()
-        ->and($result->errorKind)->toBe(ErrorKind::ServerError);
+        ->and($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse();
 });
 
 test('a video story drives the video_stories start, upload, and finish phases', function () {
@@ -127,7 +128,7 @@ test('a video story drives the video_stories start, upload, and finish phases', 
         && ! array_key_exists('description', $r->data()));
 });
 
-test('a video story finish response without a success flag maps to a server error', function () {
+test('a video story finish response without a success flag requires manual reconciliation', function () {
     Http::fake([
         'https://graph.facebook.com/*/video_stories' => Http::sequence()
             ->push(['video_id' => 'v-9', 'upload_url' => 'https://rupload.facebook.com/video-upload/v-9'])
@@ -138,7 +139,8 @@ test('a video story finish response without a success flag maps to a server erro
     $result = app(FacebookConnector::class)->publish(fbStoryContext(fbStoryVideo()));
 
     expect($result->isSuccessful())->toBeFalse()
-        ->and($result->errorKind)->toBe(ErrorKind::ServerError);
+        ->and($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse();
 });
 
 test('a video story start response missing the video id or upload url fails without persisting state', function () {

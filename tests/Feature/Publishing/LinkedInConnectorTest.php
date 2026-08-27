@@ -9,6 +9,7 @@ use App\Models\PostTarget;
 use App\Services\Media\CompressionResult;
 use App\Services\Media\ImageCompressor;
 use App\Services\Publishing\Connectors\LinkedInConnector;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -44,6 +45,16 @@ test('linkedin creates a single post and returns the urn', function () {
 
     Http::assertSent(fn ($request) => $request['commentary'] === 'hello'
         && $request['author'] === 'urn:li:person:person123');
+});
+
+test('linkedin treats a lost final publish response as an unconfirmed outcome', function () {
+    Http::fake(fn () => throw new ConnectionException('connection lost after publish'));
+
+    $result = app(LinkedInConnector::class)->publish(liContext(['possibly live']));
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse()
+        ->and($result->errorMessage)->toContain('check LinkedIn');
 });
 
 test('linkedin sends article content for a text-only link post', function () {
@@ -143,6 +154,37 @@ test('linkedin registers + uploads media and references the asset urn', function
         && ($request['content']['media']['altText'] ?? null) === 'a picture');
 });
 
+test('linkedin uploads only media resolved for this target', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/excluded.png', 'excluded-bytes');
+    Storage::disk('public')->put('media/selected.png', 'selected-bytes');
+
+    $excluded = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/excluded.png', 'mime' => 'image/png']);
+    $selected = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/selected.png', 'mime' => 'image/png']);
+    $base = liContext(['look'], [$excluded, $selected]);
+    $context = new PublishContext(
+        target: $base->target,
+        segments: $base->segments,
+        media: $base->media,
+        account: $base->account,
+        credentials: $base->credentials,
+        mediaBySection: [0 => [$selected]],
+    );
+
+    Http::fake([
+        'https://api.linkedin.com/rest/images?action=initializeUpload' => Http::response([
+            'value' => ['uploadUrl' => 'https://upload.linkedin.com/put/selected', 'image' => 'urn:li:image:selected'],
+        ]),
+        'https://upload.linkedin.com/put/selected' => Http::response('', 201),
+        'https://api.linkedin.com/rest/posts' => Http::response([], 201, ['x-restli-id' => 'urn:li:share:7']),
+    ]);
+
+    expect(app(LinkedInConnector::class)->publish($context)->isSuccessful())->toBeTrue();
+    Http::assertSent(fn ($request): bool => $request->url() === 'https://upload.linkedin.com/put/selected'
+        && $request->body() === 'selected-bytes');
+    Http::assertNotSent(fn ($request): bool => $request->body() === 'excluded-bytes');
+});
+
 test('linkedin includes alt text per image for a multi-image post', function () {
     Storage::fake('public');
     Storage::disk('public')->put('media/a.png', 'a-bytes');
@@ -182,8 +224,8 @@ test('linkedin fails when no post id is returned', function () {
     $result = app(LinkedInConnector::class)->publish(liContext(['hi']));
 
     expect($result->isSuccessful())->toBeFalse()
-        ->and($result->errorKind)->toBe(ErrorKind::ServerError)
-        ->and($result->errorMessage)->toBe('LinkedIn did not return a post id');
+        ->and($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorMessage)->toContain('returned no post id');
 });
 
 test('linkedin joins every segment into one post', function () {

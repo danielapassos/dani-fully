@@ -27,7 +27,9 @@ import {
     engagementItems,
 } from '@/lib/posts/engagement-metrics';
 import { platformLabel, postPermalink } from '@/lib/posts/permalink';
+import { resolveTargetMediaBySection } from '@/lib/posts/target-media';
 import { cn } from '@/lib/utils';
+import { retry as retryRoute } from '@/routes/posts/targets';
 import type {
     MediaView,
     PlatformName,
@@ -78,18 +80,6 @@ function initials(name: string): string {
         .join('')
         .slice(0, 2)
         .toUpperCase();
-}
-
-/** Media this target actually carries — its override list, or all post media. */
-function resolveMedia(target: TargetView, media: MediaView[]): MediaView[] {
-    const ids = target.content_override?.media_ids;
-    if (ids && ids.length > 0) {
-        return ids
-            .map((id) => media.find((m) => m.id === id))
-            .filter((m): m is MediaView => m !== undefined);
-    }
-
-    return media;
 }
 
 function MediaGrid({ media }: { media: MediaView[] }) {
@@ -249,7 +239,7 @@ function PublishedCard({
             ? postPermalink(target.platform, target.handle, target.remote_id)
             : null;
     const when = publishedAt ? dayjs(publishedAt).fromNow() : 'now';
-    const cardMedia = resolveMedia(target, media);
+    const cardMediaBySection = resolveTargetMediaBySection(target, media);
     const sections = target.sections.length > 0 ? target.sections : [''];
     const isThread = sections.length > 1;
 
@@ -329,8 +319,11 @@ function PublishedCard({
                                         discordLabels={discordLabels}
                                     />
                                 </p>
-                                {index === 0 && cardMedia.length > 0 && (
-                                    <MediaGrid media={cardMedia} />
+                                {(cardMediaBySection[index]?.length ?? 0) >
+                                    0 && (
+                                    <MediaGrid
+                                        media={cardMediaBySection[index]}
+                                    />
                                 )}
                             </div>
                         </article>
@@ -525,6 +518,7 @@ function PublishedBody({
     const otherTargets = post.targets.filter((t) => t.status !== 'published');
 
     const [selectedId, setSelectedId] = useState(publishedTargets[0]?.id ?? '');
+    const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
     const stats = rawStats ?? null;
     const statsById = new Map(
         (stats?.targets ?? []).map((t) => [t.id, t] as const),
@@ -533,6 +527,24 @@ function PublishedBody({
     const selectedTarget =
         publishedTargets.find((t) => t.id === selectedId) ??
         publishedTargets[0];
+
+    function retryTarget(targetId: string) {
+        setRetryingIds((current) => new Set(current).add(targetId));
+        router.post(
+            retryRoute({ post: post.id, target: targetId }).url,
+            {},
+            {
+                preserveScroll: true,
+                onFinish: () =>
+                    setRetryingIds((current) => {
+                        const next = new Set(current);
+                        next.delete(targetId);
+
+                        return next;
+                    }),
+            },
+        );
+    }
 
     return (
         <section className="mt-6 space-y-4">
@@ -591,7 +603,11 @@ function PublishedBody({
                     <p className="mb-2.5 text-[12px] font-medium text-muted-foreground">
                         Didn’t publish everywhere
                     </p>
-                    <TargetStatusChips targets={otherTargets} />
+                    <TargetStatusChips
+                        targets={otherTargets}
+                        onRetry={retryTarget}
+                        retryingIds={retryingIds}
+                    />
                 </div>
             )}
         </section>

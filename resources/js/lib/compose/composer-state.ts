@@ -341,18 +341,53 @@ function withOrphanMediaOnHead(
     return { ...map, __head__: [...(map.__head__ ?? []), ...orphans] };
 }
 
+/**
+ * Resolve one stored placement list into the editor's effective map. Existing
+ * rows are inherently explicit (including rows created before the marker was
+ * introduced); only an unconfigured, row-less target gets the legacy all-media
+ * fallback. A configured empty list means this target intentionally has none.
+ */
+function storedPlacementMap(
+    placements: Placement[] | undefined,
+    placementsExplicit: boolean | undefined,
+    media: MediaView[],
+): Record<string, string[]> {
+    const grouped = groupPlacements(placements);
+    const isExplicit =
+        placementsExplicit === true || (placements?.length ?? 0) > 0;
+
+    return isExplicit ? grouped : withOrphanMediaOnHead(grouped, media);
+}
+
+function placementStateFromPost(
+    post: PostView,
+): Pick<ComposerState, 'placements' | 'placementsByAccount'> {
+    const placements = storedPlacementMap(
+        post.placements,
+        post.placements_explicit,
+        post.media,
+    );
+    const placementsByAccount: Record<string, Record<string, string[]>> = {};
+
+    for (const target of post.targets) {
+        const targetPlacements = storedPlacementMap(
+            target.placements,
+            target.placements_explicit,
+            post.media,
+        );
+        if (!placementMapsEqual(targetPlacements, placements)) {
+            placementsByAccount[target.connected_account_id] = targetPlacements;
+        }
+    }
+
+    return { placements, placementsByAccount };
+}
+
 function hydrate(post: PostView): ComposerState {
     const autoSplitByAccount: Record<string, boolean> = {};
     const formatByAccount: Record<string, PostFormat> = {};
     const overrideByAccount: Record<string, string[] | undefined> = {};
-    const placementsByAccount: Record<string, Record<string, string[]>> = {};
-    // Raw canonical grouping drives the per-account divergence check below;
-    // the display map additionally folds in any unplaced media.
-    const canonicalPlacements = groupPlacements(post.placements);
-    const displayPlacements = withOrphanMediaOnHead(
-        canonicalPlacements,
-        post.media,
-    );
+    const placementState = placementStateFromPost(post);
 
     for (const target of post.targets) {
         autoSplitByAccount[target.connected_account_id] = target.auto_split;
@@ -367,12 +402,6 @@ function hydrate(post: PostView): ComposerState {
         // here as "diverged" and stops emitting the account's per-target
         // segment_breaks/placements from canonical, so a later canonical-scope
         // edit (no accountId) would silently never reach that account.
-        if (target.placements !== undefined) {
-            const grouped = groupPlacements(target.placements);
-            if (!placementMapsEqual(grouped, canonicalPlacements)) {
-                placementsByAccount[target.connected_account_id] = grouped;
-            }
-        }
     }
 
     return {
@@ -399,8 +428,8 @@ function hydrate(post: PostView): ComposerState {
         overrideByAccount,
         media: post.media,
         segmentBreaks: post.segment_breaks ?? [],
-        placements: displayPlacements,
-        placementsByAccount,
+        placements: placementState.placements,
+        placementsByAccount: placementState.placementsByAccount,
         scheduleTray: {
             mode: post.scheduled_at ? 'pick' : 'now',
             pickedAt: post.scheduled_at ?? null,
@@ -968,24 +997,28 @@ export function contentMatchesServer(
         return false;
     }
 
-    // Compare through the same "fold unplaced media onto __head__" display
-    // semantics `hydrate` applies, not the raw server grouping — a legacy post
-    // with media but no placement rows groups to `{}` while the hydrated state
-    // folds that same media onto `__head__`; those are the same post and must
-    // not be flagged as diverged.
+    const serverPlacementState = placementStateFromPost(post);
+
     if (
-        JSON.stringify(
-            normalizePlacements(
-                withOrphanMediaOnHead(state.placements, state.media),
-            ),
-        ) !==
-        JSON.stringify(
-            normalizePlacements(
-                withOrphanMediaOnHead(
-                    groupPlacements(post.placements),
-                    post.media,
+        !placementMapsEqual(state.placements, serverPlacementState.placements)
+    ) {
+        return false;
+    }
+
+    const localPlacementAccounts = Object.keys(state.placementsByAccount);
+    const serverPlacementAccounts = Object.keys(
+        serverPlacementState.placementsByAccount,
+    );
+    if (
+        localPlacementAccounts.length !== serverPlacementAccounts.length ||
+        !localPlacementAccounts.every(
+            (accountId) =>
+                serverPlacementState.placementsByAccount[accountId] !==
+                    undefined &&
+                placementMapsEqual(
+                    state.placementsByAccount[accountId],
+                    serverPlacementState.placementsByAccount[accountId],
                 ),
-            ),
         )
     ) {
         return false;
@@ -1008,24 +1041,6 @@ export function contentMatchesServer(
         localKeys.length === serverKeys.length &&
         localKeys.every((key) => localOverrides[key] === serverOverrides[key])
     );
-}
-
-/**
- * Drop empty segment arrays from a placements map so a segment that was
- * emptied out (e.g. its last media id moved elsewhere) compares equal to one
- * that never had a key for that segment at all.
- */
-function normalizePlacements(
-    map: Record<string, string[]>,
-): Record<string, string[]> {
-    const out: Record<string, string[]> = {};
-    for (const [segmentRef, ids] of Object.entries(map)) {
-        if (ids.length > 0) {
-            out[segmentRef] = ids;
-        }
-    }
-
-    return out;
 }
 
 /**

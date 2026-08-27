@@ -91,27 +91,46 @@ function MediaGallery({ media }: { media: PublicMedia[] }) {
                         : 'grid-cols-2 sm:grid-cols-3',
                 )}
             >
-                {media.map((m) => (
-                    <a
-                        key={m.id}
-                        href={m.url}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="group relative block overflow-hidden rounded-2xl border border-border bg-muted/40 ring-1 ring-black/5"
-                    >
-                        <img
-                            src={m.url}
-                            alt={m.alt_text ?? ''}
-                            loading="lazy"
-                            className={cn(
-                                'w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]',
-                                media.length === 1
-                                    ? 'max-h-[460px]'
-                                    : 'aspect-square',
-                            )}
-                        />
-                    </a>
-                ))}
+                {media.map((m) =>
+                    m.mime.startsWith('video/') ? (
+                        <div
+                            key={m.id}
+                            className="relative overflow-hidden rounded-2xl border border-border bg-muted/40 ring-1 ring-black/5"
+                        >
+                            <video
+                                src={m.url}
+                                controls
+                                preload="metadata"
+                                className={cn(
+                                    'w-full object-cover',
+                                    media.length === 1
+                                        ? 'max-h-[460px]'
+                                        : 'aspect-square',
+                                )}
+                            />
+                        </div>
+                    ) : (
+                        <a
+                            key={m.id}
+                            href={m.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className="group relative block overflow-hidden rounded-2xl border border-border bg-muted/40 ring-1 ring-black/5"
+                        >
+                            <img
+                                src={m.url}
+                                alt={m.alt_text ?? ''}
+                                loading="lazy"
+                                className={cn(
+                                    'w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]',
+                                    media.length === 1
+                                        ? 'max-h-[460px]'
+                                        : 'aspect-square',
+                                )}
+                            />
+                        </a>
+                    ),
+                )}
             </div>
         </div>
     );
@@ -212,6 +231,9 @@ function PlatformCard({
                                     }
                                 />
                             </p>
+                            <MediaGallery
+                                media={target.media_by_section[i] ?? []}
+                            />
                         </div>
                     </div>
                 ))}
@@ -233,7 +255,6 @@ export function PostPreview({
 }) {
     return (
         <div className={cn('space-y-4', className)}>
-            <MediaGallery media={post.media} />
             {post.targets.map((t, i) => (
                 <PlatformCard
                     key={`${t.platform}-${t.handle ?? i}`}
@@ -243,6 +264,7 @@ export function PostPreview({
             ))}
             {post.targets.length === 0 && (
                 <div className="rounded-3xl border border-dashed border-border bg-card/60 px-6 py-10 text-center">
+                    <MediaGallery media={post.media} />
                     <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap text-foreground">
                         <LinkedText
                             text={post.base_text}

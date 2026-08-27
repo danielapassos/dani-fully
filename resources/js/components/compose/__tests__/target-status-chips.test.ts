@@ -137,16 +137,16 @@ describe('target status chips', () => {
             () => undefined,
         );
         const buttons = Array.from(container.querySelectorAll('button'));
-        const manualReview = Array.from(
-            container.querySelectorAll('span'),
-        ).find((node) => node.textContent === 'Manual review');
+        const manualReview = container.querySelector('summary');
 
         expect(buttons.some((button) => button.textContent === 'Retry')).toBe(
             false,
         );
-        expect(manualReview?.getAttribute('title')).toContain(
-            'provider outcome is unconfirmed',
+        expect(container.textContent).toContain(
+            'The provider outcome is unconfirmed and may already be live.',
         );
+        act(() => manualReview?.focus());
+        expect(document.activeElement).toBe(manualReview);
     });
 
     it('keeps Retry for a safely retryable failure', () => {
@@ -161,5 +161,53 @@ describe('target status chips', () => {
             ),
         ).toBe(true);
         expect(container.textContent).not.toContain('Manual review');
+    });
+
+    it('links an account-gated failure to the accounts page instead of retrying', () => {
+        const container = renderChips(
+            [
+                failedTarget({
+                    error_kind: 'auth_expired',
+                    can_retry: false,
+                    retry_blocked_reason: 'Reconnect @dani before posting.',
+                    retry_recovery_kind: 'reconnect',
+                }),
+            ],
+            () => undefined,
+        );
+        const recovery = Array.from(container.querySelectorAll('a')).find(
+            (link) => link.textContent === 'Open accounts',
+        );
+
+        expect(recovery?.getAttribute('href')).toBe('/accounts');
+        expect(recovery?.getAttribute('title')).toBe(
+            'Reconnect @dani before posting.',
+        );
+        expect(container.textContent).not.toContain('Retry');
+    });
+
+    it('links a billing-gated failure to subscription settings', () => {
+        const container = renderChips(
+            [
+                failedTarget({
+                    error_kind: 'billing_required',
+                    can_retry: false,
+                    retry_blocked_reason: 'Subscribe to publish this post.',
+                    retry_recovery_kind: 'billing',
+                }),
+            ],
+            () => undefined,
+        );
+        const recovery = Array.from(container.querySelectorAll('a')).find(
+            (link) => link.textContent === 'View billing',
+        );
+
+        expect(recovery?.getAttribute('href')).toBe(
+            '/settings/workspace/subscription',
+        );
+        expect(recovery?.getAttribute('title')).toBe(
+            'Subscribe to publish this post.',
+        );
+        expect(container.textContent).not.toContain('Retry');
     });
 });

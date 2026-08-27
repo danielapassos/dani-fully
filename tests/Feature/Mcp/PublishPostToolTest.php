@@ -48,3 +48,28 @@ test('publish_post_now with confirm sets status to publishing', function (): voi
     $response->assertOk();
     expect($post->fresh()->status)->toBe(PostStatus::Publishing);
 });
+
+test('publish_post_now rejects a failed post and points to guarded target retry', function (): void {
+    Queue::fake();
+    $user = User::factory()->create();
+    $workspace = Workspace::factory()->create();
+    $user->forceFill(['current_workspace_id' => $workspace->id])->save();
+    bindTokenToWorkspace($user, $workspace);
+
+    $post = Post::factory()->for($workspace)->create(['status' => PostStatus::Failed->value]);
+    $account = ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::X->value]);
+    $target = PostTarget::factory()->for($post)->failed()->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::X->value,
+    ]);
+
+    $response = ShoutrrrServer::actingAs($user)->tool(PublishPostTool::class, [
+        'post_id' => $post->id,
+        'confirm' => true,
+    ]);
+
+    $response->assertHasErrors();
+    expect($post->fresh()->status)->toBe(PostStatus::Failed)
+        ->and($target->fresh()->status)->toBe(PostTargetStatus::Failed);
+    Queue::assertNotPushed(PublishPostTarget::class);
+});

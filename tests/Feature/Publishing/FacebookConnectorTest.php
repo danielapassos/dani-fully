@@ -7,6 +7,7 @@ use App\Models\ConnectedAccount;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Publishing\Connectors\FacebookConnector;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -42,6 +43,30 @@ test('facebook creates a text post and returns the pageid_postid', function () {
 
     Http::assertSent(fn ($request) => str_contains($request->url(), '/page123/feed')
         && $request['message'] === 'hello world');
+});
+
+test('facebook treats a lost final publish response as an unconfirmed outcome', function () {
+    Http::fake(fn () => throw new ConnectionException('connection lost after publish'));
+
+    $result = app(FacebookConnector::class)->publish(fbContext(['possibly live']));
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse()
+        ->and($result->errorMessage)->toContain('check Facebook');
+});
+
+test('facebook keeps a connection loss during unpublished carousel upload retryable', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/a.jpg', 'a-bytes');
+    Storage::disk('public')->put('media/b.jpg', 'b-bytes');
+    $first = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/a.jpg']);
+    $second = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/b.jpg']);
+    Http::fake(fn () => throw new ConnectionException('upload did not reach Facebook'));
+
+    $result = app(FacebookConnector::class)->publish(fbContext(['carousel'], [$first, $second]));
+
+    expect($result->errorKind)->toBe(ErrorKind::Network)
+        ->and($result->errorKind?->isRetryable())->toBeTrue();
 });
 
 test('facebook includes a link field when the text contains a url', function () {
@@ -84,6 +109,37 @@ test('facebook publishes a single photo and returns the post_id', function () {
         return $parts->contains(fn ($part) => ($part['name'] ?? null) === 'source' && ($part['contents'] ?? null) === 'jpg-bytes')
             && $parts->contains(fn ($part) => ($part['name'] ?? null) === 'caption' && ($part['contents'] ?? null) === 'look')
             && $parts->contains(fn ($part) => ($part['name'] ?? null) === 'published' && ($part['contents'] ?? null) === 'true');
+    });
+});
+
+test('facebook publishes only media resolved for this target', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/excluded.jpg', 'excluded-bytes');
+    Storage::disk('public')->put('media/selected.jpg', 'selected-bytes');
+
+    $excluded = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/excluded.jpg', 'mime' => 'image/jpeg']);
+    $selected = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/selected.jpg', 'mime' => 'image/jpeg']);
+    $base = fbContext(['look'], [$excluded, $selected]);
+    $context = new PublishContext(
+        target: $base->target,
+        segments: $base->segments,
+        media: $base->media,
+        account: $base->account,
+        credentials: $base->credentials,
+        mediaBySection: [0 => [$selected]],
+    );
+
+    Http::fake([
+        'https://graph.facebook.com/*/page123/photos' => Http::response(['post_id' => 'page123_777']),
+    ]);
+
+    expect(app(FacebookConnector::class)->publish($context)->isSuccessful())->toBeTrue();
+
+    Http::assertSent(function ($request): bool {
+        $parts = collect($request->data());
+
+        return $parts->contains(fn ($part): bool => ($part['name'] ?? null) === 'source' && ($part['contents'] ?? null) === 'selected-bytes')
+            && ! $parts->contains(fn ($part): bool => ($part['name'] ?? null) === 'source' && ($part['contents'] ?? null) === 'excluded-bytes');
     });
 });
 

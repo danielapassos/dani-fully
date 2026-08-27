@@ -7,6 +7,7 @@ use App\Models\ConnectedAccount;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Publishing\Connectors\DiscordPublishConnector;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -44,6 +45,16 @@ test('discord posts a single text message with wait=true and returns the message
 
     Http::assertSent(fn ($request) => str_contains($request->url(), 'wait=true')
         && $request['content'] === 'hello world');
+});
+
+test('discord treats a lost webhook response as an unconfirmed outcome', function () {
+    Http::fake(fn () => throw new ConnectionException('connection lost after publish'));
+
+    $result = app(DiscordPublishConnector::class)->publish(discordContext(['possibly live']));
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse()
+        ->and($result->errorMessage)->toContain('check Discord');
 });
 
 test('discord posts each segment as its own sequential message and accumulates remote_ids', function () {
@@ -90,6 +101,61 @@ test('discord attaches media to the first segment as multipart with payload_json
             && str_contains($body, 'name="payload_json"')
             && str_contains($body, 'name="files[0]"');
     });
+});
+
+test('discord attaches only media resolved for this target', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/excluded.jpg', 'excluded-bytes');
+    Storage::disk('public')->put('media/selected.jpg', 'selected-bytes');
+
+    $excluded = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/excluded.jpg', 'mime' => 'image/jpeg']);
+    $selected = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/selected.jpg', 'mime' => 'image/jpeg']);
+    $base = discordContext(['look'], [$excluded, $selected]);
+    $context = new PublishContext(
+        target: $base->target,
+        segments: $base->segments,
+        media: $base->media,
+        account: $base->account,
+        credentials: $base->credentials,
+        mediaBySection: [0 => [$selected]],
+    );
+
+    Http::fake([DISCORD_HOOK.'?wait=true' => Http::response(['id' => 'm1'])]);
+
+    expect(app(DiscordPublishConnector::class)->publish($context)->isSuccessful())->toBeTrue();
+    Http::assertSent(fn ($request): bool => str_contains($request->body(), 'selected-bytes')
+        && ! str_contains($request->body(), 'excluded-bytes'));
+});
+
+test('discord keeps section-two media on the second message', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/second.jpg', 'second-section-bytes');
+    $media = PostMedia::factory()->create([
+        'disk' => 'public',
+        'path' => 'media/second.jpg',
+        'mime' => 'image/jpeg',
+    ]);
+    $base = discordContext(['first', 'second'], [$media]);
+    $context = new PublishContext(
+        target: $base->target,
+        segments: $base->segments,
+        media: $base->media,
+        account: $base->account,
+        credentials: $base->credentials,
+        mediaBySection: [0 => [], 1 => [$media]],
+    );
+
+    Http::fake([DISCORD_HOOK.'?wait=true' => Http::sequence()
+        ->push(['id' => 'm1'])
+        ->push(['id' => 'm2'])]);
+
+    expect(app(DiscordPublishConnector::class)->publish($context)->remoteIds)
+        ->toBe(['m1', 'm2']);
+
+    $requests = Http::recorded()->map(fn (array $record): string => $record[0]->body())->values();
+    expect($requests)->toHaveCount(2)
+        ->and($requests[0])->not->toContain('second-section-bytes')
+        ->and($requests[1])->toContain('second-section-bytes');
 });
 
 test('discord posts a caption-less media message', function () {

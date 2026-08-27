@@ -4,6 +4,7 @@ use App\Dto\Publishing\PublishContext;
 use App\Dto\Publishing\PublishResult;
 use App\Enums\ConnectedAccountStatus;
 use App\Enums\ErrorKind;
+use App\Enums\Platform;
 use App\Enums\PostStatus;
 use App\Enums\PostTargetStatus;
 use App\Jobs\PublishPostTarget;
@@ -12,7 +13,9 @@ use App\Services\Publishing\BackoffSchedule;
 use App\Services\Publishing\PostStatusRollup;
 use App\Services\Publishing\PublishConnectorRegistry;
 use App\Services\Publishing\TokenManager;
+use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Queue\MaxAttemptsExceededException;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Date;
 
@@ -135,6 +138,33 @@ test('publish fails immediately when the account already needs attention', funct
     Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
+test('job skips an account that lost publishing readiness after dispatch', function () {
+    Bus::fake();
+    config()->set('services.youtube.publishing_enabled', true);
+    $target = publishTarget();
+    $target->forceFill(['platform' => Platform::YouTube->value])->save();
+    $target->account()->firstOrFail()->forceFill([
+        'platform' => Platform::YouTube->value,
+        'capabilities' => ['oauth_scopes' => []],
+    ])->save();
+
+    bindConnector(fn () => throw new RuntimeException('connector should not be called'));
+
+    (new PublishPostTarget($target->fresh()))->handle(
+        app(PublishConnectorRegistry::class),
+        app(TokenManager::class),
+        app(PostStatusRollup::class),
+        app(BackoffSchedule::class),
+    );
+
+    $target->refresh();
+    expect($target->status)->toBe(PostTargetStatus::Skipped)
+        ->and($target->error_message)->toContain('grant YouTube video upload access')
+        ->and($target->attempts)->toBe(0);
+    expect(PostTargetAttempt::where('post_target_id', $target->id)->count())->toBe(0);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
 test('auth expired result refreshes credentials once and retries the connector', function () {
     $target = publishTarget();
     $target->account()->firstOrFail()->secret()->firstOrFail()->forceFill([
@@ -249,10 +279,13 @@ test('an uncaught exception closes the attempt and marks the target failed (neve
 
     $target->refresh();
     expect($target->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::Unknown)
+        ->and($target->canRetryManually())->toBeFalse()
         ->and($target->error_message)->not->toBeNull();
 
     $attempt = PostTargetAttempt::where('post_target_id', $target->id)->latest('id')->first();
     expect($attempt->status)->toBe('failed')
+        ->and($attempt->error_kind)->toBe(ErrorKind::Unknown)
         ->and($attempt->finished_at)->not->toBeNull();
 
     expect($target->post->refresh()->status)->toBe(PostStatus::Failed);
@@ -336,7 +369,10 @@ test('failed() gives up on a partial thread once the attempt budget is exhausted
 
     (new PublishPostTarget($target->fresh()))->failed(new RuntimeException('still broken'));
 
-    expect($target->refresh()->status)->toBe(PostTargetStatus::Failed);
+    $target->refresh();
+    expect($target->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::Unknown)
+        ->and($target->canRetryManually())->toBeFalse();
     Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
@@ -359,6 +395,24 @@ test('failed() is a no-op when the target already reached a terminal state', fun
     Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
+test('a stale failed callback preserves an existing known failure', function () {
+    Bus::fake();
+    $target = publishTarget(['one']);
+    $target->forceFill([
+        'status' => PostTargetStatus::Failed->value,
+        'error_kind' => ErrorKind::RateLimited->value,
+        'error_message' => 'Try later.',
+    ])->save();
+
+    (new PublishPostTarget($target->fresh()))->failed(new RuntimeException('stale worker callback'));
+
+    $target->refresh();
+    expect($target->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::RateLimited)
+        ->and($target->error_message)->toBe('Try later.');
+    Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
 test('failed() with no posted segments marks the target failed', function () {
     $target = publishTarget(['one']);
     $target->forceFill(['status' => PostTargetStatus::Publishing->value])->save();
@@ -367,6 +421,8 @@ test('failed() with no posted segments marks the target failed', function () {
 
     $target->refresh();
     expect($target->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::Unknown)
+        ->and($target->canRetryManually())->toBeFalse()
         ->and($target->error_message)->not->toBeNull();
 });
 
@@ -375,11 +431,44 @@ test('job has tries=1 and a timeout below the queue retry_after', function () {
     $job = new PublishPostTarget($target);
 
     expect($job->tries)->toBe(1)
-        ->and($job->timeout)->toBe(900);
+        ->and($job->timeout)->toBe(900)
+        ->and($job)->toBeInstanceOf(ShouldBeUniqueUntilProcessing::class)
+        ->and($job->uniqueId())->toBe($target->id);
 
     // Invariant: the job timeout MUST stay below the queue connection's retry_after,
     // or a slow large-video run is released to a second worker mid-upload and double-posts.
     expect($job->timeout)->toBeLessThan((int) config('queue.connections.database.retry_after'));
+});
+
+test('async publish jobs discard overlapping mutations for the same target', function () {
+    config()->set('queue.default', 'database');
+    $target = publishTarget();
+    $job = new PublishPostTarget($target);
+
+    $middleware = $job->middleware();
+
+    expect($middleware)->toHaveCount(1)
+        ->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class)
+        ->and($middleware[0]->key)->toBe("publish-post-target:{$target->id}")
+        ->and($middleware[0]->releaseAfter)->toBeNull()
+        ->and($middleware[0]->expiresAfter)->toBe(960);
+});
+
+test('a stale job cannot implicitly retry a failed target', function () {
+    $target = publishTarget(status: 'failed');
+
+    bindConnector(fn () => throw new RuntimeException('connector must not be called'));
+
+    (new PublishPostTarget($target->fresh()))->handle(
+        app(PublishConnectorRegistry::class),
+        app(TokenManager::class),
+        app(PostStatusRollup::class),
+        app(BackoffSchedule::class),
+    );
+
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->fresh()->attempts)->toBe(0);
+    expect(PostTargetAttempt::where('post_target_id', $target->id)->count())->toBe(0);
 });
 
 test('handle is a no-op on a terminal published target (stale retry / double dispatch)', function () {

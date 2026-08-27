@@ -3,6 +3,7 @@
 use App\Enums\ErrorKind;
 use App\Enums\PostTargetStatus;
 use App\Jobs\PublishPostTarget;
+use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\PostTarget;
 use Illuminate\Support\Facades\Queue;
@@ -30,10 +31,31 @@ test('publishing dispatches and returns 202', function () {
     Queue::fake();
     [$user, $workspace, $token] = issuedKey();
     $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
+    $account = ConnectedAccount::factory()->for($workspace)->create();
+    PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id]);
 
     $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/publish")
         ->assertStatus(202)
         ->assertJsonPath('status', 'queued');
+});
+
+test('publishing a failed post requires the guarded target retry path', function (): void {
+    Queue::fake();
+    [$user, $workspace, $token] = issuedKey();
+    $post = Post::factory()->for($workspace)->create([
+        'author_id' => $user->id,
+        'status' => 'failed',
+    ]);
+    $account = ConnectedAccount::factory()->for($workspace)->create();
+    $target = PostTarget::factory()->for($post)->failed()->create(['connected_account_id' => $account->id]);
+
+    $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/publish")
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This post has no pending targets to publish. Use Retry on an eligible failed or skipped target.');
+
+    expect($post->fresh()->status->value)->toBe('failed')
+        ->and($target->fresh()->status)->toBe(PostTargetStatus::Failed);
+    Queue::assertNotPushed(PublishPostTarget::class);
 });
 
 test('a read-only key cannot publish', function () {
@@ -54,7 +76,8 @@ test('retrying a failed target dispatches and returns 202', function () {
     Queue::fake();
     [$user, $workspace, $token] = issuedKey();
     $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
-    $target = PostTarget::factory()->for($post)->failed()->create();
+    $account = ConnectedAccount::factory()->for($workspace)->create();
+    $target = PostTarget::factory()->for($post)->failed()->create(['connected_account_id' => $account->id]);
 
     $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/targets/{$target->id}/retry")
         ->assertStatus(202)
@@ -77,6 +100,22 @@ test('retrying an unconfirmed provider outcome is rejected for manual review', f
 
     expect($target->fresh()->status)->toBe(PostTargetStatus::Failed)
         ->and($target->error_kind)->toBe(ErrorKind::Unknown);
+    Queue::assertNotPushed(PublishPostTarget::class);
+});
+
+test('retrying through the API rejects an account that is not publish-ready', function () {
+    Queue::fake();
+    [$user, $workspace, $token] = issuedKey();
+    $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
+    $account = ConnectedAccount::factory()->for($workspace)->create();
+    $target = PostTarget::factory()->for($post)->failed()->create(['connected_account_id' => $account->id]);
+    $target->account()->firstOrFail()->forceFill(['disabled_at' => now()])->save();
+
+    $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/targets/{$target->id}/retry")
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This account is disabled. Re-enable it before posting.');
+
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed);
     Queue::assertNotPushed(PublishPostTarget::class);
 });
 

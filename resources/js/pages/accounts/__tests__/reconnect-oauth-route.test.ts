@@ -33,6 +33,7 @@ function account(overrides: Partial<Account>): Account {
         auto_repost_enabled: false,
         publishing_ready: false,
         publishing_unavailable_reason: 'Reconnect before posting.',
+        publishing_recovery_kind: 'reconnect',
         ...overrides,
     };
 }

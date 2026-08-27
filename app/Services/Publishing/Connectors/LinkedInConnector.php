@@ -76,8 +76,10 @@ class LinkedInConnector implements PublishConnector, RepostConnector
             static fn (string $segment): bool => $segment !== '',
         )));
 
-        $videoMedia = array_values(array_filter($context->media, fn (PostMedia $m): bool => $m->isVideo()));
+        $media = $context->effectiveMedia();
+        $videoMedia = array_values(array_filter($media, fn (PostMedia $m): bool => $m->isVideo()));
         $videoUrn = null;
+        $publishRequestInFlight = false;
 
         if ($videoMedia !== []) {
             $ready = $this->ensureVideoReady($context, $videoMedia[0], $author, $token);
@@ -103,7 +105,7 @@ class LinkedInConnector implements PublishConnector, RepostConnector
             if ($videoUrn !== null) {
                 $body['content'] = ['media' => ['id' => $videoUrn, 'title' => '']];
             } else {
-                $images = $this->uploadImages($context->media, $author, $token, $context->account);
+                $images = $this->uploadImages($media, $author, $token, $context->account);
 
                 if (count($images) === 1) {
                     $body['content'] = ['media' => ['id' => $images[0]['urn'], 'altText' => $images[0]['altText']]];
@@ -125,11 +127,13 @@ class LinkedInConnector implements PublishConnector, RepostConnector
                 }
             }
 
+            $publishRequestInFlight = true;
             $response = $this->http
                 ->withToken($token)
                 ->withHeaders(['LinkedIn-Version' => $this->apiVersion(), 'X-Restli-Protocol-Version' => '2.0.0'])
                 ->acceptJson()
                 ->post(self::POSTS_URL, $body);
+            $publishRequestInFlight = false;
 
             $this->meter(UsageCategory::Publish, UsageOperation::POST, $context->account, $response);
 
@@ -141,11 +145,19 @@ class LinkedInConnector implements PublishConnector, RepostConnector
         } catch (LinkedInRequestFailed $e) {
             return $this->mapFailure($e->response);
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return $publishRequestInFlight
+                ? PublishResult::failure(
+                    ErrorKind::Unknown,
+                    'The connection closed after LinkedIn received the publish request. The post may already be live; check LinkedIn before taking further action.',
+                )
+                : PublishResult::failure(ErrorKind::Network, $e->getMessage());
         }
 
         if ($urn === '') {
-            return PublishResult::failure(ErrorKind::ServerError, 'LinkedIn did not return a post id');
+            return PublishResult::failure(
+                ErrorKind::Unknown,
+                'LinkedIn accepted the publish request but returned no post id. The post may already be live; check LinkedIn before taking further action.',
+            );
         }
 
         return PublishResult::success([$urn]);

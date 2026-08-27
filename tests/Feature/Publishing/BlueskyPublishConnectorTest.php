@@ -10,6 +10,7 @@ use App\Services\Atproto\DPoP;
 use App\Services\Media\CompressionResult;
 use App\Services\Media\ImageCompressor;
 use App\Services\Publishing\Connectors\BlueskyPublishConnector;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -40,6 +41,16 @@ test('bluesky creates a single post and returns its uri', function () {
 
     expect($result->isSuccessful())->toBeTrue()
         ->and($result->remoteIds)->toBe(['at://did:plc:me/app.bsky.feed.post/1']);
+});
+
+test('bluesky treats a lost create-record response as an unconfirmed outcome', function () {
+    Http::fake(fn () => throw new ConnectionException('connection lost after publish'));
+
+    $result = app(BlueskyPublishConnector::class)->publish(bskyContext(['possibly live']));
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse()
+        ->and($result->errorMessage)->toContain('check Bluesky');
 });
 
 test('bluesky oauth publish uses dpop authorization', function () {

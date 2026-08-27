@@ -125,16 +125,15 @@ export function PostPageActions({ post }: Props) {
     }
 
     async function handleRetry() {
-        const failed = post.targets.find(
-            (target) => target.status === 'failed' && targetCanRetry(target),
-        );
-        if (!failed) {
+        const retryableTarget = post.targets.find(targetCanRetry);
+        if (!retryableTarget) {
             return;
         }
         http.transform(() => ({}));
-        await http.post(retryRoute({ post: post.id, target: failed.id }).url, {
-            onSuccess: refresh,
-        });
+        await http.post(
+            retryRoute({ post: post.id, target: retryableTarget.id }).url,
+            { onSuccess: refresh },
+        );
     }
 
     async function handleDelete() {

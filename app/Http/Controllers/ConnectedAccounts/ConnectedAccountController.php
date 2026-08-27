@@ -74,6 +74,7 @@ class ConnectedAccountController extends Controller
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
                 'publishing_ready' => $account->canPublish(),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
+                'publishing_recovery_kind' => $account->publishingRecoveryKind(),
             ])
             ->values()
             ->all();

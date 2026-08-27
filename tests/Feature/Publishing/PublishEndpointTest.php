@@ -12,7 +12,10 @@ use App\Models\PostTarget;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
+use App\Services\Billing\WorkspaceSubscriptionGate;
+use App\Services\Publishing\ManualPostTargetRetry;
 use App\Support\InstanceSettings;
+use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
 use Illuminate\Support\Facades\Bus;
 
 function publishingMember(): array
@@ -66,6 +69,22 @@ test('publish-now is blocked (422) when the post has no targets and does not dis
     Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
+test('publish-now rejects a failed post with no runnable targets and preserves its state', function (): void {
+    Bus::fake();
+    [$user, $workspace] = publishingMember();
+    $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Failed]);
+    $account = publishingAccountFor($workspace);
+    $target = PostTarget::factory()->for($post)->failed()->create(['connected_account_id' => $account->id]);
+
+    test()->postJson("/posts/{$post->id}/publish")
+        ->assertStatus(422)
+        ->assertJsonPath('message', 'This post has no pending targets to publish. Use Retry on an eligible failed or skipped target.');
+
+    expect($post->refresh()->status)->toBe(PostStatus::Failed)
+        ->and($target->refresh()->status)->toBe(PostTargetStatus::Failed);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
 test('publish-now is blocked across workspaces', function () {
     publishingMember();
     $foreign = Post::factory()->create();
@@ -77,7 +96,8 @@ test('per-target retry resets a failed target to pending and dispatches it', fun
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Failed]);
-    $target = PostTarget::factory()->for($post)->failed()->create();
+    $account = publishingAccountFor($workspace);
+    $target = PostTarget::factory()->for($post)->failed()->create(['connected_account_id' => $account->id]);
 
     test()->postJson("/posts/{$post->id}/targets/{$target->id}/retry")
         ->assertOk()
@@ -89,6 +109,37 @@ test('per-target retry resets a failed target to pending and dispatches it', fun
         ->and($target->error_message)->toBeNull();
 
     Bus::assertDispatched(PublishPostTarget::class, fn (PublishPostTarget $job): bool => $job->target->is($target));
+});
+
+test('manual retry restores the failure when the queue cannot accept the job', function () {
+    [$user, $workspace] = publishingMember();
+    $post = Post::factory()->create([
+        'workspace_id' => $workspace->id,
+        'status' => PostStatus::Failed,
+    ]);
+    $account = publishingAccountFor($workspace);
+    $target = PostTarget::factory()->for($post)->failed()->create([
+        'connected_account_id' => $account->id,
+        'error_kind' => ErrorKind::RateLimited->value,
+        'error_message' => 'Try later.',
+        'next_attempt_at' => now()->addMinute(),
+    ]);
+
+    $dispatcher = Mockery::mock(BusDispatcher::class);
+    $dispatcher->shouldReceive('dispatch')
+        ->once()
+        ->andThrow(new RuntimeException('queue unavailable'));
+    app()->instance(BusDispatcher::class, $dispatcher);
+
+    expect(fn () => app(ManualPostTargetRetry::class)->dispatch($target))
+        ->toThrow(RuntimeException::class, 'queue unavailable');
+
+    $target->refresh();
+    expect($target->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::RateLimited)
+        ->and($target->error_message)->toBe('Try later.')
+        ->and($target->next_attempt_at)->not->toBeNull()
+        ->and($post->refresh()->status)->toBe(PostStatus::Failed);
 });
 
 test('per-target retry requires manual review for an unconfirmed provider outcome', function () {
@@ -110,11 +161,63 @@ test('per-target retry requires manual review for an unconfirmed provider outcom
     Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
+test('per-target retry rejects an unsubscribed workspace before claiming the target', function () {
+    Bus::fake();
+    config()->set('subscriptions.enabled', true);
+    [$user, $workspace] = publishingMember();
+    $workspace->forceFill(['is_initial' => false])->save();
+    $post = Post::factory()->create([
+        'workspace_id' => $workspace->id,
+        'status' => PostStatus::Failed,
+    ]);
+    $account = publishingAccountFor($workspace);
+    $target = PostTarget::factory()->for($post)->failed()->create([
+        'connected_account_id' => $account->id,
+        'error_kind' => ErrorKind::BillingRequired->value,
+    ]);
+
+    test()->postJson("/posts/{$post->id}/targets/{$target->id}/retry")
+        ->assertStatus(409)
+        ->assertJsonPath('message', 'Subscribe to publish this post.');
+
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
+test('per-target retry rejects an exhausted X quota before claiming the target', function () {
+    Bus::fake();
+    [$user, $workspace] = publishingMember();
+    $post = Post::factory()->create([
+        'workspace_id' => $workspace->id,
+        'status' => PostStatus::Failed,
+    ]);
+    $account = publishingAccountFor($workspace, Platform::X);
+    $target = PostTarget::factory()->for($post)->failed()->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::X->value,
+        'error_kind' => ErrorKind::BillingRequired->value,
+    ]);
+
+    $gate = Mockery::mock(WorkspaceSubscriptionGate::class);
+    $gate->shouldReceive('canPublish')->once()->andReturnTrue();
+    $gate->shouldReceive('canPublishX')->once()->andReturnFalse();
+    $gate->shouldReceive('remainingXPosts')->once()->andReturn(0);
+    app()->instance(WorkspaceSubscriptionGate::class, $gate);
+
+    test()->postJson("/posts/{$post->id}/targets/{$target->id}/retry")
+        ->assertStatus(409)
+        ->assertJsonPath('message', 'Monthly X publishing quota exceeded. Upgrade or wait for the next billing period.');
+
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
 test('per-target retry redirects after an Inertia retry request', function () {
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Failed]);
-    $target = PostTarget::factory()->for($post)->failed()->create();
+    $account = publishingAccountFor($workspace);
+    $target = PostTarget::factory()->for($post)->failed()->create(['connected_account_id' => $account->id]);
 
     test()->from('/dashboard')
         ->post("/posts/{$post->id}/targets/{$target->id}/retry", [], [
@@ -131,7 +234,9 @@ test('per-target retry resets a skipped target to pending and dispatches it', fu
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Partial]);
+    $account = publishingAccountFor($workspace);
     $target = PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
         'status' => PostTargetStatus::Skipped->value,
         'error_message' => 'X is disabled on this instance.',
     ]);
@@ -148,10 +253,13 @@ test('per-target retry resets a skipped target to pending and dispatches it', fu
     Bus::assertDispatched(PublishPostTarget::class, fn (PublishPostTarget $job): bool => $job->target->is($target));
 });
 
-test('retrying a skipped target whose platform is still frozen re-skips it instead of erroring', function () {
+test('retrying a skipped target whose platform is still frozen is rejected before dispatch', function () {
+    Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Partial]);
+    $account = publishingAccountFor($workspace);
     $target = PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
         'platform' => Platform::X->value,
         'status' => PostTargetStatus::Skipped->value,
         'error_message' => 'X is disabled on this instance.',
@@ -159,12 +267,47 @@ test('retrying a skipped target whose platform is still frozen re-skips it inste
 
     app(InstanceSettings::class)->update(['platforms_enabled' => ['x' => false]]);
 
-    // Sync queue runs the retried job inline, so the terminal + freeze guards in
-    // PublishPostTarget::handle() execute within this request.
     test()->postJson("/posts/{$post->id}/targets/{$target->id}/retry")
-        ->assertOk();
+        ->assertStatus(409)
+        ->assertJsonPath('message', 'X is disabled on this installation. Enable it before posting.');
 
     expect($target->fresh()->status)->toBe(PostTargetStatus::Skipped);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
+test('per-target retry reruns publish prechecks before changing state', function () {
+    Bus::fake();
+    [$user, $workspace] = publishingMember();
+    $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Failed]);
+    $account = publishingAccountFor($workspace);
+    $target = PostTarget::factory()->for($post)->failed()->create([
+        'connected_account_id' => $account->id,
+        'sections' => [str_repeat('x', 281)],
+    ]);
+
+    test()->postJson("/posts/{$post->id}/targets/{$target->id}/retry")
+        ->assertStatus(409)
+        ->assertJsonPath('message', "A section is over X's length limit.");
+
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->error_kind)->toBe(ErrorKind::Validation);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
+test('a second manual retry cannot enqueue the same target again', function () {
+    Bus::fake();
+    [$user, $workspace] = publishingMember();
+    $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Failed]);
+    $account = publishingAccountFor($workspace);
+    $target = PostTarget::factory()->for($post)->failed()->create(['connected_account_id' => $account->id]);
+
+    test()->postJson("/posts/{$post->id}/targets/{$target->id}/retry")->assertOk();
+    test()->postJson("/posts/{$post->id}/targets/{$target->id}/retry")
+        ->assertStatus(409)
+        ->assertJsonPath('message', 'Only failed or skipped targets can be retried.');
+
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Pending);
+    Bus::assertDispatchedTimes(PublishPostTarget::class, 1);
 });
 
 test('retry rejects a non-failed target with 409 and dispatches nothing', function () {

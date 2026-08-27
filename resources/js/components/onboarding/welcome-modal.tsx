@@ -16,7 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { welcomed as welcomedRoute } from '@/routes/onboarding';
 
-const DESTINATIONS = ['x', 'bluesky', 'linkedin'] as const;
+const DESTINATIONS = ['instagram', 'threads', 'tiktok', 'youtube'] as const;
 
 // One-time entrance: the disc springs in, then the destinations stagger on after
 // it. No looping animation — the hero settles and stays put.

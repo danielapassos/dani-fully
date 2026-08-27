@@ -57,11 +57,13 @@ class YouTubeConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::AuthExpired, 'YouTube access token unavailable; reconnect the channel.');
         }
 
-        if (count($context->media) !== 1 || ! $context->media[0]->isVideo()) {
+        $media = $context->effectiveMedia();
+
+        if (count($media) !== 1 || ! $media[0]->isVideo()) {
             return PublishResult::failure(ErrorKind::Validation, 'YouTube publishing requires exactly one video.');
         }
 
-        $media = $context->media[0];
+        $media = $media[0];
         $state = new MediaUploadState($context->target->media_upload_state);
         $storedPrivacy = (string) ($state->metadata($media->id)['privacy_status'] ?? '');
         $expectedPrivacy = in_array($storedPrivacy, ['private', 'unlisted', 'public'], true)

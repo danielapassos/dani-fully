@@ -23,6 +23,27 @@ test('empty placements fall back to all media on section 0', function (): void {
     expect($out[1] ?? [])->toHaveCount(0);
 });
 
+test('explicit empty placements publish no attached media', function (): void {
+    $out = app(SegmentMediaResolver::class)->resolve(
+        sections: ['a'], sectionSources: [0], segmentBreaks: [],
+        placements: [], allMedia: [fakeMedia('m1')], placementsExplicit: true,
+    );
+
+    expect($out)->toBe([0 => []]);
+});
+
+test('invalid explicit placement rows do not reactivate the legacy all-media fallback', function (): void {
+    $out = app(SegmentMediaResolver::class)->resolve(
+        sections: ['a'], sectionSources: [0], segmentBreaks: [],
+        placements: [
+            ['post_media_id' => 'detached', 'segment_ref' => '__head__', 'position' => 0],
+        ],
+        allMedia: [fakeMedia('attached')],
+    );
+
+    expect($out)->toBe([0 => []]);
+});
+
 test('media rides the first sub-post of its authored segment', function (): void {
     // Authored segment 0 auto-split into sections 0 and 1; segment 1 (break "b1") is section 2.
     $out = app(SegmentMediaResolver::class)->resolve(

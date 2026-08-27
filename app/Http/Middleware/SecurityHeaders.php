@@ -110,7 +110,9 @@ class SecurityHeaders
      * tightest policy. Derived from the configured public URL and API endpoint;
      * an s3 disk with neither configured (vanilla AWS, whose virtual-hosted,
      * region-derived presign host can't be predicted cheaply here) falls back to
-     * `https:` so uploads and playback still work.
+     * `https:` so uploads and playback still work. A configured public URL does
+     * not identify that API host, so the fallback remains whenever no endpoint
+     * is configured.
      *
      * @return list<string>
      */
@@ -132,7 +134,11 @@ class SecurityHeaders
             }
         }
 
-        return $origins === [] ? ['https:'] : array_values($origins);
+        if ($this->originOf((string) config("filesystems.disks.{$disk}.endpoint")) === null) {
+            $origins['https:'] = 'https:';
+        }
+
+        return array_values($origins);
     }
 
     /**

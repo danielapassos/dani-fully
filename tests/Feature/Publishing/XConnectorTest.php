@@ -9,6 +9,7 @@ use App\Models\PostTarget;
 use App\Services\Media\CompressionResult;
 use App\Services\Media\ImageCompressor;
 use App\Services\Publishing\Connectors\XConnector;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -38,6 +39,16 @@ test('x posts a single tweet', function () {
 
     Http::assertSent(fn ($request) => $request->url() === 'https://api.twitter.com/2/tweets'
         && $request['text'] === 'hello world');
+});
+
+test('x treats a lost final publish response as an unconfirmed outcome', function () {
+    Http::fake(fn () => throw new ConnectionException('connection lost after publish'));
+
+    $result = app(XConnector::class)->publish(xContext(['possibly live']));
+
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorKind?->isRetryable())->toBeFalse()
+        ->and($result->errorMessage)->toContain('check X');
 });
 
 test('x threads replies to the previous tweet id', function () {

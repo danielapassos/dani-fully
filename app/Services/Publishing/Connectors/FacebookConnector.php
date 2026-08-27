@@ -62,7 +62,8 @@ class FacebookConnector implements PublishConnector
             static fn (string $segment): bool => $segment !== '',
         )));
 
-        $videoMedia = array_values(array_filter($context->media, fn (PostMedia $m): bool => $m->isVideo()));
+        $media = $context->effectiveMedia();
+        $videoMedia = array_values(array_filter($media, fn (PostMedia $m): bool => $m->isVideo()));
 
         $format = $context->target->format;
 
@@ -75,27 +76,31 @@ class FacebookConnector implements PublishConnector
         }
 
         if ($format === PostFormat::Story) {
-            if ($context->media === []) {
+            if ($media === []) {
                 return PublishResult::failure(ErrorKind::Validation, 'Facebook Stories require an image or video.');
             }
 
-            return $this->publishStory($context, $context->media[0], $pageId, $token);
+            return $this->publishStory($context, $media[0], $pageId, $token);
         }
 
         if ($videoMedia !== []) {
             return $this->publishVideo($context, $videoMedia[0], $pageId, $text, $token);
         }
 
-        $images = array_slice($context->media, 0, Platform::Facebook->maxMedia());
+        $images = array_slice($media, 0, Platform::Facebook->maxMedia());
+        $publishRequestInFlight = false;
 
         try {
             if (count($images) === 1) {
+                $publishRequestInFlight = true;
                 $response = $this->publishSinglePhoto($pageId, $text, $images[0], $token);
             } elseif (count($images) > 1) {
-                $response = $this->publishCarousel($pageId, $text, $images, $token, $context);
+                $response = $this->publishCarousel($pageId, $text, $images, $token, $context, $publishRequestInFlight);
             } else {
+                $publishRequestInFlight = true;
                 $response = $this->publishFeed($pageId, $text, $token);
             }
+            $publishRequestInFlight = false;
 
             $this->meter(UsageCategory::Publish, UsageOperation::POST, $context->account, $response);
 
@@ -109,11 +114,14 @@ class FacebookConnector implements PublishConnector
         } catch (FacebookRequestFailed $e) {
             return $this->mapFailure($e->response);
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return $this->connectionFailure($e, $publishRequestInFlight);
         }
 
         if ($id === '') {
-            return PublishResult::failure(ErrorKind::ServerError, 'Facebook did not return a post id');
+            return PublishResult::failure(
+                ErrorKind::Unknown,
+                'Facebook accepted the publish request but returned no post id. The post may already be live; check Facebook before taking further action.',
+            );
         }
 
         return PublishResult::success([$id]);
@@ -152,8 +160,14 @@ class FacebookConnector implements PublishConnector
      *
      * @param  list<PostMedia>  $media
      */
-    private function publishCarousel(string $pageId, string $text, array $media, string $token, PublishContext $context): Response
-    {
+    private function publishCarousel(
+        string $pageId,
+        string $text,
+        array $media,
+        string $token,
+        PublishContext $context,
+        bool &$publishRequestInFlight,
+    ): Response {
         $attachedMedia = [];
 
         foreach ($media as $index => $item) {
@@ -181,6 +195,8 @@ class FacebookConnector implements PublishConnector
             $body["attached_media[{$index}]"] = json_encode(['media_fbid' => $mediaFbid]);
         }
 
+        $publishRequestInFlight = true;
+
         return $this->http->asForm()->post($this->baseUrl().'/'.$pageId.'/feed', $body);
     }
 
@@ -200,6 +216,7 @@ class FacebookConnector implements PublishConnector
         $disk = Storage::disk($media->disk);
         $totalSize = (int) $disk->size($media->path);
         $url = $this->baseUrl().'/'.$pageId.'/videos';
+        $publishRequestInFlight = false;
 
         try {
             if ($sessionId === null || $videoId === null) {
@@ -269,12 +286,14 @@ class FacebookConnector implements PublishConnector
                 fclose($stream);
             }
 
+            $publishRequestInFlight = true;
             $finish = $this->http->asForm()->post($url, [
                 'upload_phase' => 'finish',
                 'upload_session_id' => $sessionId,
                 'description' => $text,
                 'access_token' => $token,
             ]);
+            $publishRequestInFlight = false;
 
             $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $finish);
 
@@ -283,12 +302,12 @@ class FacebookConnector implements PublishConnector
             }
 
             if ($finish->json('success') !== true) {
-                return PublishResult::failure(ErrorKind::ServerError, 'Facebook did not confirm the video upload finished.');
+                return PublishResult::failure(ErrorKind::Unknown, 'Facebook did not confirm the video was published. It may already be live; check Facebook before taking further action.');
             }
         } catch (FacebookRequestFailed $e) {
             return $this->mapFailure($e->response);
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return $this->connectionFailure($e, $publishRequestInFlight);
         }
 
         return PublishResult::success([$videoId]);
@@ -310,6 +329,7 @@ class FacebookConnector implements PublishConnector
         $disk = Storage::disk($media->disk);
         $totalSize = (int) $disk->size($media->path);
         $reelsUrl = $this->baseUrl().'/'.$pageId.'/video_reels';
+        $publishRequestInFlight = false;
 
         try {
             if ($videoId === null || $uploadUrl === null) {
@@ -354,6 +374,7 @@ class FacebookConnector implements PublishConnector
                 throw new FacebookRequestFailed($upload);
             }
 
+            $publishRequestInFlight = true;
             $finish = $this->http->asForm()->post($reelsUrl, [
                 'upload_phase' => 'finish',
                 'video_id' => $videoId,
@@ -361,6 +382,7 @@ class FacebookConnector implements PublishConnector
                 'description' => $text,
                 'access_token' => $token,
             ]);
+            $publishRequestInFlight = false;
             $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $finish);
 
             if ($finish->failed()) {
@@ -368,12 +390,12 @@ class FacebookConnector implements PublishConnector
             }
 
             if ($finish->json('success') !== true) {
-                return PublishResult::failure(ErrorKind::ServerError, 'Facebook did not confirm the reel was published.');
+                return PublishResult::failure(ErrorKind::Unknown, 'Facebook did not confirm the Reel was published. It may already be live; check Facebook before taking further action.');
             }
         } catch (FacebookRequestFailed $e) {
             return $this->mapFailure($e->response);
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return $this->connectionFailure($e, $publishRequestInFlight);
         }
 
         return PublishResult::success([$videoId]);
@@ -389,6 +411,8 @@ class FacebookConnector implements PublishConnector
         if ($media->isVideo()) {
             return $this->publishVideoStory($context, $media, $pageId, $token);
         }
+
+        $publishRequestInFlight = false;
 
         try {
             $bytes = (string) Storage::disk($media->disk)->get($media->path);
@@ -408,10 +432,12 @@ class FacebookConnector implements PublishConnector
 
             $photoId = (string) $upload->json('id');
 
+            $publishRequestInFlight = true;
             $story = $this->http->asForm()->post($this->baseUrl().'/'.$pageId.'/photo_stories', [
                 'photo_id' => $photoId,
                 'access_token' => $token,
             ]);
+            $publishRequestInFlight = false;
             $this->meter(UsageCategory::Publish, UsageOperation::POST, $context->account, $story);
 
             if ($story->failed()) {
@@ -419,18 +445,21 @@ class FacebookConnector implements PublishConnector
             }
 
             if ($story->json('success') !== true) {
-                return PublishResult::failure(ErrorKind::ServerError, 'Facebook did not confirm the story was created.');
+                return PublishResult::failure(ErrorKind::Unknown, 'Facebook did not confirm the Story was created. It may already be live; check Facebook before taking further action.');
             }
 
             $id = (string) ($story->json('post_id') ?? $story->json('id'));
         } catch (FacebookRequestFailed $e) {
             return $this->mapFailure($e->response);
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return $this->connectionFailure($e, $publishRequestInFlight);
         }
 
         if ($id === '') {
-            return PublishResult::failure(ErrorKind::ServerError, 'Facebook did not return a story id');
+            return PublishResult::failure(
+                ErrorKind::Unknown,
+                'Facebook accepted the Story request but returned no post id. The Story may already be live; check Facebook before taking further action.',
+            );
         }
 
         return PublishResult::success([$id]);
@@ -450,6 +479,7 @@ class FacebookConnector implements PublishConnector
         $disk = Storage::disk($media->disk);
         $totalSize = (int) $disk->size($media->path);
         $storiesUrl = $this->baseUrl().'/'.$pageId.'/video_stories';
+        $publishRequestInFlight = false;
 
         try {
             if ($videoId === null || $uploadUrl === null) {
@@ -494,11 +524,13 @@ class FacebookConnector implements PublishConnector
                 throw new FacebookRequestFailed($upload);
             }
 
+            $publishRequestInFlight = true;
             $finish = $this->http->asForm()->post($storiesUrl, [
                 'upload_phase' => 'finish',
                 'video_id' => $videoId,
                 'access_token' => $token,
             ]);
+            $publishRequestInFlight = false;
             $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $finish);
 
             if ($finish->failed()) {
@@ -506,12 +538,12 @@ class FacebookConnector implements PublishConnector
             }
 
             if ($finish->json('success') !== true) {
-                return PublishResult::failure(ErrorKind::ServerError, 'Facebook did not confirm the story upload finished.');
+                return PublishResult::failure(ErrorKind::Unknown, 'Facebook did not confirm the Story was published. It may already be live; check Facebook before taking further action.');
             }
         } catch (FacebookRequestFailed $e) {
             return $this->mapFailure($e->response);
         } catch (ConnectionException $e) {
-            return PublishResult::failure(ErrorKind::Network, $e->getMessage());
+            return $this->connectionFailure($e, $publishRequestInFlight);
         }
 
         return PublishResult::success([$videoId]);
@@ -553,6 +585,16 @@ class FacebookConnector implements PublishConnector
         $message = (string) ($response->json('error.message') ?? 'Facebook request failed');
 
         return PublishResult::failure($kind, $message, $response->status(), $this->excerpt($response), $this->retryAfter($response));
+    }
+
+    private function connectionFailure(ConnectionException $exception, bool $publishRequestInFlight): PublishResult
+    {
+        return $publishRequestInFlight
+            ? PublishResult::failure(
+                ErrorKind::Unknown,
+                'The connection closed after Facebook received the publish request. The post may already be live; check Facebook before taking further action.',
+            )
+            : PublishResult::failure(ErrorKind::Network, $exception->getMessage());
     }
 }
 

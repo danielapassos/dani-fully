@@ -7,9 +7,9 @@ namespace App\Services\Posts;
 use App\Enums\Platform;
 use App\Models\Post;
 use App\Models\PostMedia;
-use App\Models\PostMediaPlacement;
 use App\Models\PostTarget;
 use App\Services\Publishing\SegmentMediaResolver;
+use App\Services\Publishing\TargetMediaSelection;
 use Illuminate\Support\Collection;
 
 class PublishPrecheck
@@ -17,6 +17,7 @@ class PublishPrecheck
     public function __construct(
         private readonly PostSplitter $splitter,
         private readonly SegmentMediaResolver $segmentMediaResolver,
+        private readonly TargetMediaSelection $targetMediaSelection,
     ) {}
 
     /**
@@ -37,15 +38,15 @@ class PublishPrecheck
     public function blockingTargets(Post $post): array
     {
         $media = $post->media;
-        $mediaCount = $media->count();
 
         /** @var list<array{connected_account_id: string, handle: ?string, platform: string, issues: list<string>}> $blocking */
         $blocking = [];
 
         foreach ($post->targets as $target) {
             /** @var PostTarget $target */
-            $issues = $this->hasContent($target, $mediaCount)
-                ? $this->targetIssues($target, $media)
+            $targetMedia = $this->targetMedia($target, $media);
+            $issues = $this->hasContent($target, $targetMedia->count())
+                ? $this->targetIssues($target, $targetMedia)
                 : ['empty'];
 
             if ($issues === []) {
@@ -124,10 +125,17 @@ class PublishPrecheck
             $issues[] = 'publishing_unavailable';
         }
 
-        if ($platform->requiresVideo() && ! $media->contains(fn (PostMedia $item): bool => $item->isVideo())) {
+        $requiresVideo = $platform->requiresVideo() || $target->format->requiresVideo();
+        $requiresMedia = $platform->requiresMedia() || $target->format->requiresMedia();
+
+        if ($requiresVideo && ! $media->contains(fn (PostMedia $item): bool => $item->isVideo())) {
             $issues[] = 'video_required';
-        } elseif ($media->count() === 0 && $platform->requiresMedia()) {
+        } elseif ($media->count() === 0 && $requiresMedia) {
             $issues[] = 'media_required';
+        }
+
+        if ($target->format->singleMediaOnly() && $media->count() > 1) {
+            $issues[] = 'too_many_media';
         }
 
         foreach ($this->mediaIssues($target, $platform, $media) as $issue) {
@@ -139,7 +147,7 @@ class PublishPrecheck
 
     /**
      * Media-attribute rules the connectors enforce only at publish time — the
-     * per-section media cap, image/video mixing, GIF mixing, and unplaced media.
+     * per-section media cap, image/video mixing, and GIF mixing.
      * Video caps are checked against the whole target's media (never
      * re-encoded server-side, so caps can't self-heal the way images can). The
      * other rules are checked per thread segment: each connector publishes a
@@ -166,18 +174,6 @@ class PublishPrecheck
 
             foreach ($this->mixIssues($platform, $sectionMedia) as $issue) {
                 $issues[] = $issue;
-            }
-        }
-
-        if ($target->placements->isNotEmpty()) {
-            $placedIds = collect($sections)
-                ->flatMap(fn (Collection $sectionMedia): Collection => $sectionMedia)
-                ->map(fn (PostMedia $item): string => (string) $item->id)
-                ->all();
-            $attachedIds = $media->map(fn (PostMedia $item): string => (string) $item->id)->all();
-
-            if (array_diff($attachedIds, $placedIds) !== []) {
-                $issues[] = 'unplaced_media';
             }
         }
 
@@ -238,23 +234,43 @@ class PublishPrecheck
      */
     private function mediaBySection(PostTarget $target, Collection $media): array
     {
-        $placements = array_values($target->placements
-            ->map(fn (PostMediaPlacement $placement): array => [
-                'post_media_id' => $placement->post_media_id,
-                'segment_ref' => $placement->segment_ref,
-                'position' => $placement->position,
-            ])
-            ->all());
+        $selection = $this->targetMediaSelection->resolve($target, $target->placements);
 
         $bySection = $this->segmentMediaResolver->resolve(
             sections: $target->sections,
             sectionSources: $target->section_sources ?? [],
             segmentBreaks: $target->segment_breaks ?? [],
-            placements: $placements,
+            placements: $selection['placements'],
             allMedia: array_values($media->all()),
+            placementsExplicit: $selection['explicit'],
         );
 
         return array_map(static fn (array $sectionMedia): Collection => collect($sectionMedia), $bySection);
+    }
+
+    /**
+     * Resolve the ordered media this account will actually publish. Once a
+     * target has explicit placements, attachments omitted from that map are an
+     * intentional account-specific exclusion rather than a validation error.
+     * Legacy targets without placement rows retain the full-media fallback.
+     *
+     * @param  Collection<int, PostMedia>  $media
+     * @return Collection<int, PostMedia>
+     */
+    private function targetMedia(PostTarget $target, Collection $media): Collection
+    {
+        $selection = $this->targetMediaSelection->resolve($target, $target->placements);
+        if (! $selection['explicit']) {
+            return $media->values();
+        }
+
+        $byId = $media->keyBy(fn (PostMedia $item): string => (string) $item->id);
+
+        return collect($selection['placements'])
+            ->map(fn (array $placement): ?PostMedia => $byId->get($placement['post_media_id']))
+            ->filter(static fn (?PostMedia $item): bool => $item !== null)
+            ->unique(fn (PostMedia $item): string => (string) $item->id)
+            ->values();
     }
 
     /**

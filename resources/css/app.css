@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source(none);
 
 @import 'tw-animate-css';
 
@@ -6,6 +6,7 @@
 
 @import '@fontsource-variable/noto-sans';
 
+@source '../js';
 @source '../views';
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 

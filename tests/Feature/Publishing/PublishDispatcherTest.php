@@ -11,7 +11,7 @@ use App\Models\PostTarget;
 use App\Services\Publishing\PublishDispatcher;
 use Illuminate\Support\Facades\Bus;
 
-test('dispatcher fans out one job per non-terminal target', function () {
+test('dispatcher fans out one job per runnable target', function () {
     Bus::fake();
 
     $post = Post::factory()->create();
@@ -22,6 +22,49 @@ test('dispatcher fans out one job per non-terminal target', function () {
 
     Bus::assertDispatchedTimes(PublishPostTarget::class, 1);
     Bus::assertDispatched(PublishPostTarget::class, fn (PublishPostTarget $job): bool => $job->target->is($pending));
+    expect($pending->fresh()->status)->toBe(PostTargetStatus::Publishing);
+});
+
+test('dispatcher atomically claims a target so a second call cannot enqueue it again', function () {
+    Bus::fake();
+
+    $post = Post::factory()->create();
+    $target = PostTarget::factory()->for($post)->create([
+        'status' => PostTargetStatus::Pending->value,
+    ]);
+
+    $dispatcher = app(PublishDispatcher::class);
+    $dispatcher->dispatchForPost($post);
+    $dispatcher->dispatchForPost($post);
+
+    Bus::assertDispatchedTimes(PublishPostTarget::class, 1);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Publishing);
+});
+
+test('dispatcher never redispatches failed targets through the general publish path', function (): void {
+    Bus::fake();
+
+    $post = Post::factory()->create(['status' => PostStatus::Failed->value]);
+    PostTarget::factory()->for($post)->failed()->create();
+
+    $dispatcher = app(PublishDispatcher::class);
+    expect($dispatcher->hasRunnableTargets($post))->toBeFalse();
+    $dispatcher->dispatchForPost($post);
+
+    Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
+test('dispatcher never seeds a second chain for an already publishing target', function (): void {
+    Bus::fake();
+
+    $post = Post::factory()->create(['status' => PostStatus::Publishing->value]);
+    PostTarget::factory()->for($post)->create(['status' => PostTargetStatus::Publishing->value]);
+
+    $dispatcher = app(PublishDispatcher::class);
+    expect($dispatcher->hasRunnableTargets($post))->toBeFalse();
+    $dispatcher->dispatchForPost($post);
+
+    Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
 test('dispatcher marks a blocked target failed instead of dispatching it', function () {

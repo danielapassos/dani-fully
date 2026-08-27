@@ -54,6 +54,11 @@ final class FileStorage
     public static function url(string $path, ?string $disk = null): string
     {
         $disk ??= self::diskName();
+        $publicBaseUrl = config("filesystems.disks.{$disk}.public_url");
+
+        if (is_string($publicBaseUrl) && trim($publicBaseUrl) !== '') {
+            return self::appendPathToBaseUrl($publicBaseUrl, $path);
+        }
 
         if (config("filesystems.disks.{$disk}.visibility") === 'public') {
             return Storage::disk($disk)->url($path);
@@ -73,14 +78,19 @@ final class FileStorage
         $baseUrl = config('media.public_url');
 
         if (is_string($baseUrl) && trim($baseUrl) !== '') {
-            $encodedPath = implode('/', array_map(
-                static fn (string $segment): string => rawurlencode($segment),
-                explode('/', ltrim($path, '/')),
-            ));
-
-            return rtrim(trim($baseUrl), '/').'/'.$encodedPath;
+            return self::appendPathToBaseUrl($baseUrl, $path);
         }
 
         return self::url($path, $disk);
+    }
+
+    private static function appendPathToBaseUrl(string $baseUrl, string $path): string
+    {
+        $encodedPath = implode('/', array_map(
+            static fn (string $segment): string => rawurlencode($segment),
+            explode('/', ltrim($path, '/')),
+        ));
+
+        return rtrim(trim($baseUrl), '/').'/'.$encodedPath;
     }
 }

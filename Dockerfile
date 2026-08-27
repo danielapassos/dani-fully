@@ -7,6 +7,9 @@
 ARG SERVERSIDEUP_PHP_VERSION=8.5-frankenphp-trixie
 # https://www.postgresql.org/support/versioning/
 ARG POSTGRES_VERSION=17
+ARG BUN_VERSION=1.4.0
+ARG BUN_SHA256_AMD64=2d03fb5fb83ac8b567aca0a281b2ce1a1a19d488f56c2968d88c3f25e92fe452
+ARG BUN_SHA256_ARM64=4b1a332ee861983eb93bcfe6f770fff94e3e31b2c388bdaea3c8ed35e58eed0e
 ARG USER_ID=9999
 ARG GROUP_ID=9999
 # The running app version, set by the release pipeline from the published git
@@ -47,7 +50,6 @@ COPY --chown=www-data:www-data config ./config
 COPY --chown=www-data:www-data routes ./routes
 COPY --chown=www-data:www-data app ./app
 COPY --chown=www-data:www-data database ./database
-COPY --chown=www-data:www-data storage ./storage
 
 # Full install (with dev) so Wayfinder/artisan can run
 RUN set -eux; \
@@ -56,7 +58,13 @@ RUN set -eux; \
         if [ "$attempt" = 5 ]; then exit 1; fi; \
         sleep $((attempt * 5)); \
     done
-RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views
+RUN mkdir -p \
+    storage/app/private \
+    storage/app/public \
+    storage/framework/cache/data \
+    storage/framework/sessions \
+    storage/framework/views \
+    storage/logs
 RUN php artisan wayfinder:generate --with-form
 # Re-install without dev for the production vendor dir
 RUN set -eux; \
@@ -75,7 +83,7 @@ USER www-data
 # SSR bundle are arch-independent, and this avoids running Bun/Vite under QEMU
 # emulation. node_modules native deps here (oxide/lightningcss/rolldown) are
 # build-time only; the SSR runtime bundle loads pure-JS deps.
-FROM --platform=$BUILDPLATFORM oven/bun:latest AS assets
+FROM --platform=$BUILDPLATFORM oven/bun:${BUN_VERSION} AS assets
 
 WORKDIR /app
 COPY package.json bun.lock vite.config.ts ./
@@ -114,6 +122,9 @@ FROM serversideup/php:${SERVERSIDEUP_PHP_VERSION} AS app
 ARG USER_ID
 ARG GROUP_ID
 ARG POSTGRES_VERSION
+ARG BUN_VERSION
+ARG BUN_SHA256_AMD64
+ARG BUN_SHA256_ARM64
 ARG APP_VERSION
 
 WORKDIR /var/www/html
@@ -142,11 +153,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG TARGETARCH
 RUN set -eux; \
     case "${TARGETARCH}" in \
-        amd64) bun_arch=x64 ;; \
-        arm64) bun_arch=aarch64 ;; \
+        amd64) bun_arch=x64; bun_sha256="${BUN_SHA256_AMD64}" ;; \
+        arm64) bun_arch=aarch64; bun_sha256="${BUN_SHA256_ARM64}" ;; \
         *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://github.com/oven-sh/bun/releases/latest/download/bun-linux-${bun_arch}.zip" -o /tmp/bun.zip; \
+    curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${bun_arch}.zip" -o /tmp/bun.zip; \
+    echo "${bun_sha256}  /tmp/bun.zip" | sha256sum -c -; \
     unzip /tmp/bun.zip -d /tmp; \
     mv "/tmp/bun-linux-${bun_arch}/bun" /usr/local/bin/bun; \
     chmod 755 /usr/local/bin/bun; \
@@ -216,8 +228,18 @@ COPY --from=assets --chown=www-data:www-data /app/bootstrap/ssr ./bootstrap/ssr
 # node_modules needed for the SSR runtime when toggled on
 COPY --from=assets --chown=www-data:www-data /app/node_modules ./node_modules
 
-# Directory for the optional SQLite database (lives on a named volume at runtime)
-RUN mkdir -p database/sqlite && chown -R www-data:www-data database/sqlite
+# Runtime skeletons are excluded from the build context so local media, keys,
+# caches, and maintenance markers can never enter an image. Recreate only the
+# empty directories Laravel needs before package discovery and at runtime.
+RUN mkdir -p \
+        database/sqlite \
+        storage/app/private \
+        storage/app/public \
+        storage/framework/cache/data \
+        storage/framework/sessions \
+        storage/framework/views \
+        storage/logs \
+    && chown -R www-data:www-data database/sqlite storage
 
 RUN composer dump-autoload --no-plugins --no-scripts \
     && php artisan package:discover --ansi

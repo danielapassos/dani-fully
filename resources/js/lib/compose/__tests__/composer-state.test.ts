@@ -1546,6 +1546,82 @@ describe('per-segment placements', () => {
             position: 0,
         });
     });
+
+    it('hydrates an explicit empty canonical placement set without restoring attached media', () => {
+        const post: PostView = {
+            id: 'post-empty',
+            base_text: 'text only',
+            segments: ['text only'],
+            status: 'draft',
+            published_at: null,
+            updated_at: '2026-08-26T10:00:00+00:00',
+            scheduled_at: null,
+            auto_repost: null,
+            destination: { kind: 'account', id: 'a1' },
+            placements: [],
+            placements_explicit: true,
+            targets: [
+                targetFixture('a1', {
+                    placements: [],
+                    placements_explicit: true,
+                }),
+            ],
+            media: [mediaFixture('m1')],
+        };
+
+        const state = composerReducer(initialComposerState(), {
+            type: 'hydrate',
+            post,
+        });
+        expect(state.placements).toEqual({});
+
+        const body = buildPutBody(state, ['a1']);
+        expect(body.placements).toEqual([]);
+        expect(body.targets[0].placements).toBeUndefined();
+    });
+
+    it('round-trips a per-account all-media exclusion as an explicit empty target map', () => {
+        const canonical = {
+            media_id: 'm1',
+            segment_ref: '__head__',
+            position: 0,
+        };
+        const post: PostView = {
+            id: 'post-diverged-empty',
+            base_text: 'hello',
+            segments: ['hello'],
+            status: 'draft',
+            published_at: null,
+            updated_at: '2026-08-26T10:00:00+00:00',
+            scheduled_at: null,
+            auto_repost: null,
+            destination: { kind: 'all', id: null },
+            placements: [canonical],
+            placements_explicit: true,
+            targets: [
+                targetFixture('a1', {
+                    placements: [canonical],
+                    placements_explicit: true,
+                }),
+                targetFixture('a2', {
+                    placements: [],
+                    placements_explicit: true,
+                }),
+            ],
+            media: [mediaFixture('m1')],
+        };
+
+        const state = composerReducer(initialComposerState(), {
+            type: 'hydrate',
+            post,
+        });
+        expect(state.placements).toEqual({ __head__: ['m1'] });
+        expect(state.placementsByAccount.a2).toEqual({});
+
+        const body = buildPutBody(state, ['a1', 'a2']);
+        expect(body.targets[0].placements).toBeUndefined();
+        expect(body.targets[1].placements).toEqual([]);
+    });
 });
 
 describe('segmentRefsFromBreaks', () => {

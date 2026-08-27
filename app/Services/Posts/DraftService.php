@@ -165,7 +165,7 @@ class DraftService
      * @param  list<string>  $accountIds
      * @param  list<string>  $segments
      * @param  array<string, bool>  $autoSplitByAccount
-     * @param  array<string, array{segments: list<string>, media_ids: list<string>}|null>  $overrideByAccount
+     * @param  array<string, array{segments: list<string>, media_ids?: list<string>}|null>  $overrideByAccount
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
      * @param  array<string, string>  $formatByAccount
      */
@@ -201,7 +201,9 @@ class DraftService
             $currentFormat = $current instanceof PostTarget ? $current->format->value : null;
             $format = $formatByAccount[$accountId] ?? $currentFormat ?? 'feed';
 
-            $effectiveSegments = $override['segments'] ?? $segments;
+            $effectiveSegments = isset($override['segments']) && is_array($override['segments'])
+                ? array_values(array_map(static fn (mixed $segment): string => (string) $segment, $override['segments']))
+                : $segments;
             $resolvedSegments = array_map(
                 fn (string $segment): string => $this->resolveMentionTokens($segment, $mentions, $account->platform->value),
                 $effectiveSegments,
@@ -230,17 +232,25 @@ class DraftService
                 $mediaSegments,
             );
 
+            $targetAttributes = [
+                'platform' => $account->platform->value,
+                'sections' => $split->sections,
+                'segment_breaks' => $breaks,
+                'section_sources' => $split->sectionSources,
+                'content_override' => $override,
+                'auto_split' => $autoSplit,
+                'format' => $format,
+            ];
+
+            // Empty placement rows are otherwise indistinguishable from a
+            // legacy target that should inherit all attached media.
+            if ($placementsProvided) {
+                $targetAttributes['placements_explicit'] = true;
+            }
+
             $target = PostTarget::updateOrCreate(
                 ['post_id' => $post->id, 'connected_account_id' => $accountId],
-                [
-                    'platform' => $account->platform->value,
-                    'sections' => $split->sections,
-                    'segment_breaks' => $breaks,
-                    'section_sources' => $split->sectionSources,
-                    'content_override' => $override,
-                    'auto_split' => $autoSplit,
-                    'format' => $format,
-                ],
+                $targetAttributes,
             );
 
             // Only rewrite placements when the caller actually sent them; a partial
@@ -565,6 +575,18 @@ class DraftService
      */
     private function attachMedia(Post $post, array $mediaIds): void
     {
+        $detachedMediaIds = PostMedia::withoutGlobalScopes()
+            ->where('post_id', $post->id)
+            ->whereNotIn('id', $mediaIds)
+            ->pluck('id');
+
+        if ($detachedMediaIds->isNotEmpty()) {
+            PostMediaPlacement::query()
+                ->whereIn('post_target_id', $post->targets()->select('id'))
+                ->whereIn('post_media_id', $detachedMediaIds)
+                ->delete();
+        }
+
         // Detach media that are no longer referenced.
         PostMedia::withoutGlobalScopes()
             ->where('post_id', $post->id)

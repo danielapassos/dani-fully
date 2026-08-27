@@ -67,11 +67,15 @@ services:
         environment:
             <<: *app-env
         ports:
-            - "${APP_PORT:-8080}:8080"
+            # Proxy deployments should not expose a second, untrusted route to
+            # the app. Set APP_BIND_HOST=0.0.0.0 only for intentional direct access.
+            - "${APP_BIND_HOST:-127.0.0.1}:${APP_PORT:-8080}:8080"
         volumes:
             - storage:/var/www/html/storage
             - sqlite:/var/www/html/database/sqlite
-        stop_grace_period: 60s
+        # Allow supervisord's 930-second queue drain to complete before Docker
+        # force-kills a long provider upload.
+        stop_grace_period: 960s
         healthcheck:
             test: ["CMD", "healthcheck-octane"]
             start_period: 15s

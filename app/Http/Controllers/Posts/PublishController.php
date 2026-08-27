@@ -8,7 +8,6 @@ use App\Enums\PostStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Post;
 use App\Services\Billing\WorkspaceSubscriptionGate;
-use App\Services\Posts\PublishPrecheck;
 use App\Services\Publishing\PublishDispatcher;
 use App\Support\PostView;
 use Illuminate\Http\JsonResponse;
@@ -21,7 +20,6 @@ class PublishController extends Controller
         Post $post,
         PublishDispatcher $dispatcher,
         WorkspaceSubscriptionGate $subscriptions,
-        PublishPrecheck $precheck,
     ): JsonResponse {
         abort_unless($request->user()->can('update', $post), 403);
 
@@ -33,6 +31,10 @@ class PublishController extends Controller
             ], 422);
         }
 
+        if (! $dispatcher->hasRunnableTargets($post)) {
+            return response()->json(['message' => PublishDispatcher::NO_RUNNABLE_MESSAGE], 422);
+        }
+
         if (! $subscriptions->canPublish($workspace)) {
             return response()->json([
                 'message' => 'Subscribe to publish this post.',
@@ -40,7 +42,7 @@ class PublishController extends Controller
             ], 402);
         }
 
-        $blocked = $precheck->blockingTargets($post->loadMissing(['targets.account', 'media']));
+        $blocked = $dispatcher->blockingTargets($post);
         if ($blocked !== []) {
             return response()->json([
                 'message' => "Some accounts can't be published yet.",

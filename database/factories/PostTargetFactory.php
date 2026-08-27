@@ -26,6 +26,7 @@ class PostTargetFactory extends Factory
             'connected_account_id' => ConnectedAccount::factory(),
             'platform' => Platform::X->value,
             'sections' => ['Hello world'],
+            'placements_explicit' => false,
             'content_override' => null,
             'auto_split' => true,
             'format' => PostFormat::Feed->value,

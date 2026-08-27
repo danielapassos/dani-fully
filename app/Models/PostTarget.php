@@ -27,7 +27,8 @@ use Override;
  * @property list<string> $sections
  * @property list<string>|null $segment_breaks
  * @property list<int>|null $section_sources
- * @property array{text?: string|null, media_ids?: list<string>}|null $content_override
+ * @property bool $placements_explicit
+ * @property array<string, mixed>|null $content_override
  * @property bool $auto_split
  * @property PostFormat $format
  * @property PostTargetStatus $status
@@ -59,6 +60,7 @@ use Override;
     'sections',
     'segment_breaks',
     'section_sources',
+    'placements_explicit',
     'content_override',
     'auto_split',
     'format',
@@ -98,7 +100,8 @@ class PostTarget extends Model
     public function canRetryManually(): bool
     {
         return $this->status->isRetryable()
-            && $this->error_kind !== ErrorKind::Unknown;
+            && $this->error_kind !== ErrorKind::Unknown
+            && $this->account?->canPublish() === true;
     }
 
     /**
@@ -111,7 +114,30 @@ class PostTarget extends Model
             return 'The provider outcome is unconfirmed and may already be live. Check the connected platform before taking any further action.';
         }
 
+        if ($this->status->isRetryable() && $this->error_kind !== ErrorKind::Unknown) {
+            $account = $this->account;
+
+            if ($account === null) {
+                return 'The connected account is unavailable. Open Accounts before retrying.';
+            }
+
+            return $account->canPublish()
+                ? null
+                : ($account->publishingUnavailableReason()
+                    ?? 'The connected account is unavailable. Open Accounts before retrying.');
+        }
+
         return null;
+    }
+
+    /** @return 'enable_account'|'reconnect'|'operator_configuration'|null */
+    public function manualRetryRecoveryKind(): ?string
+    {
+        if (! $this->status->isRetryable() || $this->error_kind === ErrorKind::Unknown) {
+            return null;
+        }
+
+        return $this->account?->publishingRecoveryKind();
     }
 
     /**
@@ -126,6 +152,7 @@ class PostTarget extends Model
             'sections' => 'array',
             'segment_breaks' => 'array',
             'section_sources' => 'array',
+            'placements_explicit' => 'boolean',
             'content_override' => 'array',
             'auto_split' => 'boolean',
             'format' => PostFormat::class,

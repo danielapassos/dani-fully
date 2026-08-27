@@ -7,6 +7,7 @@ use App\Models\PostMedia;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Posts\DraftService;
+use App\Services\Publishing\TargetMediaSelection;
 use Illuminate\Support\Facades\Context;
 
 test('saving a draft writes placement rows and target provenance', function (): void {
@@ -97,6 +98,104 @@ test('a partial update that omits placements and segment breaks preserves them',
         ->and($target->segment_breaks)->toBe(['b1']);
 });
 
+test('a legacy text-only override keeps inherited media while an explicit empty media list excludes it', function (): void {
+    $user = User::factory()->create();
+    $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    $user->forceFill(['current_workspace_id' => $workspace->id])->save();
+    Context::add('workspace_id', $workspace->id);
+    $account = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::X->value,
+    ]);
+    $post = app(DraftService::class)->createDraft($workspace->id, $user, ['kind' => 'all'], ['hello']);
+    $media = PostMedia::factory()->create([
+        'workspace_id' => $workspace->id,
+        'post_id' => $post->id,
+    ]);
+
+    $post = app(DraftService::class)->updateDraft($post, DraftData::fromArray([
+        'segments' => ['custom'],
+        'destination' => ['kind' => 'all'],
+        'targets' => [[
+            'connected_account_id' => $account->id,
+            'content_override' => ['segments' => ['custom']],
+        ]],
+        'expected_updated_at' => $post->updated_at->toIso8601String(),
+    ]));
+
+    $target = $post->targets->firstWhere('connected_account_id', $account->id);
+    $selection = app(TargetMediaSelection::class)->resolve($target, $target->placements);
+    expect($target->content_override)->toBe(['segments' => ['custom']])
+        ->and($target->placements_explicit)->toBeFalse()
+        ->and($selection)->toBe(['explicit' => false, 'placements' => []])
+        ->and($media->fresh()->post_id)->toBe($post->id);
+
+    $post = app(DraftService::class)->updateDraft($post, DraftData::fromArray([
+        'segments' => ['custom again'],
+        'destination' => ['kind' => 'all'],
+        'targets' => [[
+            'connected_account_id' => $account->id,
+            'content_override' => ['segments' => ['custom again'], 'media_ids' => []],
+        ]],
+        'expected_updated_at' => $post->updated_at->toIso8601String(),
+    ]));
+
+    $target = $post->targets->firstWhere('connected_account_id', $account->id);
+    $selection = app(TargetMediaSelection::class)->resolve($target, $target->placements);
+    expect($target->content_override)->toBe(['segments' => ['custom again'], 'media_ids' => []])
+        ->and($selection)->toBe(['explicit' => true, 'placements' => []]);
+});
+
+test('an explicit empty per-account placement set stays empty across partial updates', function (): void {
+    $user = User::factory()->create();
+    $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    $user->forceFill(['current_workspace_id' => $workspace->id])->save();
+    Context::add('workspace_id', $workspace->id);
+
+    $excludedAccount = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::X->value,
+    ]);
+    $includedAccount = ConnectedAccount::factory()->create([
+        'workspace_id' => $workspace->id,
+        'platform' => Platform::LinkedIn->value,
+    ]);
+    $post = app(DraftService::class)->createDraft($workspace->id, $user, ['kind' => 'all'], ['hello']);
+    $media = PostMedia::factory()->create(['workspace_id' => $workspace->id, 'post_id' => null]);
+
+    $post = app(DraftService::class)->updateDraft($post, DraftData::fromArray([
+        'segments' => ['hello'],
+        'destination' => ['kind' => 'all'],
+        'media_ids' => [$media->id],
+        'placements' => [
+            ['media_id' => $media->id, 'segment_ref' => '__head__', 'position' => 0],
+        ],
+        'targets' => [
+            ['connected_account_id' => $excludedAccount->id, 'placements' => []],
+            ['connected_account_id' => $includedAccount->id],
+        ],
+        'expected_updated_at' => $post->updated_at->toIso8601String(),
+    ]));
+
+    $excluded = $post->targets->firstWhere('connected_account_id', $excludedAccount->id);
+    $included = $post->targets->firstWhere('connected_account_id', $includedAccount->id);
+    expect($excluded->placements_explicit)->toBeTrue()
+        ->and($excluded->placements()->count())->toBe(0)
+        ->and($included->placements_explicit)->toBeTrue()
+        ->and($included->placements()->count())->toBe(1);
+
+    $updated = app(DraftService::class)->updateDraft($post, DraftData::fromArray([
+        'segments' => ['hello again'],
+        'destination' => ['kind' => 'all'],
+        'expected_updated_at' => $post->updated_at->toIso8601String(),
+    ]));
+    $excluded = $updated->targets->firstWhere('connected_account_id', $excludedAccount->id);
+
+    expect($excluded->placements_explicit)->toBeTrue()
+        ->and($excluded->placements()->count())->toBe(0)
+        ->and($media->fresh()->post_id)->toBe($post->id);
+});
+
 test('a partial update that omits media_ids preserves attached media and placements', function (): void {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
@@ -182,7 +281,9 @@ test('explicitly sending an empty media_ids array still detaches all media', fun
     $updated = app(DraftService::class)->updateDraft($post, $clearing);
 
     expect($m1->fresh()->post_id)->toBeNull();
-    expect($updated->media)->toHaveCount(0);
+    expect($updated->media)->toHaveCount(0)
+        ->and($updated->targets->first()->placements()->count())->toBe(0)
+        ->and($updated->targets->first()->placements_explicit)->toBeTrue();
 });
 
 test('an update with diverged per-account placements writes distinct placement rows per target', function (): void {

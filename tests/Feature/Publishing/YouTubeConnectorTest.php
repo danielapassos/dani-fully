@@ -12,8 +12,12 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
-/** @param list<PostMedia> $media */
-function youtubePublishContext(array $media, array $targetOverrides = []): PublishContext
+/**
+ * @param  list<PostMedia>  $media
+ * @param  array<string, mixed>  $targetOverrides
+ * @param  array<int, list<PostMedia>>  $mediaBySection
+ */
+function youtubePublishContext(array $media, array $targetOverrides = [], array $mediaBySection = []): PublishContext
 {
     $target = PostTarget::factory()->create(array_merge([
         'platform' => Platform::YouTube,
@@ -30,6 +34,7 @@ function youtubePublishContext(array $media, array $targetOverrides = []): Publi
         media: $media,
         account: $account,
         credentials: ['access_token' => 'youtube-token'],
+        mediaBySection: $mediaBySection,
     );
 }
 
@@ -55,6 +60,23 @@ test('youtube stays fail closed until publishing is explicitly enabled', functio
 
     expect($result->errorKind)->toBe(ErrorKind::Unsupported);
     Http::assertNothingSent();
+});
+
+test('youtube starts an upload for the placed video while ignoring excluded media', function () {
+    Http::fake([
+        'https://www.googleapis.com/upload/youtube/v3/videos*' => Http::response([
+            'error' => ['message' => 'deliberate test stop'],
+        ], 400),
+    ]);
+
+    $image = PostMedia::factory()->create(['kind' => 'image']);
+    $video = PostMedia::factory()->video()->create();
+    $result = app(YouTubeConnector::class)->publish(
+        youtubePublishContext([$image, $video], [], [0 => [$video]]),
+    );
+
+    expect($result->errorMessage)->not->toContain('exactly one video');
+    Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'uploadType=resumable'));
 });
 
 test('youtube completes a resumable upload and waits for public processing', function () {

@@ -7,9 +7,10 @@ namespace App\Support;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\PostMedia;
-use App\Models\PostMediaPlacement;
 use App\Models\PostTarget;
-use App\Services\Posts\PostSplitter;
+use App\Services\Posts\PublishPrecheck;
+use App\Services\Publishing\ManualRetryEligibility;
+use App\Services\Publishing\TargetMediaSelection;
 
 final class PostView
 {
@@ -18,10 +19,12 @@ final class PostView
      */
     public static function make(Post $post): array
     {
-        $post->loadMissing('targets.placements');
+        $post->loadMissing(['targets.account', 'targets.placements', 'media']);
 
-        $splitter = app(PostSplitter::class);
-        $mediaCount = $post->media->count();
+        $mediaSelection = app(TargetMediaSelection::class);
+        $retryEligibility = app(ManualRetryEligibility::class);
+        $issuesByAccount = collect(app(PublishPrecheck::class)->blockingTargets($post))
+            ->keyBy('connected_account_id');
         $defaultAccountId = $post->workspace()->value('default_connected_account_id');
         $defaultTarget = $post->targets
             ->sortByDesc(fn (PostTarget $target): bool => $target->connected_account_id === $defaultAccountId)
@@ -40,44 +43,64 @@ final class PostView
             'destination' => self::destination($post),
             'targets' => $post->targets
                 ->sortByDesc(fn (PostTarget $target): bool => $target->connected_account_id === $defaultAccountId)
-                ->map(fn (PostTarget $target): array => [
-                    'id' => $target->id,
-                    'connected_account_id' => $target->connected_account_id,
-                    'platform' => $target->platform->value,
-                    'handle' => $target->account?->handle,
-                    'display_name' => $target->account?->display_name,
-                    'avatar_url' => $target->account?->avatar_url,
-                    'sections' => $target->sections,
-                    'segment_breaks' => $target->segment_breaks ?? [],
-                    'placements' => $target->placements->map(fn (PostMediaPlacement $placement): array => [
-                        'media_id' => $placement->post_media_id,
-                        'segment_ref' => $placement->segment_ref,
-                        'position' => $placement->position,
-                    ])->values()->all(),
-                    'content_override' => $target->content_override,
-                    'auto_split' => $target->auto_split,
-                    'format' => $target->format->value,
-                    'status' => $target->status->value,
-                    'error_kind' => $target->error_kind?->value,
-                    'error_message' => $target->error_message,
-                    'can_retry' => $target->canRetryManually(),
-                    'retry_blocked_reason' => $target->manualRetryBlockedReason(),
-                    'attempts' => $target->attempts,
-                    'remote_id' => $target->remote_id,
-                    'issues' => $splitter->validateSections(
-                        $target->sections,
-                        $target->platform,
-                        $mediaCount,
-                        $target->account?->maxTextLength(),
-                    ),
-                ])->values()->all(),
+                ->map(function (PostTarget $target) use ($issuesByAccount, $mediaSelection, $post, $retryEligibility): array {
+                    $selection = $mediaSelection->resolve($target, $target->placements);
+                    $retry = $retryEligibility->evaluate($target, $post);
+
+                    return [
+                        'id' => $target->id,
+                        'connected_account_id' => $target->connected_account_id,
+                        'platform' => $target->platform->value,
+                        'handle' => $target->account?->handle,
+                        'display_name' => $target->account?->display_name,
+                        'avatar_url' => $target->account?->avatar_url,
+                        'sections' => $target->sections,
+                        'segment_breaks' => $target->segment_breaks ?? [],
+                        'section_sources' => $target->section_sources ?? [],
+                        'placements_explicit' => $selection['explicit'],
+                        'placements' => array_map(static fn (array $placement): array => [
+                            'media_id' => $placement['post_media_id'],
+                            'segment_ref' => $placement['segment_ref'],
+                            'position' => $placement['position'],
+                        ], $selection['placements']),
+                        'content_override' => $target->content_override,
+                        'auto_split' => $target->auto_split,
+                        'format' => $target->format->value,
+                        'status' => $target->status->value,
+                        'error_kind' => $target->error_kind?->value,
+                        'error_message' => $target->error_message,
+                        'can_retry' => $retry['allowed'],
+                        'retry_blocked_reason' => ! $retry['allowed'] && $target->status->isRetryable()
+                            ? $retry['reason']
+                            : null,
+                        'retry_recovery_kind' => $retry['recovery_kind'],
+                        'attempts' => $target->attempts,
+                        'remote_id' => $target->remote_id,
+                        'issues' => $issuesByAccount->get((string) $target->connected_account_id)['issues'] ?? [],
+                    ];
+                })->values()->all(),
             'media' => $post->media->map(fn (PostMedia $media): array => $media->toView())->values()->all(),
             'segment_breaks' => $defaultTarget?->segment_breaks ?? [], // @phpstan-ignore nullsafe.neverNull
-            'placements' => $defaultTarget?->placements->map(fn (PostMediaPlacement $placement): array => [
-                'media_id' => $placement->post_media_id,
-                'segment_ref' => $placement->segment_ref,
-                'position' => $placement->position,
-            ])->values()->all() ?? [],
+            ...self::defaultPlacementView($defaultTarget, $mediaSelection),
+        ];
+    }
+
+    /** @return array{placements_explicit: bool, placements: list<array{media_id: string, segment_ref: string, position: int}>} */
+    private static function defaultPlacementView(?PostTarget $target, TargetMediaSelection $mediaSelection): array
+    {
+        if ($target === null) {
+            return ['placements_explicit' => false, 'placements' => []];
+        }
+
+        $selection = $mediaSelection->resolve($target, $target->placements);
+
+        return [
+            'placements_explicit' => $selection['explicit'],
+            'placements' => array_map(static fn (array $placement): array => [
+                'media_id' => $placement['post_media_id'],
+                'segment_ref' => $placement['segment_ref'],
+                'position' => $placement['position'],
+            ], $selection['placements']),
         ];
     }
 

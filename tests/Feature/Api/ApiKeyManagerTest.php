@@ -140,6 +140,40 @@ test('issue does not generate keys and fails loudly when auto-generation is disa
     }
 });
 
+test('issue rejects a partially configured environment keypair', function (?string $privateKey, ?string $publicKey) {
+    $emptyDir = storage_path('framework/testing/passport-keys-'.uniqid());
+    File::ensureDirectoryExists($emptyDir);
+    Passport::loadKeysFrom($emptyDir);
+    $previous = [
+        'auto' => config('passport.auto_generate_keys'),
+        'private' => config('passport.private_key'),
+        'public' => config('passport.public_key'),
+    ];
+    config([
+        'passport.auto_generate_keys' => true,
+        'passport.private_key' => $privateKey,
+        'passport.public_key' => $publicKey,
+    ]);
+
+    try {
+        expect(fn () => $this->manager->issue($this->workspace, $this->user, 'partial keys', 'read', null))
+            ->toThrow(RuntimeException::class, 'PASSPORT_PRIVATE_KEY and PASSPORT_PUBLIC_KEY must be configured together.');
+        expect(file_exists($emptyDir.'/oauth-private.key'))->toBeFalse();
+        expect(file_exists($emptyDir.'/oauth-public.key'))->toBeFalse();
+    } finally {
+        config([
+            'passport.auto_generate_keys' => $previous['auto'],
+            'passport.private_key' => $previous['private'],
+            'passport.public_key' => $previous['public'],
+        ]);
+        Passport::loadKeysFrom(storage_path());
+        File::deleteDirectory($emptyDir);
+    }
+})->with([
+    'private key only' => ['configured-private-key', null],
+    'public key only' => [null, 'configured-public-key'],
+]);
+
 test('revoke marks the row revoked and revokes the passport token', function () {
     [$apiKey] = $this->manager->issue($this->workspace, $this->user, 'bot', 'write', null);
 

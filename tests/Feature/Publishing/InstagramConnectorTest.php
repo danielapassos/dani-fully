@@ -26,8 +26,9 @@ function pngBytes(): string
  * @param  list<PostMedia>  $media
  * @param  array<string, mixed>  $targetOverrides
  * @param  array<string, mixed>  $accountOverrides
+ * @param  array<int, list<PostMedia>>  $mediaBySection
  */
-function igContext(array $segments, array $media = [], array $targetOverrides = [], array $accountOverrides = []): PublishContext
+function igContext(array $segments, array $media = [], array $targetOverrides = [], array $accountOverrides = [], array $mediaBySection = []): PublishContext
 {
     $target = PostTarget::factory()->create(array_merge(['platform' => Platform::Instagram->value], $targetOverrides));
     $account = ConnectedAccount::factory()->create(array_merge([
@@ -41,6 +42,7 @@ function igContext(array $segments, array $media = [], array $targetOverrides = 
         media: $media,
         account: $account,
         credentials: ['access_token' => 'page-tok'],
+        mediaBySection: $mediaBySection,
     );
 }
 
@@ -263,6 +265,46 @@ test('instagram builds a carousel from two images then publishes the parent cont
         && ($request['media_type'] ?? null) === 'CAROUSEL'
         && ($request['children'] ?? null) === 'child-1,child-2'
         && ($request['caption'] ?? null) === 'carousel caption');
+});
+
+test('instagram honors target-specific media order and exclusions', function () {
+    Storage::fake('public');
+    foreach (['excluded', 'first', 'second'] as $name) {
+        Storage::disk('public')->put("media/{$name}.jpg", "{$name}-bytes");
+    }
+
+    $excluded = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/excluded.jpg', 'mime' => 'image/jpeg']);
+    $first = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/first.jpg', 'mime' => 'image/jpeg']);
+    $second = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/second.jpg', 'mime' => 'image/jpeg']);
+
+    Http::fake([
+        'https://graph.facebook.com/*/ig123/media' => Http::sequence()
+            ->push(['id' => 'child-second'])
+            ->push(['id' => 'child-first'])
+            ->push(['id' => 'parent']),
+        'https://graph.facebook.com/*/parent*' => Http::response(['status_code' => 'FINISHED']),
+        'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'published']),
+    ]);
+
+    $result = app(InstagramConnector::class)->publish(igContext(
+        ['caption'],
+        [$excluded, $first, $second],
+        [],
+        [],
+        [0 => [$second, $first]],
+    ));
+
+    expect($result->isSuccessful())->toBeTrue();
+
+    $childUrls = Http::recorded()
+        ->filter(fn (array $record): bool => ($record[0]['is_carousel_item'] ?? null) === 'true')
+        ->map(fn (array $record): string => (string) ($record[0]['image_url'] ?? ''))
+        ->values();
+
+    expect($childUrls)->toHaveCount(2)
+        ->and($childUrls[0])->toContain('second.jpg')
+        ->and($childUrls[1])->toContain('first.jpg')
+        ->and($childUrls->implode(' '))->not->toContain('excluded.jpg');
 });
 
 test('instagram sets media_type=VIDEO on a carousel video child container', function () {

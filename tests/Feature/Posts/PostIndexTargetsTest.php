@@ -5,6 +5,7 @@ use App\Enums\Platform;
 use App\Enums\PostStatus;
 use App\Enums\PostTargetStatus;
 use App\Enums\WorkspaceRole;
+use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\PostTarget;
 use App\Models\User;
@@ -27,7 +28,9 @@ test('posts index payload includes per-target status and published_at', function
         'status' => PostStatus::Partial,
         'published_at' => now(),
     ]);
+    $account = ConnectedAccount::factory()->create(['workspace_id' => $workspace->id]);
     PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
         'platform' => Platform::X->value,
         'status' => PostTargetStatus::Failed->value,
         'error_kind' => ErrorKind::RateLimited->value,
