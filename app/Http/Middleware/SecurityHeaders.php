@@ -107,7 +107,8 @@ class SecurityHeaders
     /**
      * CSP source origins for the deployment's media storage host. Empty unless
      * the default disk uses the s3 driver, so local/public-disk deployments keep the
-     * tightest policy. Derived from the configured public URL and API endpoint;
+     * tightest policy. Derived from the configured public URL, API endpoint,
+     * and the exact bucket host used by virtual-hosted S3-compatible storage;
      * an s3 disk with neither configured (vanilla AWS, whose virtual-hosted,
      * region-derived presign host can't be predicted cheaply here) falls back to
      * `https:` so uploads and playback still work. A configured public URL does
@@ -134,11 +135,49 @@ class SecurityHeaders
             }
         }
 
+        $bucketOrigin = $this->virtualHostedBucketOrigin($disk);
+        if ($bucketOrigin !== null) {
+            $origins[$bucketOrigin] = $bucketOrigin;
+        }
+
         if ($this->originOf((string) config("filesystems.disks.{$disk}.endpoint")) === null) {
             $origins['https:'] = 'https:';
         }
 
         return array_values($origins);
+    }
+
+    /**
+     * Laravel Cloud injects virtual-hosted disks after configuration loads.
+     * Match the SDK's addressing for ordinary, undotted DNS bucket names without
+     * resolving a storage client, signing a URL, or permitting sibling buckets.
+     */
+    private function virtualHostedBucketOrigin(string $disk): ?string
+    {
+        $key = "filesystems.disks.{$disk}";
+        if (config($key.'.use_path_style_endpoint') || config($key.'.bucket_endpoint')) {
+            return null;
+        }
+
+        $bucket = config($key.'.bucket');
+        $endpoint = (string) config($key.'.endpoint');
+        $scheme = parse_url($endpoint, PHP_URL_SCHEME);
+        $host = parse_url($endpoint, PHP_URL_HOST);
+
+        if (
+            ! is_string($bucket)
+            || ! preg_match('/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/D', $bucket)
+            || ! in_array($scheme, ['http', 'https'], true)
+            || ! is_string($host)
+            || ! filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)
+            || filter_var($host, FILTER_VALIDATE_IP)
+        ) {
+            return null;
+        }
+
+        $port = parse_url($endpoint, PHP_URL_PORT);
+
+        return $scheme.'://'.$bucket.'.'.$host.(is_int($port) ? ':'.$port : '');
     }
 
     /**

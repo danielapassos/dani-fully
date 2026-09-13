@@ -1,6 +1,8 @@
 <?php
 
 use App\Services\Gifs\GifAttacher;
+use Illuminate\Foundation\Cloud;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Vite;
 
 test('responses carry the static security headers', function () {
@@ -76,6 +78,102 @@ test('an arbitrarily named s3 disk allowlists its own storage origins', function
     expect($csp)->toContain('connect-src \'self\' blob: https://media.example.com https://r2-api.example.com')
         ->and($csp)->toContain('media-src \'self\' blob: https://media.example.com https://r2-api.example.com');
 });
+
+test('a Cloud-injected disk permits its actual virtual-hosted upload origin without sibling buckets', function () {
+    $previousCloudConfig = $_SERVER['LARAVEL_CLOUD_DISK_CONFIG'] ?? null;
+    config(['filesystems.disks.cloud-media.use_path_style_endpoint' => true]);
+
+    try {
+        $_SERVER['LARAVEL_CLOUD_DISK_CONFIG'] = json_encode([[
+            'disk' => 'cloud-media',
+            'access_key_id' => 'test-key',
+            'access_key_secret' => 'test-secret',
+            'bucket' => 'shoutrrr-media',
+            'url' => 'https://cdn.example.com/media',
+            'endpoint' => 'https://account.r2.cloudflarestorage.com',
+            'is_default' => true,
+        ]], JSON_THROW_ON_ERROR);
+
+        Cloud::configureDisks($this->app);
+    } finally {
+        if ($previousCloudConfig === null) {
+            unset($_SERVER['LARAVEL_CLOUD_DISK_CONFIG']);
+        } else {
+            $_SERVER['LARAVEL_CLOUD_DISK_CONFIG'] = $previousCloudConfig;
+        }
+    }
+
+    // Signing with dummy credentials is local: this makes no storage request.
+    $upload = Storage::disk('cloud-media')->temporaryUploadUrl('tmp/media/test.mp4', now()->addMinutes(5));
+    $uploadOrigin = 'https://'.parse_url($upload['url'], PHP_URL_HOST);
+    $csp = $this->get('/login')->headers->get('Content-Security-Policy');
+    $sources = "'self' blob: https://cdn.example.com https://account.r2.cloudflarestorage.com {$uploadOrigin}";
+
+    expect(config('filesystems.default'))->toBe('cloud-media')
+        ->and(config('filesystems.disks.cloud-media.use_path_style_endpoint'))->toBeFalse()
+        ->and($uploadOrigin)->toBe('https://shoutrrr-media.account.r2.cloudflarestorage.com')
+        ->and($csp)->toContain("connect-src {$sources};")
+        ->and($csp)->toContain("media-src {$sources};");
+});
+
+test('the storage policy matches the configured S3 addressing mode', function (array $overrides, string $expectedOrigin) {
+    $disk = array_replace([
+        'driver' => 's3',
+        'key' => 'test-key',
+        'secret' => 'test-secret',
+        'region' => 'auto',
+        'bucket' => 'shoutrrr-media',
+        'endpoint' => 'https://storage.example.com:8443/api',
+        'use_path_style_endpoint' => false,
+    ], $overrides);
+    config(['filesystems.default' => 'media-test', 'filesystems.disks.media-test' => $disk]);
+
+    $upload = Storage::disk('media-test')->temporaryUploadUrl('tmp/media/test.mp4', now()->addMinutes(5));
+    $scheme = parse_url($upload['url'], PHP_URL_SCHEME);
+    $host = parse_url($upload['url'], PHP_URL_HOST);
+    $port = parse_url($upload['url'], PHP_URL_PORT);
+    $uploadOrigin = $scheme.'://'.$host.($port === null ? '' : ':'.$port);
+    $endpointOrigin = preg_replace('~/api$~', '', $disk['endpoint']);
+    $origins = $expectedOrigin === $endpointOrigin ? $expectedOrigin : $endpointOrigin.' '.$expectedOrigin;
+    $csp = $this->get('/login')->headers->get('Content-Security-Policy');
+
+    expect($uploadOrigin)->toBe($expectedOrigin)
+        ->and($csp)->toContain("connect-src 'self' blob: {$origins};")
+        ->and($csp)->toContain("media-src 'self' blob: {$origins};");
+})->with([
+    'virtual-hosted with custom port and path' => [[], 'https://shoutrrr-media.storage.example.com:8443'],
+    'explicit path-style' => [['use_path_style_endpoint' => true], 'https://storage.example.com:8443'],
+    'bucket-specific endpoint' => [['bucket_endpoint' => true], 'https://storage.example.com:8443'],
+    'dotted bucket over HTTPS' => [['bucket' => 'shoutrrr.media'], 'https://storage.example.com:8443'],
+    'uppercase bucket' => [['bucket' => 'ShoutrrrMedia'], 'https://storage.example.com:8443'],
+    'IPv4 endpoint' => [['endpoint' => 'http://127.0.0.1:9000'], 'http://127.0.0.1:9000'],
+    'IPv6 endpoint' => [['endpoint' => 'http://[::1]:9000'], 'http://[::1]:9000'],
+]);
+
+test('missing or invalid bucket configuration does not add a storage origin', function (mixed $bucket) {
+    config([
+        'filesystems.default' => 'media-test',
+        'filesystems.disks.media-test' => [
+            'driver' => 's3',
+            'bucket' => $bucket,
+            'endpoint' => 'https://storage.example.com',
+        ],
+    ]);
+
+    $csp = $this->get('/login')->headers->get('Content-Security-Policy');
+
+    expect($csp)->toContain("connect-src 'self' blob: https://storage.example.com;")
+        ->and($csp)->toContain("media-src 'self' blob: https://storage.example.com;");
+})->with([
+    'missing' => [null],
+    'empty' => [''],
+    'too short' => ['ab'],
+    'leading hyphen' => ['-invalid'],
+    'trailing hyphen' => ['invalid-'],
+    'underscore' => ['invalid_bucket'],
+    'CSP delimiter' => ['invalid; https://other.example.com'],
+    'non-string' => [['invalid']],
+]);
 
 test('a vanilla s3 disk with no endpoint falls back to https: so uploads still work', function () {
     config([
