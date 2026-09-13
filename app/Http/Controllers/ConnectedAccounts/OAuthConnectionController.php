@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ConnectedAccount;
 use App\Services\ConnectedAccounts\AccountConnectionService;
 use App\Services\ConnectedAccounts\LinkedIn\LinkedInOrganizationDiscovery;
+use App\Services\ConnectedAccounts\OAuthConnectionFlow;
 use App\Services\ConnectedAccounts\Threads\ThreadsTokenExchanger;
 use App\Services\ConnectedAccounts\XAccountCapabilities;
 use App\Support\InstanceSettings;
@@ -18,7 +19,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
-use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\InvalidStateException;
 use Laravel\Socialite\Two\User as SocialiteUser;
@@ -33,6 +33,7 @@ class OAuthConnectionController extends Controller
         private readonly ThreadsTokenExchanger $threadsExchanger,
         private readonly InstanceSettings $settings,
         private readonly LinkedInOrganizationDiscovery $linkedInOrganizations,
+        private readonly OAuthConnectionFlow $flows,
     ) {}
 
     public function redirect(Request $request, string $platform): Response
@@ -41,7 +42,11 @@ class OAuthConnectionController extends Controller
 
         $request->user()->can('create', ConnectedAccount::class) ?: abort(403);
 
-        return $this->driver($resolved)->setScopes($this->scopesFor($resolved))->redirect();
+        try {
+            return $this->flows->redirect($request, $resolved, $this->driver($resolved)->setScopes($this->scopesFor($resolved)));
+        } catch (InvalidStateException $exception) {
+            return $this->failed($this->failureMessage($resolved, $exception));
+        }
     }
 
     public function callback(Request $request, string $platform): RedirectResponse|InertiaResponse
@@ -50,25 +55,23 @@ class OAuthConnectionController extends Controller
 
         $request->user()->can('create', ConnectedAccount::class) ?: abort(403);
 
-        // The provider can bounce back with an error instead of a code — most
-        // commonly when the user presses "Cancel" on the consent screen.
-        if ($request->filled('error')) {
-            Log::warning('Connected-account OAuth provider returned an error.', [
-                'platform' => $resolved->value,
-                'error' => $request->query('error'),
-                'error_description' => $request->query('error_description'),
-            ]);
-
-            return $this->failed($this->denialMessage($resolved, (string) $request->query('error')));
-        }
-
+        $attempt = null;
         try {
-            $oauthUser = $this->driver($resolved)->user();
-        } catch (Throwable $exception) {
-            if ($exception instanceof InvalidStateException && $this->hasSuccessfulConnectionFlash($request, $resolved)) {
-                $request->session()->keep('success');
+            $attempt = $this->flows->claim($request, $resolved);
+            if ($attempt->completedAccountId !== null) {
+                return redirect()->route('accounts.index')->with('success', $this->successMessage($resolved));
+            }
 
-                return redirect()->route('accounts.index');
+            if ($request->filled('error')) {
+                $this->flows->fail($request, $attempt);
+
+                return $this->failed($this->denialMessage($resolved, $request->string('error')->toString()));
+            }
+
+            $oauthUser = $this->flows->user($request, $attempt, $this->driver($resolved));
+        } catch (Throwable $exception) {
+            if ($attempt !== null) {
+                $this->flows->fail($request, $attempt);
             }
 
             Log::warning('Connected-account OAuth callback failed.', [
@@ -81,6 +84,8 @@ class OAuthConnectionController extends Controller
         }
 
         if (! $oauthUser instanceof SocialiteUser) {
+            $this->flows->fail($request, $attempt);
+
             return $this->failed("We couldn't read your {$resolved->label()} profile. Please try again.");
         }
 
@@ -142,6 +147,8 @@ class OAuthConnectionController extends Controller
             try {
                 $long = $this->threadsExchanger->exchangeForLongLived((string) $data->accessToken);
             } catch (Throwable $exception) {
+                $this->flows->fail($request, $attempt);
+
                 Log::warning('Threads long-lived token exchange failed.', [
                     'exception' => $exception::class,
                     'message' => $exception->getMessage(),
@@ -157,11 +164,20 @@ class OAuthConnectionController extends Controller
             $picker = $this->renderLinkedInPagePicker($request, $data, $linkedInGrantedScopes);
 
             if ($picker !== null) {
+                $this->flows->fail($request, $attempt);
+
                 return $picker;
             }
         }
 
-        $this->connections->store($data, $request->user());
+        try {
+            $account = $this->connections->store($data, $request->user(), $attempt->workspaceId);
+            $this->flows->complete($request, $attempt, $account);
+        } catch (Throwable $exception) {
+            $this->flows->fail($request, $attempt);
+
+            throw $exception;
+        }
 
         return redirect()->route('accounts.index')
             ->with('success', $this->successMessage($resolved));
@@ -225,11 +241,6 @@ class OAuthConnectionController extends Controller
         return "{$platform->label()} account connected.";
     }
 
-    private function hasSuccessfulConnectionFlash(Request $request, Platform $platform): bool
-    {
-        return $request->session()->get('success') === $this->successMessage($platform);
-    }
-
     /**
      * Friendly message for a provider-side denial/error redirect.
      */
@@ -250,6 +261,7 @@ class OAuthConnectionController extends Controller
         $message = $exception->getMessage();
 
         return match (true) {
+            $exception instanceof InvalidStateException => "This {$platform->label()} connection link has expired or was already used. Start again from Connect account.",
             str_contains($message, 'scope') => "Your {$platform->label()} app is missing a required permission. Check the app's configured scopes/permissions, then try again.",
             str_contains($message, '401'), str_contains($message, '403'), str_contains($message, 'Unauthorized'), str_contains($message, 'Forbidden') => "{$platform->label()} refused the request. Check your {$platform->label()} app's credentials and permissions, then try again.",
             default => "We couldn't connect your {$platform->label()} account. Please try again.",
@@ -355,12 +367,6 @@ class OAuthConnectionController extends Controller
      */
     private function driver(Platform $platform): AbstractProvider
     {
-        $driver = Socialite::driver((string) $platform->socialiteDriver());
-
-        if (! $driver instanceof AbstractProvider) {
-            abort(404);
-        }
-
-        return $driver->redirectUrl(route('accounts.callback', ['platform' => $platform->value]));
+        return $this->flows->driver($platform);
     }
 }

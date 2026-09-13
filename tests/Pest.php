@@ -1,5 +1,6 @@
 <?php
 
+use App\Dto\ConnectedAccount\OAuthConnectionAttempt;
 use App\Dto\Publishing\PublishContext;
 use App\Dto\Publishing\PublishResult;
 use App\Enums\Platform;
@@ -14,15 +15,16 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
 use App\Services\Api\ApiKeyManager;
+use App\Services\ConnectedAccounts\OAuthConnectionFlow;
 use App\Services\Publishing\Contracts\PublishConnector;
 use App\Services\Publishing\PublishConnectorRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
 use Laravel\Passport\AccessToken;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
-use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\User as SocialiteUser;
 use Tests\TestCase;
@@ -277,7 +279,28 @@ function fakeOAuthUser(string $driver, array $data): SocialiteUser
     $provider->shouldReceive('redirect')->andReturn(redirect('https://provider.test/oauth'));
     $provider->shouldReceive('user')->andReturn($user);
 
-    Socialite::shouldReceive('driver')->with($driver)->andReturn($provider);
+    fakeAccountOAuthFlow($driver, $provider);
 
     return $user;
+}
+
+/**
+ * Isolate controller/data-mapping tests from OAuth protocol validation.
+ * OAuthConnectionStateTest exercises real providers and the full state flow.
+ */
+function fakeAccountOAuthFlow(string $driver, AbstractProvider $provider): void
+{
+    $flow = Mockery::mock(OAuthConnectionFlow::class);
+    $flow->shouldReceive('driver')
+        ->with(Mockery::on(fn (Platform $platform): bool => $platform->socialiteDriver() === $driver))
+        ->andReturn($provider);
+    $flow->shouldReceive('redirect')->andReturnUsing(fn (Request $request, Platform $platform, AbstractProvider $provider) => $provider->redirect());
+    $flow->shouldReceive('claim')->andReturnUsing(fn (Request $request, Platform $platform) => new OAuthConnectionAttempt(
+        str_repeat('a', 40), $platform, (string) $request->user()->getAuthIdentifier(),
+        (string) $request->user()->current_workspace_id, route('accounts.callback', ['platform' => $platform->value]), hash('sha256', 'test-code'),
+    ));
+    $flow->shouldReceive('user')->andReturnUsing(fn (Request $request, OAuthConnectionAttempt $attempt, AbstractProvider $provider) => $provider->user());
+    $flow->shouldReceive('complete');
+    $flow->shouldReceive('fail');
+    app()->instance(OAuthConnectionFlow::class, $flow);
 }

@@ -9,7 +9,6 @@ use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
 use App\Support\InstanceSettings;
 use Illuminate\Support\Facades\Http;
-use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\InvalidStateException;
 use Laravel\Socialite\Two\User as SocialiteUser;
@@ -278,7 +277,7 @@ test('linkedin connect requests the community management feed scopes only when e
     });
     $provider->shouldReceive('redirectUrl')->andReturnSelf();
     $provider->shouldReceive('redirect')->andReturn(redirect('https://provider.test/oauth'));
-    Socialite::shouldReceive('driver')->with('linkedin-openid')->andReturn($provider);
+    fakeAccountOAuthFlow('linkedin-openid', $provider);
 
     // Off by default: never request the restricted scope (it would break authorize).
     test()->get('/accounts/connect/linkedin')->assertRedirect('https://provider.test/oauth');
@@ -306,7 +305,7 @@ test('linkedin connect requests the organization scopes only when community mana
     });
     $provider->shouldReceive('redirectUrl')->andReturnSelf();
     $provider->shouldReceive('redirect')->andReturn(redirect('https://provider.test/oauth'));
-    Socialite::shouldReceive('driver')->with('linkedin-openid')->andReturn($provider);
+    fakeAccountOAuthFlow('linkedin-openid', $provider);
 
     test()->get('/accounts/connect/linkedin')->assertRedirect('https://provider.test/oauth');
     expect($captured)->not->toContain('w_organization_social');
@@ -357,7 +356,7 @@ test('linkedin connect marks engagement unavailable when the feed scope is not g
         ->and($account->canFetchEngagement())->toBeFalse();
 });
 
-test('duplicate callback after a successful OAuth connection keeps the success flash', function () {
+test('a previous success flash cannot turn an invalid callback into a successful connection', function () {
     config()->set('services.linkedin-openid.client_id', 'cid');
     config()->set('services.linkedin-openid.client_secret', 'secret');
     config()->set('services.linkedin-openid.redirect', 'https://app.test/accounts/callback/linkedin');
@@ -382,7 +381,7 @@ test('duplicate callback after a successful OAuth connection keeps the success f
         ->once()
         ->andThrow(new InvalidStateException)
         ->ordered();
-    Socialite::shouldReceive('driver')->with('linkedin-openid')->twice()->andReturn($provider);
+    fakeAccountOAuthFlow('linkedin-openid', $provider);
 
     test()->get('/accounts/callback/linkedin')
         ->assertRedirect(route('accounts.index'))
@@ -390,8 +389,7 @@ test('duplicate callback after a successful OAuth connection keeps the success f
 
     test()->get('/accounts/callback/linkedin')
         ->assertRedirect(route('accounts.index'))
-        ->assertSessionMissing('error')
-        ->assertSessionHas('success', 'LinkedIn account connected.');
+        ->assertSessionHas('error', 'This LinkedIn connection link has expired or was already used. Start again from Connect account.');
 });
 
 test('a member is forbidden from connecting', function () {
@@ -415,6 +413,8 @@ test('callback surfaces a friendly message when the user declines on the provide
     config()->set('services.x.client_secret', 'secret');
     ownerActingIn();
 
+    fakeOAuthUser('x', ['id' => 'declined']);
+
     test()->get('/accounts/callback/x?error=access_denied')
         ->assertRedirect(route('accounts.index'))
         ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'declined')
@@ -431,7 +431,7 @@ test('callback maps a scope failure to a friendly permission message', function 
     $provider = Mockery::mock(AbstractProvider::class);
     $provider->shouldReceive('redirectUrl')->andReturnSelf();
     $provider->shouldReceive('user')->andThrow(new RuntimeException('Missing required OAuth2 scopes: users.email'));
-    Socialite::shouldReceive('driver')->with('x')->andReturn($provider);
+    fakeAccountOAuthFlow('x', $provider);
 
     test()->get('/accounts/callback/x')
         ->assertRedirect(route('accounts.index'))

@@ -11,7 +11,6 @@ use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
 use App\Services\Publishing\PublishConnectorRegistry;
 use Illuminate\Support\Facades\Http;
-use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\User as SocialiteUser;
 
@@ -57,7 +56,7 @@ function fakeThreadsOAuthUser(array $data): SocialiteUser
     $provider->shouldReceive('redirect')->andReturn(redirect('https://threads.net/oauth/authorize?client_id=threads-cid'));
     $provider->shouldReceive('user')->andReturn($user);
 
-    Socialite::shouldReceive('driver')->with('threads')->andReturn($provider);
+    fakeAccountOAuthFlow('threads', $provider);
 
     return $user;
 }
