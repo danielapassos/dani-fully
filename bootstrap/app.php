@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\ConnectedAccounts\ThreadsLifecycleController;
 use App\Http\Controllers\Uploads\StreamedUploadController;
 use App\Http\Middleware\CaptureMcpWorkspaceSelection;
 use App\Http\Middleware\EnsureConversationSupportsDirectMessageMedia;
@@ -35,6 +36,19 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->where('path', '.*')
                 ->middleware(['throttle:60,1', 'signed:relative'])
                 ->name('uploads.stream');
+
+            // Meta authenticates these stateless callbacks with signed_request;
+            // browser sessions, CSRF and workspace selection must not apply.
+            Route::prefix('accounts/threads')->middleware('throttle:60,1')->group(function (): void {
+                Route::post('deauthorize', [ThreadsLifecycleController::class, 'deauthorize'])
+                    ->name('accounts.threads.deauthorize');
+                Route::post('data-deletion', [ThreadsLifecycleController::class, 'deleteData'])
+                    ->name('accounts.threads.data-deletion');
+                Route::get('data-deletion/{confirmationCode}', [ThreadsLifecycleController::class, 'deletionStatus'])
+                    ->where('confirmationCode', '[A-Za-z0-9]{40}')
+                    ->middleware('signed')
+                    ->name('accounts.threads.deletion-status');
+            });
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {

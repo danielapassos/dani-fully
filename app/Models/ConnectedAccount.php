@@ -36,6 +36,7 @@ use Override;
  * @property array<string, mixed>|null $capabilities
  * @property CarbonImmutable|null $token_expires_at
  * @property CarbonImmutable|null $last_refreshed_at
+ * @property CarbonImmutable|null $authorized_at
  * @property CarbonImmutable|null $refresh_failed_at
  * @property string|null $refresh_failure_reason
  * @property CarbonImmutable|null $metrics_captured_at
@@ -57,6 +58,7 @@ use Override;
     'capabilities',
     'token_expires_at',
     'last_refreshed_at',
+    'authorized_at',
     'refresh_failed_at',
     'refresh_failure_reason',
     'metrics_captured_at',
@@ -90,6 +92,7 @@ class ConnectedAccount extends Model
             'capabilities' => 'array',
             'token_expires_at' => 'immutable_datetime',
             'last_refreshed_at' => 'immutable_datetime',
+            'authorized_at' => 'immutable_datetime',
             'refresh_failed_at' => 'immutable_datetime',
             'metrics_captured_at' => 'immutable_datetime',
             'metrics_status' => MetricsStatus::class,
