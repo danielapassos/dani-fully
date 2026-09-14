@@ -207,6 +207,56 @@ test('tiktok persists a manual-review gate when the inbox init response is lost'
         ->and($retryCalledProvider)->toBeFalse();
 });
 
+test('tiktok retains safe initialization diagnostics without creating an upload', function () {
+    Http::fake(['*/inbox/video/init/' => Http::response([
+        'error' => ['code' => 'invalid_param', 'message' => 'The total_chunk_count is invalid.', 'logid' => '20260914153227ABCDEF'],
+        'data' => ['upload_url' => tiktokTestUploadUrl()],
+    ], 400)]);
+    $video = tiktokStoredVideo();
+    $context = tiktokPublishContext([$video]);
+
+    $result = tiktokPublishConnector()->publish($context);
+
+    expect($result->errorKind)->toBe(ErrorKind::Validation)
+        ->and($result->httpStatus)->toBe(400)
+        ->and($result->errorMessage)->toContain('invalid_param', 'total_chunk_count')
+        ->and(json_decode($result->responseExcerpt, true))->toBe([
+            'code' => 'invalid_param', 'message' => 'The total_chunk_count is invalid.', 'log_id' => '20260914153227ABCDEF',
+        ])
+        ->and($result->responseExcerpt)->not->toContain('test-upload-secret')
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata'])->not->toHaveKey('init_outcome_unknown');
+    Http::assertSentCount(1);
+});
+
+test('tiktok omits unsafe initialization prose and never saves the raw response', function (string $message) {
+    Http::fake(['*/inbox/video/init/' => Http::response([
+        'error' => ['code' => 'invalid_param', 'message' => $message, 'log_id' => 'https://secret.example.test'],
+        'data' => ['upload_url' => tiktokTestUploadUrl()],
+    ], 400)]);
+
+    $result = tiktokPublishConnector()->publish(tiktokPublishContext([tiktokStoredVideo()]));
+
+    expect($result->errorMessage)->not->toContain($message)
+        ->and(json_decode($result->responseExcerpt, true))->toBe(['code' => 'invalid_param', 'message' => null, 'log_id' => null]);
+})->with([
+    'URL' => 'See https://example.test/?upload_token=secret',
+    'credential' => 'access_token: secret',
+    'long opaque value' => str_repeat('a', 64),
+    'structured message' => '{"secret":"value"}',
+]);
+
+test('tiktok preserves the unknown-outcome gate for an initialization server error', function () {
+    Http::fake(['*/inbox/video/init/' => Http::response(['error' => ['code' => 'internal_error']], 500)]);
+    $video = tiktokStoredVideo();
+    $context = tiktokPublishContext([$video]);
+    $connector = tiktokPublishConnector();
+
+    expect($connector->publish($context)->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($connector->publish($context)->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['init_outcome_unknown'])->toBeTrue();
+    Http::assertSentCount(1);
+});
+
 test('tiktok resumes the stored publish and records the public video id', function () {
     Http::fake([
         'https://open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response([

@@ -113,7 +113,7 @@ class TikTokConnector implements PublishConnector
                     $this->setInitOutcomeUnknown($state, $media, false);
                     $context->target->forceFill(['media_upload_state' => $state->toArray()])->save();
 
-                    return PublishResult::failure($failure->errorKind ?? ErrorKind::Unknown, 'TikTok could not initialize the inbox upload. Check the upload permission and developer app status.', $failure->httpStatus, retryAfter: $failure->retryAfter);
+                    return $this->initializationFailure($response, $failure);
                 }
 
                 $publishId = (string) $response->json('data.publish_id');
@@ -514,6 +514,36 @@ class TikTokConnector implements PublishConnector
             ->connectTimeout(5)
             ->withToken($token)
             ->acceptJson();
+    }
+
+    private function initializationFailure(Response $response, PublishResult $failure): PublishResult
+    {
+        $code = $response->json('error.code');
+        $code = is_string($code) && preg_match('/\A[a-z][a-z0-9_]{0,79}\z/', $code) === 1 ? $code : 'unknown';
+        $logId = $response->json('error.log_id') ?? $response->json('error.logid');
+        $logId = is_string($logId) && preg_match('/\A[A-Z0-9]{10,80}\z/i', $logId) === 1 ? $logId : null;
+        $detail = $response->json('error.message');
+        // Provider prose may echo credentials or signed URLs. Retain only short
+        // validation prose; structured credentials and raw bodies are omitted.
+        $detail = is_string($detail) && preg_match('/\A[A-Za-z0-9 _.,:;()=\-]{1,200}\z/', $detail) === 1
+            && preg_match('/token|secret|authorization|credential|bearer|[A-Za-z0-9_\-]{33,}/i', $detail) !== 1
+            ? $detail : null;
+        $reason = match ($code) {
+            'invalid_param' => 'TikTok rejected the upload parameters.',
+            'scope_not_authorized' => 'Reconnect the TikTok account and approve video uploads.',
+            'access_token_invalid' => 'Reconnect the TikTok account to renew access.',
+            'spam_risk_too_many_pending_share' => 'Finish or remove pending uploads in TikTok before sending another video.',
+            'spam_risk_user_banned_from_posting' => 'TikTok has restricted posting for this account.',
+            default => 'Check the TikTok developer app status before retrying.',
+        };
+
+        return PublishResult::failure(
+            $failure->errorKind ?? ErrorKind::Unknown,
+            'TikTok could not initialize the inbox upload ('.$code.'). '.($detail !== null ? $detail.' ' : '').$reason,
+            $failure->httpStatus,
+            json_encode(['code' => $code, 'message' => $detail, 'log_id' => $logId], JSON_THROW_ON_ERROR),
+            $failure->retryAfter,
+        );
     }
 
     private function failure(Response $response, string $fallback): ?PublishResult
