@@ -108,8 +108,8 @@ test('tiktok stays fail closed until inbox publishing is explicitly enabled', fu
     Http::assertNothingSent();
 });
 
-test('tiktok transfers one video and keeps the target processing until native finish', function (string $uploadPath) {
-    $uploadUrl = str_replace('/video/', $uploadPath, tiktokTestUploadUrl());
+test('tiktok transfers one video and keeps the target processing until native finish', function (string $uploadBase) {
+    $uploadUrl = $uploadBase.'?upload_id=test-upload&upload_token=test-upload-secret';
     Http::fake(function (Request $request) use ($uploadUrl) {
         if (str_contains($request->url(), '/inbox/video/init/')) {
             return Http::response([
@@ -152,7 +152,7 @@ test('tiktok transfers one video and keeps the target processing until native fi
         && ! $request->hasHeader('Authorization'));
     expect($context->target->fresh()->media_upload_state[$video->id]['metadata'])->not->toHaveKey('upload_url');
     Http::assertSentCount(3);
-})->with(['/video/', '/upload/']);
+})->with(['https://open-upload.tiktokapis.com/video/', 'https://open-upload.tiktokapis.com/upload/', 'https://open-upload.tiktokapis.us/upload']);
 
 test('tiktok publishes the placed video while ignoring media excluded for that target', function () {
     Http::fake(function (Request $request) {
@@ -572,6 +572,7 @@ test('tiktok rejects untrusted upload URLs without exposing their signed query',
 })->with([
     'external host' => 'https://example.test/video/?upload_id=id&upload_token=secret',
     'host suffix' => 'https://open-upload.tiktokapis.com.example.test/video/?upload_id=id&upload_token=secret',
+    'US host suffix' => 'https://open-upload.tiktokapis.us.example.test/upload?upload_id=id&upload_token=secret',
     'http' => 'http://open-upload.tiktokapis.com/video/?upload_id=id&upload_token=secret',
     'userinfo' => 'https://user:secret@open-upload.tiktokapis.com/video/?upload_id=id&upload_token=secret',
     'alternate port' => 'https://open-upload.tiktokapis.com:444/video/?upload_id=id&upload_token=secret',

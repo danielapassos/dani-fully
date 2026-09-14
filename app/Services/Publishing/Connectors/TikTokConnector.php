@@ -379,8 +379,8 @@ class TikTokConnector implements PublishConnector
     {
         $parts = parse_url($value);
         if (! is_array($parts) || ($parts['scheme'] ?? null) !== 'https'
-            || ! in_array($parts['host'] ?? null, ['open-upload.tiktokapis.com', 'upload.us.tiktokapis.com'], true)
-            || ! in_array($parts['path'] ?? null, ['/video/', '/upload/'], true) || isset($parts['user']) || isset($parts['pass'])
+            || ! in_array($parts['host'] ?? null, ['open-upload.tiktokapis.com', 'upload.us.tiktokapis.com', 'open-upload.tiktokapis.us'], true)
+            || ! in_array($parts['path'] ?? null, ['/video/', '/upload/', '/upload'], true) || isset($parts['user']) || isset($parts['pass'])
             || isset($parts['fragment']) || (isset($parts['port']) && $parts['port'] !== 443)) {
             throw new RuntimeException('Invalid TikTok upload URL.');
         }
