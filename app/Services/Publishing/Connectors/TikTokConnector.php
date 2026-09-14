@@ -140,11 +140,12 @@ class TikTokConnector implements PublishConnector
                 // a later job must never create a duplicate inbox transfer.
                 $this->persistState($context, $state);
 
-                $uploadUrl = $this->uploadUrl((string) $response->json('data.upload_url'));
+                $uploadUrl = (string) $response->json('data.upload_url');
                 $metadata = $state->metadata($media->id);
                 $metadata['upload_url'] = Crypt::encryptString($uploadUrl);
                 $state->setMetadata($media->id, $metadata);
                 $this->persistState($context, $state);
+                $this->uploadUrl($uploadUrl);
             }
 
             $metadata = $state->metadata($media->id);
@@ -379,7 +380,7 @@ class TikTokConnector implements PublishConnector
         $parts = parse_url($value);
         if (! is_array($parts) || ($parts['scheme'] ?? null) !== 'https'
             || ! in_array($parts['host'] ?? null, ['open-upload.tiktokapis.com', 'upload.us.tiktokapis.com'], true)
-            || ($parts['path'] ?? null) !== '/video/' || isset($parts['user']) || isset($parts['pass'])
+            || ! in_array($parts['path'] ?? null, ['/video/', '/upload/'], true) || isset($parts['user']) || isset($parts['pass'])
             || isset($parts['fragment']) || (isset($parts['port']) && $parts['port'] !== 443)) {
             throw new RuntimeException('Invalid TikTok upload URL.');
         }

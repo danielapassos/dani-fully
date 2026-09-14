@@ -108,11 +108,12 @@ test('tiktok stays fail closed until inbox publishing is explicitly enabled', fu
     Http::assertNothingSent();
 });
 
-test('tiktok transfers one video and keeps the target processing until native finish', function () {
-    Http::fake(function (Request $request) {
+test('tiktok transfers one video and keeps the target processing until native finish', function (string $uploadPath) {
+    $uploadUrl = str_replace('/video/', $uploadPath, tiktokTestUploadUrl());
+    Http::fake(function (Request $request) use ($uploadUrl) {
         if (str_contains($request->url(), '/inbox/video/init/')) {
             return Http::response([
-                'data' => ['publish_id' => 'publish-42', 'upload_url' => tiktokTestUploadUrl()],
+                'data' => ['publish_id' => 'publish-42', 'upload_url' => $uploadUrl],
                 'error' => ['code' => 'ok'],
             ]);
         }
@@ -143,7 +144,7 @@ test('tiktok transfers one video and keeps the target processing until native fi
             'total_chunk_count' => 1,
         ]);
     Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT'
-        && $request->url() === tiktokTestUploadUrl()
+        && $request->url() === $uploadUrl
         && $request->body() === 'private-video-bytes'
         && $request->header('Content-Type') === ['video/mp4']
         && $request->header('Content-Length') === ['19']
@@ -151,7 +152,7 @@ test('tiktok transfers one video and keeps the target processing until native fi
         && ! $request->hasHeader('Authorization'));
     expect($context->target->fresh()->media_upload_state[$video->id]['metadata'])->not->toHaveKey('upload_url');
     Http::assertSentCount(3);
-});
+})->with(['/video/', '/upload/']);
 
 test('tiktok publishes the placed video while ignoring media excluded for that target', function () {
     Http::fake(function (Request $request) {
@@ -562,7 +563,9 @@ test('tiktok rejects untrusted upload URLs without exposing their signed query',
 
     expect($result->errorKind)->toBe(ErrorKind::Validation)
         ->and($result->errorMessage)->not->toContain('secret')
-        ->and($context->target->fresh()->media_upload_state[$video->id]['remote_ref'])->toBe('publish-42');
+        ->and($context->target->fresh()->media_upload_state[$video->id]['remote_ref'])->toBe('publish-42')
+        ->and(Crypt::decryptString($context->target->fresh()->media_upload_state[$video->id]['metadata']['upload_url']))->toBe($url)
+        ->and(json_encode($context->target->fresh()->media_upload_state))->not->toContain('secret');
     $context->target->refresh();
     tiktokPublishConnector()->publish($context);
     Http::assertSentCount(1);
