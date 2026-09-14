@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\AccountSetsController;
+use App\Http\Controllers\Api\V1\AnalyticsController;
 use App\Http\Controllers\Api\V1\CalendarController;
 use App\Http\Controllers\Api\V1\ConnectedAccountsController;
 use App\Http\Controllers\Api\V1\MediaController;
@@ -24,6 +25,11 @@ Route::middleware(['auth:api', ResolveApiWorkspace::class, 'throttle:api', Recor
         Route::get('calendar', [CalendarController::class, 'index']);
         Route::get('posting-schedule', [PostingScheduleController::class, 'show']);
         Route::get('posts/{id}/shares', [SharesController::class, 'index']);
+
+        Route::middleware('metrics.enabled')->group(function (): void {
+            Route::get('analytics/accounts', [AnalyticsController::class, 'accounts']);
+            Route::get('analytics/posts', [AnalyticsController::class, 'posts']);
+        });
 
         Route::middleware(RequireWriteScope::class)->group(function (): void {
             Route::post('posts', [PostsController::class, 'store']);
