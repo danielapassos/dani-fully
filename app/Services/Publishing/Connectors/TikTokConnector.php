@@ -87,6 +87,11 @@ class TikTokConnector implements PublishConnector
                 // TikTok merges the remainder into the final chunk, rather than
                 // accepting an additional chunk smaller than its 5 MiB minimum.
                 $chunkCount = max(1, intdiv($media->size_bytes, $chunkSize));
+                // With one chunk TikTok requires the declared size to equal
+                // the whole file, including any remainder above CHUNK_BYTES.
+                if ($chunkCount === 1) {
+                    $chunkSize = $media->size_bytes;
+                }
 
                 // An inbox-init response can be lost after TikTok creates the
                 // transfer. Persist the mutation boundary first so a retry cannot
@@ -224,7 +229,9 @@ class TikTokConnector implements PublishConnector
         $chunkSize = (int) ($metadata['chunk_size'] ?? 0);
         $chunkCount = (int) ($metadata['chunk_count'] ?? 0);
         if (($metadata['total_bytes'] ?? null) !== $total || ($metadata['content_type'] ?? null) !== $media->mime
-            || $chunkSize !== min(self::CHUNK_BYTES, $total) || $total < 1 || $total > self::MAX_VIDEO_BYTES
+            || ($chunkSize !== min(self::CHUNK_BYTES, $total)
+                && ! ($total < self::CHUNK_BYTES * 2 && $chunkSize === $total))
+            || $total < 1 || $total > self::MAX_VIDEO_BYTES
             || $chunkCount !== max(1, intdiv($total, $chunkSize)) || $chunkCount > 1000
             || $offset < 0 || $offset >= $total || $offset % $chunkSize !== 0) {
             throw new RuntimeException('Invalid saved TikTok upload metadata.');
@@ -529,7 +536,7 @@ class TikTokConnector implements PublishConnector
             && preg_match('/token|secret|authorization|credential|bearer|[A-Za-z0-9_\-]{33,}/i', $detail) !== 1
             ? $detail : null;
         $reason = match ($code) {
-            'invalid_param' => 'TikTok rejected the upload parameters.',
+            'invalid_param', 'invalid_params' => 'TikTok rejected the upload parameters.',
             'scope_not_authorized' => 'Reconnect the TikTok account and approve video uploads.',
             'access_token_invalid' => 'Reconnect the TikTok account to renew access.',
             'spam_risk_too_many_pending_share' => 'Finish or remove pending uploads in TikTok before sending another video.',

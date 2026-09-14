@@ -411,6 +411,36 @@ test('tiktok uploads one chunk per invocation and merges trailing bytes into the
     Http::assertSentCount(4);
 });
 
+test('tiktok declares the complete file size when sending a single chunk with a remainder', function (int $size) {
+    $video = tiktokStoredVideo(str_repeat('v', $size));
+    $context = tiktokPublishContext([$video]);
+    Http::fake(function (Request $request) use ($size) {
+        if (str_contains($request->url(), '/inbox/video/init/')) {
+            if ($request['source_info']['chunk_size'] !== $size || $request['source_info']['total_chunk_count'] !== 1) {
+                return Http::response(['error' => ['code' => 'invalid_params', 'message' => 'The chunk size is invalid']], 400);
+            }
+
+            return Http::response(['data' => ['publish_id' => 'publish-42', 'upload_url' => tiktokTestUploadUrl()]]);
+        }
+        if ($request->method() === 'PUT') {
+            expect(strlen($request->body()))->toBe($size)
+                ->and($request->header('Content-Length'))->toBe([(string) $size])
+                ->and($request->header('Content-Range'))->toBe(['bytes 0-'.($size - 1).'/'.$size]);
+
+            return Http::response('', 201);
+        }
+
+        return Http::response(['data' => ['status' => 'SEND_TO_USER_INBOX']]);
+    });
+
+    $result = tiktokPublishConnector()->publish($context);
+
+    expect($result->errorKind)->toBe(ErrorKind::MediaProcessing)
+        ->and($result->errorMessage)->toContain('Open TikTok')
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['upload_complete'])->toBeTrue();
+    Http::assertSentCount(3);
+})->with(['first byte above chunk' => 8388609, 'failed production video' => 9071797, 'last single chunk size' => 16777215]);
+
 test('tiktok reconciles a lost or rejected chunk response before deciding which bytes to send', function (int|string $failure, bool $accepted) {
     $chunk = 8 * 1024 * 1024;
     $video = tiktokStoredVideo(str_repeat('a', $chunk).str_repeat('b', $chunk));
