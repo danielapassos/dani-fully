@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Enums\Platform;
 use App\Listeners\BindWorkspaceToAccessToken;
+use App\Listeners\CaptureMcpRefreshToken;
 use App\Listeners\SetCurrentWorkspaceOnLogin;
 use App\Listeners\SetSentryUserContext;
 use App\Models\PostMedia;
@@ -34,6 +35,7 @@ use Inertia\ExceptionResponse;
 use Inertia\Inertia;
 use Laravel\Cashier\Cashier;
 use Laravel\Passport\Events\AccessTokenCreated;
+use Laravel\Passport\Events\AccessTokenRevoked;
 use Laravel\Passport\Passport;
 use Laravel\Socialite\Facades\Socialite;
 use Override;
@@ -135,6 +137,7 @@ class AppServiceProvider extends ServiceProvider
 
         Event::listen(Login::class, SetCurrentWorkspaceOnLogin::class);
         Event::listen(AccessTokenCreated::class, BindWorkspaceToAccessToken::class);
+        Event::listen(AccessTokenRevoked::class, CaptureMcpRefreshToken::class);
         Event::listen(Authenticated::class, SetSentryUserContext::class);
 
         Passport::authorizationView(
