@@ -175,8 +175,10 @@ function bindConnector(PublishResult|callable $result): void
  * wrap it in an AccessToken (the ScopeAuthorizable that withAccessToken expects),
  * with 'oauth_access_token_id' set so AccessToken::__get('id') proxies to the
  * underlying Token id, which is what WorkspaceTool::workspaceId() reads.
+ *
+ * @param  list<string>  $scopes
  */
-function bindTokenToWorkspace(User $user, Workspace $workspace): void
+function bindTokenToWorkspace(User $user, Workspace $workspace, array $scopes = ['mcp:use', 'read', 'write']): void
 {
     // A real MCP grant is only ever issued for a workspace the user belongs to
     // (CaptureMcpWorkspaceSelection verifies membership at consent), so model that.
@@ -197,7 +199,7 @@ function bindTokenToWorkspace(User $user, Workspace $workspace): void
         'user_id' => $user->id,
         'client_id' => $client->id,
         'name' => 'mcp-test',
-        'scopes' => [],
+        'scopes' => $scopes,
         'revoked' => false,
         'expires_at' => now()->addYear(),
     ]);
@@ -214,7 +216,10 @@ function bindTokenToWorkspace(User $user, Workspace $workspace): void
     // Setting oauth_access_token_id allows AccessToken::__get('id') to proxy
     // to the Token model's primary key, which is what WorkspaceTool::workspaceId()
     // reads via $request->user()->token()->id.
-    $accessToken = new AccessToken(['oauth_access_token_id' => $tokenId]);
+    $accessToken = new AccessToken([
+        'oauth_access_token_id' => $tokenId,
+        'oauth_scopes' => $scopes,
+    ]);
 
     // actingAs() stores the same $user instance on the guard, so token() remains
     // set when the tool resolves $request->user() from the auth guard.

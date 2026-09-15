@@ -49,7 +49,9 @@ class CreateNewUser implements CreatesNewUsers
             'password' => $this->passwordRules(),
         ])->validate();
 
-        return DB::transaction(function () use ($input): User {
+        $invitationRequired = ! $this->settings->registrationsAllowed();
+
+        return DB::transaction(function () use ($input, $invitationToken, $invitationRequired): User {
             $user = User::create([
                 'name' => $input['name'],
                 'email' => $input['email'],
@@ -57,7 +59,13 @@ class CreateNewUser implements CreatesNewUsers
             ]);
 
             $this->settings->claimOwnerIfMissing($user);
-            $this->provisioning->provisionForNewUser($user, request()->input('invitation'));
+            $invitationAccepted = $this->provisioning->provisionForNewUser($user, $invitationToken);
+
+            if ($invitationRequired && ! $invitationAccepted) {
+                throw ValidationException::withMessages([
+                    'email' => 'A valid invitation is required to register on this instance.',
+                ]);
+            }
 
             return $user->refresh();
         });

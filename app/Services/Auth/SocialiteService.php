@@ -67,12 +67,14 @@ class SocialiteService
             return new SocialiteResult($byEmail, wasRegistered: false);
         }
 
-        if (! $this->settings->registrationsAllowed($invitationToken)) {
+        if (! $this->settings->registrationsAllowed($invitationToken, $email)) {
             throw SocialAuthException::registrationsDisabled();
         }
 
+        $invitationRequired = ! $this->settings->registrationsAllowed();
+
         try {
-            $user = DB::transaction(function () use ($provider, $oauthUser, $email, $invitationToken): User {
+            $user = DB::transaction(function () use ($provider, $oauthUser, $email, $invitationToken, $invitationRequired): User {
                 $user = User::create([
                     'name' => $oauthUser->getName() ?? $oauthUser->getNickname() ?? 'User',
                     'email' => $email,
@@ -85,7 +87,11 @@ class SocialiteService
 
                 $this->linkAccount($user, $provider, $oauthUser);
                 $this->settings->claimOwnerIfMissing($user);
-                $this->provisioning->provisionForNewUser($user, $invitationToken);
+                $invitationAccepted = $this->provisioning->provisionForNewUser($user, $invitationToken);
+
+                if ($invitationRequired && ! $invitationAccepted) {
+                    throw SocialAuthException::registrationsDisabled();
+                }
 
                 return $user;
             });

@@ -1,10 +1,15 @@
 <?php
 
+use App\Dto\Workspace\InvitationAcceptanceResult;
 use App\Enums\SocialProvider;
 use App\Exceptions\SocialAuthException;
 use App\Models\SocialAccount;
 use App\Models\User;
+use App\Models\Workspace;
+use App\Models\WorkspaceInvitation;
 use App\Services\Auth\SocialiteService;
+use App\Services\Workspace\WorkspaceInvitationService;
+use App\Support\InstanceSettings;
 use Illuminate\Database\QueryException;
 use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Socialite\Contracts\User as SocialiteUser;
@@ -108,6 +113,66 @@ test('new oauth user with an invalid invitation still gets a default workspace',
 
     expect($result->wasRegistered)->toBeTrue()
         ->and($result->user->workspaceMemberships()->count())->toBe(1);
+});
+
+test('closed oauth registration rejects an invalid expired accepted or mismatched invitation', function (string $kind) {
+    User::factory()->instanceOwner()->create();
+    app(InstanceSettings::class)->update(['registrations_enabled' => false]);
+    [$plain, $hash] = WorkspaceInvitation::generateToken();
+    if ($kind !== 'invalid') {
+        WorkspaceInvitation::factory()->create([
+            'token' => $hash,
+            'email' => $kind === 'mismatched' ? 'someone-else@example.com' : 'invitee@example.com',
+            'expires_at' => $kind === 'expired' ? now()->subMinute() : now()->addDay(),
+            'accepted_at' => $kind === 'accepted' ? now() : null,
+        ]);
+    }
+    $userCount = User::count();
+    $workspaceCount = Workspace::count();
+    $oauthUser = fakeSocialiteUser(['email' => 'invitee@example.com']);
+
+    expect(fn () => app(SocialiteService::class)->loginOrRegister(SocialProvider::Google, $oauthUser, $plain))
+        ->toThrow(SocialAuthException::class);
+    $this->assertGuest();
+    expect(User::count())->toBe($userCount)
+        ->and(Workspace::count())->toBe($workspaceCount)
+        ->and(SocialAccount::count())->toBe(0);
+})->with(['invalid', 'expired', 'accepted', 'mismatched']);
+
+test('closed oauth registration accepts the invited provider email case insensitively', function () {
+    User::factory()->instanceOwner()->create();
+    app(InstanceSettings::class)->update(['registrations_enabled' => false]);
+    [$plain, $hash] = WorkspaceInvitation::generateToken();
+    $invitation = WorkspaceInvitation::factory()->create(['email' => 'Invitee@example.com', 'token' => $hash]);
+    $oauthUser = fakeSocialiteUser(['email' => 'invitee@example.com']);
+
+    $result = app(SocialiteService::class)->loginOrRegister(SocialProvider::Google, $oauthUser, $plain);
+
+    expect($result->wasRegistered)->toBeTrue()
+        ->and($result->user->current_workspace_id)->toBe($invitation->workspace_id)
+        ->and($result->user->workspaceMemberships()->count())->toBe(2)
+        ->and($invitation->fresh()->isAccepted())->toBeTrue();
+});
+
+test('closed oauth registration rolls back a failed invitation acceptance', function () {
+    User::factory()->instanceOwner()->create();
+    app(InstanceSettings::class)->update(['registrations_enabled' => false]);
+    [$plain, $hash] = WorkspaceInvitation::generateToken();
+    WorkspaceInvitation::factory()->create(['email' => 'invitee@example.com', 'token' => $hash]);
+    $userCount = User::count();
+    $workspaceCount = Workspace::count();
+    $this->mock(WorkspaceInvitationService::class)
+        ->shouldReceive('acceptByToken')->once()
+        ->andReturn(new InvitationAcceptanceResult(false, 'Invitation was revoked.', 'error'));
+    $oauthUser = fakeSocialiteUser(['email' => 'invitee@example.com']);
+
+    expect(fn () => app(SocialiteService::class)->loginOrRegister(SocialProvider::Google, $oauthUser, $plain))
+        ->toThrow(SocialAuthException::class);
+
+    $this->assertGuest();
+    expect(User::count())->toBe($userCount)
+        ->and(Workspace::count())->toBe($workspaceCount)
+        ->and(SocialAccount::count())->toBe(0);
 });
 
 test('returning user is matched by provider id, not email', function () {

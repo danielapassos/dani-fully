@@ -21,3 +21,24 @@ test('scope filters and autofills workspace id', function () {
 
     $this->assertSame(1, ScopedFixture::count());
 });
+
+test('explicitly missing workspace context fails closed while absent worker context stays unscoped', function () {
+    $a = Workspace::factory()->create();
+    $b = Workspace::factory()->create();
+    foreach ([$a, $b] as $workspace) {
+        ScopedFixture::withoutGlobalScope('workspace')->create([
+            'workspace_id' => $workspace->id,
+            'user_id' => $workspace->owner_id,
+            'role' => 'member',
+        ]);
+    }
+
+    Context::add('workspace_id', null);
+    expect(ScopedFixture::count())->toBe(0);
+
+    Context::forget('workspace_id');
+    expect(ScopedFixture::count())->toBe(2);
+
+    Context::add('workspace_id', $a->id);
+    expect(ScopedFixture::count())->toBe(1);
+});

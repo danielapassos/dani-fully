@@ -19,13 +19,15 @@ class WorkspaceProvisioningService
      * personal workspace, then accept a pending invitation when a token is present.
      * Accepting last keeps the invited workspace as the current workspace.
      */
-    public function provisionForNewUser(User $user, ?string $invitationToken): void
+    public function provisionForNewUser(User $user, ?string $invitationToken): bool
     {
         $this->createDefaultWorkspace($user);
 
         if ($invitationToken) {
-            $this->invitations->acceptByToken($invitationToken, $user);
+            return $this->invitations->acceptByToken($invitationToken, $user)->wasSuccessful();
         }
+
+        return false;
     }
 
     public function createDefaultWorkspace(User $user): void
