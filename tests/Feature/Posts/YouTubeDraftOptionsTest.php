@@ -62,6 +62,55 @@ test('draft requests accept incomplete YouTube choices but reject malformed supp
     'not an object' => ['public', false],
 ]);
 
+test('YouTube copy overrides validate UTF-8 character and byte limits without truncating declarations', function (array $copy, bool $valid): void {
+    $choices = [...youtubeDraftChoices(), ...$copy];
+    $payload = ['targets' => [['content_override' => ['youtube' => $choices]]]];
+    expect(Validator::make($payload, YouTubePostOptions::draftRules())->passes())->toBe($valid);
+    if (! mb_check_encoding($copy, 'UTF-8')) {
+        return;
+    }
+
+    $target = PostTarget::factory()->create(['content_override' => ['youtube' => $choices]]);
+    $resolved = app(YouTubePostOptions::class)->resolve($target);
+    expect($resolved !== null)->toBe($valid);
+    if ($valid) {
+        foreach ($copy as $key => $value) {
+            expect($resolved[$key])->toBe($value ?? '');
+        }
+    }
+})->with([
+    'independent copy' => [['title' => '27B is the in-flight entertainment', 'description' => "An independent description.\nSecond line."], true],
+    'blank description' => [['description' => ''], true],
+    'request-normalized blank description' => [['description' => null], true],
+    '100 multibyte title characters' => [['title' => str_repeat('é', 100)], true],
+    '101 multibyte title characters' => [['title' => str_repeat('é', 101)], false],
+    '5000 description bytes' => [['description' => str_repeat('🌸', 1250)], true],
+    '5004 description bytes' => [['description' => str_repeat('🌸', 1251)], false],
+    'empty title' => [['title' => ''], false],
+    'whitespace title' => [['title' => '  '], false],
+    'null title' => [['title' => null], false],
+    'title angle brackets' => [['title' => 'a < b'], false],
+    'description angle brackets' => [['description' => 'a > b'], false],
+    'invalid UTF-8 title' => [['title' => "\xFF"], false],
+    'invalid UTF-8 description' => [['description' => "\xFF"], false],
+]);
+
+test('a blank YouTube description remains an explicit override after HTTP normalization', function (): void {
+    [$user, , $channel] = youtubeDraftMember();
+    $response = $this->actingAs($user)->postJson(route('posts.store'), [
+        'segments' => ['Shared caption must not replace the blank description'],
+        'destination' => ['kind' => 'account', 'id' => $channel->id],
+        'targets' => [[
+            'connected_account_id' => $channel->id,
+            'content_override' => ['youtube' => [...youtubeDraftChoices(), 'title' => 'Exact title', 'description' => '']],
+        ]],
+    ])->assertCreated();
+    $target = Post::findOrFail($response->json('post.id'))->targets()->sole();
+
+    expect(array_key_exists('description', $target->content_override['youtube']))->toBeTrue()
+        ->and(app(YouTubePostOptions::class)->resolve($target)['description'])->toBe('');
+});
+
 test('YouTube choices stay with their selected channel and inherit the shared caption', function () {
     [$user, $workspace, $channel] = youtubeDraftMember();
     $other = ConnectedAccount::factory()->create(['workspace_id' => $workspace->id, 'platform' => Platform::YouTube]);

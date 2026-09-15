@@ -8,6 +8,7 @@ use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\Gifs\PostGifController;
 use App\Http\Controllers\Posts\CalendarController;
 use App\Http\Controllers\Posts\ComposerController;
+use App\Http\Controllers\Posts\InstagramCoverController;
 use App\Http\Controllers\Posts\NextSlotController;
 use App\Http\Controllers\Posts\PostController;
 use App\Http\Controllers\Posts\PostImageEditController;
@@ -65,6 +66,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('posts', [PostController::class, 'store'])->name('posts.store');
     Route::put('posts/{post}', [PostController::class, 'update'])->name('posts.update');
     Route::get('posts/{post}', [ComposerController::class, 'show'])->name('posts.show');
+    Route::get('posts/{post}/instagram-covers', [InstagramCoverController::class, 'index'])->name('posts.instagram-covers.index');
     Route::delete('posts/{post}', [PostController::class, 'destroy'])->name('posts.destroy');
     // Throttled: each call copies every media file on the source post.
     Route::post('posts/{post}/duplicate', [PostController::class, 'duplicate'])

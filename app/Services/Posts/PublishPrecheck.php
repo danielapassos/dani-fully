@@ -9,6 +9,7 @@ use App\Models\Post;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
+use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\SegmentMediaResolver;
 use App\Services\Publishing\TargetMediaSelection;
 use App\Services\Publishing\YouTubePostOptions;
@@ -83,6 +84,8 @@ class PublishPrecheck
                 'empty' => 'Add text or media before publishing.',
                 'publishing_unavailable' => "Reconnect the {$label} account or enable {$label} publishing before posting.",
                 'youtube_options_required' => 'Review YouTube visibility, format, audience, synthetic-media, paid-placement, and subscriber notification choices before publishing.',
+                'instagram_cover_unavailable' => 'Choose an available JPEG or PNG cover image from this workspace.',
+                'instagram_cover_requires_reel' => 'A custom Instagram cover requires one Reel video. Remove the cover for photos, carousels, or Stories.',
                 'media_required' => "{$label} needs at least one image or video.",
                 'video_required' => "{$label} needs exactly one video for this publishing flow.",
                 'section_too_long' => "A section is over {$label}'s length limit.",
@@ -160,6 +163,8 @@ class PublishPrecheck
         if ($platform === Platform::YouTube && app(YouTubePostOptions::class)->resolve($target) === null) {
             $issues[] = 'youtube_options_required';
         }
+
+        $issues = array_merge($issues, app(InstagramReelCover::class)->issues($target, $media->values()->all()));
 
         return array_values(array_unique($issues));
     }

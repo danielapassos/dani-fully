@@ -53,14 +53,14 @@ describe('postCapabilities', () => {
         },
     );
 
-    it('draft: edit/schedule/delete, no duplicate', () => {
+    it('draft: edit/schedule/delete and independent copy', () => {
         const c = postCapabilities(post({ status: 'draft' }));
         expect(c).toMatchObject({
             canEdit: true,
             canSchedule: true,
             canDelete: true,
             canReschedule: false,
-            canDuplicate: false,
+            canDuplicate: true,
         });
     });
     it('scheduled: edit/reschedule/unschedule/delete, no duplicate', () => {

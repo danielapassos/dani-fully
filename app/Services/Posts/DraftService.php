@@ -15,12 +15,14 @@ use App\Models\PostMediaPlacement;
 use App\Models\PostTarget;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\Publishing\InstagramReelCover;
 use App\Support\InstanceSettings;
 use App\Support\LinkedInOrg;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class DraftService
 {
@@ -171,7 +173,7 @@ class DraftService
      * @param  list<string>  $accountIds
      * @param  list<string>  $segments
      * @param  array<string, bool>  $autoSplitByAccount
-     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null>  $overrideByAccount
+     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null}}|null>  $overrideByAccount
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
      * @param  array<string, string>  $formatByAccount
      */
@@ -216,6 +218,22 @@ class DraftService
             }
             if ($account->platform !== Platform::YouTube && is_array($override)) {
                 unset($override['youtube']);
+                $override = $override === [] ? null : $override;
+            }
+
+            if ($account->platform === Platform::Instagram) {
+                if (! is_array($override['instagram'] ?? null) && is_array($currentOverride['instagram'] ?? null)) {
+                    $override ??= [];
+                    $override['instagram'] = $currentOverride['instagram'];
+                }
+                if ($current instanceof PostTarget
+                    && ($current->remote_id !== null || ! empty($current->media_upload_state['container']['remote_ref']))
+                    && ($override['instagram']['cover_media_id'] ?? null) !== ($currentOverride['instagram']['cover_media_id'] ?? null)) {
+                    throw ValidationException::withMessages(['targets' => 'The Instagram upload has already started. Copy it to a new draft to change its cover.']);
+                }
+                app(InstagramReelCover::class)->validateChoice($post->workspace_id, $override);
+            } elseif (is_array($override)) {
+                unset($override['instagram']);
                 $override = $override === [] ? null : $override;
             }
 

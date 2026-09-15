@@ -26,6 +26,7 @@ import {
     precheckNotices,
 } from '@/lib/compose/format-notices';
 import { postGifAttachment } from '@/lib/compose/gifs/attach';
+import { canChooseInstagramCover } from '@/lib/compose/instagram-cover';
 import {
     isAttachOnlyImage,
     wouldMixVideoAndImages,
@@ -72,6 +73,7 @@ import DestinationSelector, {
 } from './destination-selector';
 import EditorBody, { type EditorBodyHandle } from './editor-body';
 import { ImageEditor } from './image-editor';
+import { InstagramCoverPicker } from './instagram-cover-picker';
 import { PlatformPreviewPanel } from './platform-preview-panel';
 import PlatformTabs from './platform-tabs';
 import SaveIndicator from './save-indicator';
@@ -174,6 +176,9 @@ export default function Composer({
     >({});
     const deleteMentionHttp = useHttp<Record<string, never>, unknown>({});
     const [savedMentions, setSavedMentions] = useState(initialSavedMentions);
+    const [coverUploadingByAccount, setCoverUploadingByAccount] = useState<
+        Record<string, boolean>
+    >({});
     const [tiktokCreatorByAccount, setTikTokCreatorByAccount] = useState<
         Record<string, TikTokCreatorInfo | null>
     >({});
@@ -815,6 +820,7 @@ export default function Composer({
                 segmentBreaks: state.segmentBreaks,
                 tiktokByAccount: state.tiktokByAccount,
                 youtubeByAccount: state.youtubeByAccount,
+                instagramByAccount: state.instagramByAccount,
                 tiktokCreatorByAccount,
             })[0]?.reasons ?? [];
         if (reasons.length > 0) {
@@ -1046,6 +1052,7 @@ export default function Composer({
         segmentBreaks: state.segmentBreaks,
         tiktokByAccount: state.tiktokByAccount,
         youtubeByAccount: state.youtubeByAccount,
+        instagramByAccount: state.instagramByAccount,
         tiktokCreatorByAccount,
     });
     const notices = precheckNotices({
@@ -1352,6 +1359,48 @@ export default function Composer({
 
                 {!readOnly &&
                     tabAccounts
+                        .filter((account) => account.platform === 'instagram')
+                        .map((account) => {
+                            const options =
+                                state.instagramByAccount[account.id];
+                            const canChoose = canChooseInstagramCover(
+                                state,
+                                account,
+                            );
+                            if (!canChoose && !options?.cover_media_id)
+                                return null;
+
+                            return (
+                                <InstagramCoverPicker
+                                    key={account.id}
+                                    account={account}
+                                    postId={state.postId}
+                                    options={options}
+                                    canChoose={canChoose}
+                                    onChange={({ cover_media_id }) =>
+                                        dispatch({
+                                            type: 'setInstagramCover',
+                                            accountId: account.id,
+                                            mediaId: cover_media_id,
+                                        })
+                                    }
+                                    onUploadingChange={(uploading) =>
+                                        setCoverUploadingByAccount((previous) =>
+                                            (previous[account.id] ?? false) ===
+                                            uploading
+                                                ? previous
+                                                : {
+                                                      ...previous,
+                                                      [account.id]: uploading,
+                                                  },
+                                        )
+                                    }
+                                />
+                            );
+                        })}
+
+                {!readOnly &&
+                    tabAccounts
                         .filter((account) => account.platform === 'youtube')
                         .map((account) => (
                             <YouTubePublishingControls
@@ -1605,7 +1654,12 @@ export default function Composer({
                                 (account) => account.handle,
                             )}
                             queueDisabled={queueState.status !== 'found'}
-                            uploading={mediaUploads.isUploading}
+                            uploading={
+                                mediaUploads.isUploading ||
+                                Object.values(coverUploadingByAccount).some(
+                                    Boolean,
+                                )
+                            }
                             onSaveDraft={flush}
                             onEnsurePost={ensurePost}
                             onOptimisticSubmit={publishStatus.applyOptimistic}

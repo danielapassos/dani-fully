@@ -67,6 +67,7 @@ export function postCapabilities(post: PostView): PostCapabilities {
         case 'draft':
             return {
                 ...NONE,
+                canDuplicate: true,
                 canEdit: true,
                 canSchedule: true,
                 canDelete: true,

@@ -1,4 +1,8 @@
-import { YOUTUBE_DEFAULT_OPTIONS } from '@/lib/compose/youtube';
+import {
+    normalizeYouTubePostOptions,
+    YOUTUBE_DEFAULT_OPTIONS,
+    youtubeCopyErrors,
+} from '@/lib/compose/youtube';
 import type { Account, YouTubePostOptions } from '@/types/compose';
 
 type Props = {
@@ -12,8 +16,11 @@ export function YouTubePublishingControls({
     options,
     onChange,
 }: Props) {
+    const normalizedOptions = options
+        ? normalizeYouTubePostOptions(options)
+        : undefined;
     const current = {
-        ...options,
+        ...normalizedOptions,
         category_id:
             options?.category_id ?? YOUTUBE_DEFAULT_OPTIONS.category_id,
         notify_subscribers:
@@ -23,6 +30,12 @@ export function YouTubePublishingControls({
     function change(patch: YouTubePostOptions) {
         onChange({ ...current, ...patch });
     }
+    function inherit(key: 'title' | 'description') {
+        const next = { ...current };
+        delete next[key];
+        onChange(next);
+    }
+    const copyErrors = youtubeCopyErrors(current);
     const selectClass = 'h-9 rounded-md border border-input bg-background px-3';
     return (
         <section
@@ -174,6 +187,71 @@ export function YouTubePublishingControls({
                 />
                 Notify subscribers
             </label>
+            <div className="space-y-3 border-t border-border pt-4">
+                <label className="grid gap-1.5 text-sm">
+                    YouTube title (optional)
+                    <input
+                        type="text"
+                        className={selectClass}
+                        value={current.title ?? ''}
+                        placeholder="Use the post caption"
+                        aria-invalid={!!copyErrors.title}
+                        onChange={(event) =>
+                            event.target.value === ''
+                                ? inherit('title')
+                                : change({ title: event.target.value })
+                        }
+                    />
+                </label>
+                <p className="text-xs text-muted-foreground">
+                    Leave blank to use the post caption.{' '}
+                    {Array.from(current.title ?? '').length}/100 characters.
+                </p>
+                {copyErrors.title && (
+                    <p role="alert" className="text-sm text-destructive">
+                        {copyErrors.title}
+                    </p>
+                )}
+                <label className="flex items-center gap-2 text-sm">
+                    <input
+                        type="checkbox"
+                        className="size-4 accent-primary"
+                        checked={current.description === undefined}
+                        onChange={(event) =>
+                            event.target.checked
+                                ? inherit('description')
+                                : change({ description: '' })
+                        }
+                    />
+                    Use post caption as description
+                </label>
+                <label className="grid gap-1.5 text-sm">
+                    YouTube description (optional)
+                    <textarea
+                        className="min-h-24 rounded-md border border-input bg-background px-3 py-2 disabled:opacity-50"
+                        value={current.description ?? ''}
+                        disabled={current.description === undefined}
+                        aria-invalid={!!copyErrors.description}
+                        placeholder={
+                            current.description === undefined
+                                ? 'Using the post caption'
+                                : 'Leave empty for no description'
+                        }
+                        onChange={(event) =>
+                            change({ description: event.target.value })
+                        }
+                    />
+                </label>
+                <p className="text-xs text-muted-foreground">
+                    Uncheck to write a separate description or leave it empty.
+                    YouTube allows up to 5,000 bytes.
+                </p>
+                {copyErrors.description && (
+                    <p role="alert" className="text-sm text-destructive">
+                        {copyErrors.description}
+                    </p>
+                )}
+            </div>
         </section>
     );
 }

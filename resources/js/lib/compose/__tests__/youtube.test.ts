@@ -9,7 +9,11 @@ import {
     initialComposerState,
 } from '../composer-state';
 import { TIKTOK_DEFAULT_OPTIONS } from '../tiktok';
-import { YOUTUBE_DEFAULT_OPTIONS, youtubeOptionsComplete } from '../youtube';
+import {
+    YOUTUBE_DEFAULT_OPTIONS,
+    youtubeCopyErrors,
+    youtubeOptionsComplete,
+} from '../youtube';
 
 const selectedOptions: YouTubePostOptions = {
     privacy_status: 'public',
@@ -56,6 +60,106 @@ function postWithOptions(options: YouTubePostOptions): PostView {
 }
 
 describe('YouTube per-post settings', () => {
+    it('normalizes a server null description as explicitly blank without turning omission into blank', () => {
+        // Laravel may serialize a submitted empty string as null.
+        const options = {
+            ...selectedOptions,
+            description: null as unknown as string,
+        };
+        const post = postWithOptions(options);
+        const state = composerReducer(initialComposerState(), {
+            type: 'hydrate',
+            post,
+        });
+        expect(state.youtubeByAccount['youtube-account'].description).toBe('');
+        expect(
+            youtubeOptionsComplete(state.youtubeByAccount['youtube-account']),
+        ).toBe(true);
+        expect(contentMatchesServer(state, post)).toBe(true);
+        expect(
+            contentMatchesServer(
+                state,
+                postWithOptions({ ...selectedOptions, description: '' }),
+            ),
+        ).toBe(true);
+        expect(
+            contentMatchesServer(state, postWithOptions(selectedOptions)),
+        ).toBe(false);
+        expect(
+            buildPutBody(state, ['youtube-account']).targets[0].content_override
+                ?.youtube?.description,
+        ).toBe('');
+    });
+
+    it('keeps optional title and empty description separate from the inherited caption', () => {
+        const options = {
+            ...selectedOptions,
+            title: 'A separate YouTube title',
+            description: '',
+        };
+        const post = postWithOptions(options);
+        let state = composerReducer(initialComposerState(), {
+            type: 'hydrate',
+            post,
+        });
+        expect(state.youtubeByAccount['youtube-account']).toEqual(options);
+        expect(contentMatchesServer(state, post)).toBe(true);
+        state = composerReducer(state, {
+            type: 'updateSegments',
+            segments: ['New post caption'],
+        });
+        expect(
+            buildPutBody(state, ['youtube-account']).targets[0]
+                .content_override,
+        ).toEqual({ youtube: options });
+        expect(youtubeOptionsComplete(options)).toBe(true);
+        expect(youtubeOptionsComplete(selectedOptions)).toBe(true);
+    });
+
+    it('validates provided copy with Unicode character and UTF-8 byte limits', () => {
+        expect(youtubeCopyErrors(undefined)).toEqual({});
+        expect(
+            youtubeOptionsComplete({
+                ...selectedOptions,
+                title: '😀'.repeat(100),
+                description: 'é'.repeat(2500),
+            }),
+        ).toBe(true);
+        expect(
+            youtubeOptionsComplete({
+                ...selectedOptions,
+                title: '😀'.repeat(101),
+            }),
+        ).toBe(false);
+        expect(
+            youtubeOptionsComplete({
+                ...selectedOptions,
+                description: 'é'.repeat(2501),
+            }),
+        ).toBe(false);
+        expect(youtubeOptionsComplete({ ...selectedOptions, title: '' })).toBe(
+            false,
+        );
+        expect(
+            youtubeOptionsComplete({ ...selectedOptions, title: '   ' }),
+        ).toBe(false);
+        expect(
+            youtubeOptionsComplete({
+                ...selectedOptions,
+                title: 'Title <tag>',
+            }),
+        ).toBe(false);
+        expect(
+            youtubeOptionsComplete({
+                ...selectedOptions,
+                description: 'Description >',
+            }),
+        ).toBe(false);
+        expect(
+            youtubeOptionsComplete({ ...selectedOptions, description: '' }),
+        ).toBe(true);
+    });
+
     it('requires explicit visibility format and declarations before publishing', () => {
         expect(YOUTUBE_DEFAULT_OPTIONS.privacy_status).toBeUndefined();
         expect(YOUTUBE_DEFAULT_OPTIONS.format_intent).toBeUndefined();

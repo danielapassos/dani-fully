@@ -261,6 +261,7 @@ export function useAutosave({
         state.formatByAccount,
         state.tiktokByAccount,
         state.youtubeByAccount,
+        state.instagramByAccount,
         state.media,
         state.autoRepost,
         state.placements,

@@ -10,6 +10,7 @@ use App\Models\Post;
 use App\Models\User;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Posts\DraftService;
+use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\YouTubePostOptions;
 use App\Support\PostView;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -57,6 +58,7 @@ class CreatePostTool extends WorkspaceTool
             'targets.*.content_override.media_ids.*' => ['string'],
             ...TikTokPostOptions::draftRules(),
             ...YouTubePostOptions::draftRules(),
+            ...InstagramReelCover::draftRules(),
         ]);
 
         /** @var User $user */
@@ -90,7 +92,7 @@ class CreatePostTool extends WorkspaceTool
                 'kind' => $schema->string()->enum(['all', 'set', 'account'])->required(),
                 'id' => $schema->string()->description('Account set id (kind=set) or connected account id (kind=account).'),
             ])->description('Where to post.')->required(),
-            'targets' => $schema->array()->description('Per-account declarations: connected_account_id and content_override.tiktok or content_override.youtube. Supply the explicit publishing choices for each selected account; missing choices remain incomplete drafts.'),
+            'targets' => $schema->array()->description('Per-account declarations: connected_account_id and content_override.tiktok or content_override.youtube. An Instagram Reel can set content_override.instagram.cover_media_id to a workspace image id; the cover stays separate from video media. Supply the explicit publishing choices for each selected account; missing choices remain incomplete drafts.'),
         ];
     }
 }

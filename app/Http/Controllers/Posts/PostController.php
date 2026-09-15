@@ -134,10 +134,10 @@ class PostController extends Controller
     {
         $request->user()->can('create', Post::class) ?: abort(403);
 
-        // Only terminal posts are eligible — mirror the client capability model
-        // so the endpoint contract can't be bypassed for a draft/scheduled post.
+        // Drafts and terminal posts can be copied without re-uploading media.
+        // Active scheduled/publishing posts remain protected from duplication.
         in_array($post->status, [
-            PostStatus::Published, PostStatus::Partial, PostStatus::Failed, PostStatus::Missed,
+            PostStatus::Draft, PostStatus::Published, PostStatus::Partial, PostStatus::Failed, PostStatus::Missed,
             PostStatus::AwaitingAction, PostStatus::Completed,
         ], true) ?: abort(422, 'This post cannot be copied to a draft.');
 

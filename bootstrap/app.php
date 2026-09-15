@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ConnectedAccounts\ThreadsLifecycleController;
+use App\Http\Controllers\Posts\TikTokMediaContentController;
 use App\Http\Controllers\Uploads\StreamedUploadController;
 use App\Http\Middleware\CaptureMcpWorkspaceSelection;
 use App\Http\Middleware\EnsureConversationSupportsDirectMessageMedia;
@@ -32,6 +33,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // middleware — the client PUTs the raw file body with no session — and a
         // relative temporary signature is the sole authorization.
         then: function (): void {
+            Route::get('provider-media/tiktok/{mediaId}', TikTokMediaContentController::class)
+                ->whereUuid('mediaId')
+                ->middleware(['signed', 'throttle:120,1'])
+                ->name('media.tiktok');
+
             Route::put('uploads/stream/{path}', StreamedUploadController::class)
                 ->where('path', '.*')
                 ->middleware(['throttle:60,1', 'signed:relative'])

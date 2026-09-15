@@ -18,6 +18,7 @@ use App\Services\Media\ImageConversionFailed;
 use App\Services\Media\PublicMediaUrl;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
 use App\Services\Publishing\Contracts\PublishConnector;
+use App\Services\Publishing\InstagramReelCover;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
 use Illuminate\Http\Client\ConnectionException;
@@ -119,6 +120,8 @@ class InstagramConnector implements PublishConnector
             return $this->mapFailure($e->response);
         } catch (InstagramReelNeedsVideo) {
             return PublishResult::failure(ErrorKind::Validation, 'Instagram Reels require a video.');
+        } catch (InstagramCoverUnavailable) {
+            return PublishResult::failure(ErrorKind::Validation, 'The Instagram cover must be an available workspace image for a single Reel video. Choose a new cover or remove the selection.');
         } catch (ImageConversionFailed $e) {
             // The image can't be re-encoded to the JPEG Instagram requires; retrying
             // won't change that, so fail with the reason rather than looping.
@@ -160,6 +163,10 @@ class InstagramConnector implements PublishConnector
         }
 
         $media = array_slice($context->effectiveMedia(), 0, Platform::Instagram->maxMedia());
+        $coverIssues = app(InstagramReelCover::class)->issues($context->target, $context->effectiveMedia());
+        if ($coverIssues !== []) {
+            throw new InstagramCoverUnavailable;
+        }
 
         $containerId = match (true) {
             $format === PostFormat::Story => $this->createStoryContainer($context, $media[0], $igUserId, $token),
@@ -184,6 +191,7 @@ class InstagramConnector implements PublishConnector
         if ($media->isVideo()) {
             $body['media_type'] = 'REELS';
             $body['video_url'] = $this->publicMediaUrl->for($media, Platform::Instagram);
+            $body = [...$body, ...$this->coverBody($context)];
         } else {
             $body['image_url'] = $this->publicMediaUrl->for($media, Platform::Instagram);
         }
@@ -228,6 +236,7 @@ class InstagramConnector implements PublishConnector
             'video_url' => $this->publicMediaUrl->for($video, Platform::Instagram),
             'caption' => $caption,
             'access_token' => $token,
+            ...$this->coverBody($context),
         ]);
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
@@ -236,6 +245,17 @@ class InstagramConnector implements PublishConnector
         }
 
         return (string) $response->json('id');
+    }
+
+    /** @return array{cover_url?: string} */
+    private function coverBody(PublishContext $context): array
+    {
+        $cover = app(InstagramReelCover::class)->resolve($context->target);
+        if ($cover === null && ($context->target->content_override['instagram']['cover_media_id'] ?? null) !== null) {
+            throw new InstagramCoverUnavailable;
+        }
+
+        return $cover === null ? [] : ['cover_url' => $this->publicMediaUrl->for($cover, Platform::Instagram)];
     }
 
     /** @param  list<PostMedia>  $media */
@@ -423,3 +443,5 @@ final class InstagramRequestFailed extends RuntimeException
  * @internal
  */
 final class InstagramReelNeedsVideo extends RuntimeException {}
+
+final class InstagramCoverUnavailable extends RuntimeException {}

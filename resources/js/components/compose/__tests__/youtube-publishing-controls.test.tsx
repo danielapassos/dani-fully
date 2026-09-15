@@ -1,3 +1,4 @@
+import { fireEvent } from '@testing-library/react';
 import { act, createElement, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -58,6 +59,76 @@ function choose(view: HTMLElement, text: string, value: string) {
 }
 
 describe('YouTube publishing controls', () => {
+    it('distinguishes an inherited description from an explicit empty one and preserves all declarations', () => {
+        const initial: YouTubePostOptions = {
+            privacy_status: 'private',
+            format_intent: 'video',
+            category_id: '28',
+            made_for_kids: false,
+            contains_synthetic_media: true,
+            has_paid_product_placement: false,
+            notify_subscribers: false,
+        };
+        const { view, changed } = renderControls(initial);
+        const title =
+            view.querySelector<HTMLInputElement>('input[type="text"]')!;
+        const description =
+            view.querySelector<HTMLTextAreaElement>('textarea')!;
+        const inheritDescription = Array.from(view.querySelectorAll('label'))
+            .find(
+                (label) =>
+                    label.textContent?.trim() ===
+                    'Use post caption as description',
+            )!
+            .querySelector<HTMLInputElement>('input')!;
+        expect(description.disabled).toBe(true);
+        expect(inheritDescription.checked).toBe(true);
+        expect(changed).not.toHaveBeenCalled();
+        act(() =>
+            fireEvent.change(title, {
+                target: { value: 'Specific YouTube title' },
+            }),
+        );
+        expect(changed).toHaveBeenLastCalledWith({
+            ...initial,
+            title: 'Specific YouTube title',
+        });
+        act(() => inheritDescription.click());
+        expect(description.disabled).toBe(false);
+        expect(changed).toHaveBeenLastCalledWith({
+            ...initial,
+            title: 'Specific YouTube title',
+            description: '',
+        });
+        act(() =>
+            fireEvent.change(description, {
+                target: { value: 'Separate description' },
+            }),
+        );
+        expect(changed.mock.lastCall![0].description).toBe(
+            'Separate description',
+        );
+        act(() => fireEvent.change(description, { target: { value: '' } }));
+        expect(changed.mock.lastCall![0].description).toBe('');
+        act(() => inheritDescription.click());
+        expect(changed.mock.lastCall![0]).not.toHaveProperty('description');
+        act(() => fireEvent.change(title, { target: { value: '' } }));
+        expect(changed).toHaveBeenLastCalledWith(initial);
+    });
+
+    it('shows invalid optional copy without silently truncating or changing it', () => {
+        const { view, changed } = renderControls({
+            title: 'Title <tag>',
+            description: 'é'.repeat(2501),
+        });
+        expect(
+            view.querySelector<HTMLInputElement>('input[type="text"]')!.value,
+        ).toBe('Title <tag>');
+        expect(view.querySelector('textarea')!.value).toBe('é'.repeat(2501));
+        expect(view.querySelectorAll('[role="alert"]')).toHaveLength(2);
+        expect(changed).not.toHaveBeenCalled();
+    });
+
     it('allows incremental choices without silently assigning disclosure answers', () => {
         const { view, changed } = renderControls();
         expect(

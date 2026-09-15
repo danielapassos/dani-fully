@@ -212,7 +212,7 @@ test('a different callback host cannot consume an authorization attempt', functi
     $this->get('https://another-host.test'.accountOAuthCallback('youtube', $query['state'], 'wrong-host'))
         ->assertSessionHas('error');
     Http::assertNothingSent();
-    $this->get('http://localhost'.accountOAuthCallback('youtube', $query['state'], 'right-host'))
+    $this->get($query['redirect_uri'].'?'.http_build_query(['state' => $query['state'], 'code' => 'right-host']))
         ->assertSessionHas('success');
 });
 

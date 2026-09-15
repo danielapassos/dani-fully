@@ -164,6 +164,53 @@ function mediaItem(over: Partial<MediaView> & { id: string }): MediaView {
 }
 
 describe('precheckDestinations', () => {
+    it('blocks a selected Instagram cover after changing to Story or excluding the video', () => {
+        const input = {
+            accounts: [accountFor({ platform: 'instagram' })],
+            segments: ['Caption'],
+            mentions: [],
+            autoSplitByAccount: {},
+            overrideByAccount: {},
+            media: [
+                mediaItem({ id: 'video', kind: 'video', mime: 'video/mp4' }),
+            ],
+            limits: [
+                limitsFor({
+                    platform: 'instagram',
+                    maxMedia: 10,
+                    threadMax: 1,
+                }),
+            ],
+            formatByAccount: {},
+            placements: { __head__: ['video'] },
+            instagramByAccount: { 'acc-1': { cover_media_id: 'cover' } },
+        };
+        expect(precheckDestinations(input)).toEqual([]);
+        const story = precheckDestinations({
+            ...input,
+            formatByAccount: { 'acc-1': 'story' },
+        });
+        expect(story[0].reasons).toContain('instagram_cover_requires_reel');
+        const excluded = precheckDestinations({
+            ...input,
+            placementsByAccount: { 'acc-1': {} },
+        });
+        expect(excluded[0].reasons).toContain('instagram_cover_requires_reel');
+        const mixed = precheckDestinations({
+            ...input,
+            media: [...input.media, mediaItem({ id: 'image' })],
+            placements: { __head__: ['video', 'image'] },
+        });
+        expect(mixed[0].reasons).toContain('instagram_cover_requires_reel');
+        expect(
+            precheckDestinations({
+                ...input,
+                formatByAccount: { 'acc-1': 'story' },
+                instagramByAccount: { 'acc-1': { cover_media_id: null } },
+            }),
+        ).toEqual([]);
+    });
+
     it('does not restore media for a defined empty account placement map', () => {
         const image = mediaItem({ id: 'image' });
         const video = mediaItem({

@@ -7,6 +7,7 @@ namespace App\Http\Requests\Post;
 use App\Http\Requests\Post\Concerns\DerivesMentionHandleRules;
 use App\Models\Post;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
+use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\YouTubePostOptions;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -49,6 +50,7 @@ class StorePostRequest extends FormRequest
             'targets.*.content_override.media_ids.*' => ['string'],
             ...TikTokPostOptions::draftRules(),
             ...YouTubePostOptions::draftRules(),
+            ...InstagramReelCover::draftRules(),
             'segment_breaks' => ['array'],
             'segment_breaks.*' => ['string'],
             'placements' => ['array'],

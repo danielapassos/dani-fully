@@ -11,6 +11,7 @@ use App\Models\Post;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Posts\DraftService;
 use App\Services\Posts\PostStaleWriteException;
+use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\YouTubePostOptions;
 use App\Support\PostView;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -59,6 +60,7 @@ class UpdatePostTool extends WorkspaceTool
             'targets.*.content_override.media_ids.*' => ['string'],
             ...TikTokPostOptions::draftRules(),
             ...YouTubePostOptions::draftRules(),
+            ...InstagramReelCover::draftRules(),
             'targets.*.segment_breaks' => ['nullable', 'array'],
             'targets.*.segment_breaks.*' => ['string'],
             'targets.*.placements' => ['nullable', 'array'],
@@ -108,7 +110,7 @@ class UpdatePostTool extends WorkspaceTool
             'media_ids' => $schema->array()->description('Ordered media ids to attach (from add_post_media).'),
             'segment_breaks' => $schema->array()->description('Ordered authored-segment break ids used by media placements.'),
             'placements' => $schema->array()->description('Canonical media placements. Each item has media_id, segment_ref, and zero-based position.'),
-            'targets' => $schema->array()->description('Optional per-account settings. A target may carry connected_account_id, format, content_override (including explicit tiktok or youtube publishing choices), segment_breaks, and placements; an explicit empty placements array excludes all attached media for that account.'),
+            'targets' => $schema->array()->description('Optional per-account settings. A target may carry connected_account_id, format, content_override (including tiktok/youtube choices or instagram.cover_media_id), segment_breaks, and placements. Set instagram.cover_media_id to null to remove a Reel cover; never add the cover image to video placements. An explicit empty placements array excludes all attached media for that account.'),
             'auto_repost' => $schema->boolean()->description('Per-post auto-boost override: true always reshares, false never does, omit to leave the current setting unchanged (null = each account\'s automatic performance gate).'),
             'expected_updated_at' => $schema->string()->description('The post updated_at you last saw, for conflict detection.'),
         ];

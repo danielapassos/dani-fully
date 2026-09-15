@@ -164,6 +164,7 @@ class YouTubeConnector implements PublishConnector
             'content_type' => $media->mime,
             'format_intent' => $options['formatIntent'],
             'privacy_status' => $options['privacyStatus'],
+            'snippet' => ['title' => $title, 'description' => $description],
             'outcome_unknown' => false,
         ]);
         $this->persistState($context, $state);
@@ -398,9 +399,11 @@ class YouTubeConnector implements PublishConnector
     /** @return array{0: string, 1: string} */
     private function copy(PublishContext $context): array
     {
+        $options = app(YouTubePostOptions::class)->resolve($context->target) ?? [];
         $description = trim(implode("\n\n", array_filter(array_map(trim(...), $context->segments))));
         $firstLine = trim((string) strtok($description, "\n"));
-        $title = $firstLine;
+        $title = $options['title'] ?? $firstLine;
+        $description = $options['description'] ?? $description;
 
         if ($title === '') {
             throw new RuntimeException('YouTube requires a video title.');
@@ -409,8 +412,8 @@ class YouTubeConnector implements PublishConnector
             throw new RuntimeException('YouTube titles and descriptions cannot contain angle brackets.');
         }
 
-        $title = mb_substr($title, 0, 100);
-        $description = mb_strcut($description, 0, 5_000, 'UTF-8');
+        $title = array_key_exists('title', $options) ? $title : mb_substr($title, 0, 100);
+        $description = array_key_exists('description', $options) ? $description : mb_strcut($description, 0, 5_000, 'UTF-8');
 
         return [$title, $description];
     }
