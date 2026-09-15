@@ -2,12 +2,48 @@
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceMembership;
 use App\Models\WorkspaceMention;
 use Illuminate\Support\Facades\Context;
+
+it('denies mention mutations without authorized workspace access', function (string $workspaceState, string $operation) {
+    $user = User::factory()->create();
+    $workspace = Workspace::factory()->create();
+    $mention = WorkspaceMention::factory()->create([
+        'workspace_id' => $workspace->id,
+        'name' => '@existing',
+        'handles' => ['x' => '@unchanged'],
+    ]);
+
+    if ($workspaceState !== 'missing') {
+        $user->forceFill(['current_workspace_id' => $workspace->id])->save();
+    }
+
+    if ($workspaceState === 'revoked') {
+        WorkspaceMembership::factory()->for($workspace)->for($user)->create()->delete();
+    }
+
+    Context::add('workspace_id', $workspace->id);
+
+    $this->actingAs($user);
+
+    if ($operation === 'store') {
+        $this->postJson(route('workspace-mentions.store'), [
+            'name' => '@existing',
+            'handles' => ['x' => '@changed'],
+        ])->assertForbidden();
+    } else {
+        $this->deleteJson(route('workspace-mentions.destroy', $mention))->assertForbidden();
+    }
+
+    expect(WorkspaceMention::withoutGlobalScopes()->count())->toBe(1)
+        ->and($mention->fresh()->handles)->toBe(['x' => '@unchanged']);
+})->with(['missing', 'revoked', 'foreign'])->with(['store', 'destroy']);
 
 it('saves a mention library item for the current workspace', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
 
@@ -30,6 +66,7 @@ it('saves a mention library item for the current workspace', function () {
 it('updates an existing saved mention by workspace and name', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
     WorkspaceMention::factory()->create([
@@ -53,6 +90,7 @@ it('updates an existing saved mention by workspace and name', function () {
 it('preserves saved handles as submitted', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
 
@@ -68,6 +106,7 @@ it('preserves saved handles as submitted', function () {
 it('preserves saved display text for people without a platform mention', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
 
@@ -83,6 +122,7 @@ it('preserves saved display text for people without a platform mention', functio
 it('round-trips Meta platform handles on create', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
 
@@ -107,6 +147,7 @@ it('round-trips Meta platform handles on create', function () {
 it('persists an edited Meta plain-text value on update', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
     WorkspaceMention::factory()->create([
@@ -130,6 +171,7 @@ it('persists an edited Meta plain-text value on update', function () {
 it('deletes a saved mention for the current workspace', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
     $mention = WorkspaceMention::factory()->create([
@@ -149,6 +191,7 @@ it('deletes a saved mention for the current workspace', function () {
 it('cannot delete a mention belonging to another workspace', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
 
@@ -169,6 +212,7 @@ it('cannot delete a mention belonging to another workspace', function () {
 it('normalizes a saved LinkedIn org reference into a canonical URN', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
 
@@ -188,6 +232,7 @@ it('normalizes a saved LinkedIn org reference into a canonical URN', function ()
 it('drops an unresolvable LinkedIn org reference (vanity slug needs the lookup API)', function () {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => $user->id]);
+    WorkspaceMembership::factory()->owner()->for($workspace)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
     Context::add('workspace_id', $workspace->id);
 

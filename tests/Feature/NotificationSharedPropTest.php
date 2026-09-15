@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceMembership;
 use App\Notifications\PostPublishedNotification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
@@ -12,6 +13,7 @@ test('shared notifications prop only includes current-workspace notifications', 
     $user = User::factory()->create();
     $wsA = Workspace::factory()->create();
     $wsB = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($wsA)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $wsA->id])->save();
 
     // two stored database notifications, one per workspace
@@ -39,6 +41,7 @@ test('shared notifications prop only includes current-workspace notifications', 
 test('shared notifications prop includes global notifications in the current workspace feed', function () {
     $user = User::factory()->create();
     $ws = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($ws)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $ws->id])->save();
 
     $user->notifications()->create([
@@ -59,6 +62,7 @@ test('shared notifications prop includes global notifications in the current wor
 test('notifications are ordered by id desc when created_at is identical', function () {
     $user = User::factory()->create();
     $ws = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($ws)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $ws->id])->save();
 
     $sameTime = Carbon::now();
