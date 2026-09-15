@@ -84,7 +84,7 @@ test('approving consent with a workspace binds it (pending) for the issued grant
         'client_id' => $client->getKey(),
         'workspace_id' => $workspace->id,
         'auth_token' => session('authToken'),
-    ]);
+    ])->assertRedirect();
 
     // CaptureMcpWorkspaceSelection (appended to the web middleware group, with an
     // early-return self-guard for non-approve routes) must have created a pending
