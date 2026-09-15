@@ -27,6 +27,12 @@ dataset('declared publishing options', [
     ]],
     'TikTok incomplete draft choices' => [Platform::TikTok, 'tiktok', ['privacy_level' => 'SELF_ONLY']],
     'YouTube incomplete draft choices' => [Platform::YouTube, 'youtube', ['privacy_status' => 'unlisted']],
+    'YouTube independent copy' => [Platform::YouTube, 'youtube', [
+        'privacy_status' => 'private', 'category_id' => '22', 'format_intent' => 'video',
+        'made_for_kids' => false, 'contains_synthetic_media' => false,
+        'has_paid_product_placement' => false, 'notify_subscribers' => false,
+        'title' => 'Separate title', 'description' => "Separate description\nwith its own second line.",
+    ]],
 ]);
 
 dataset('invalid publishing options', [
@@ -36,6 +42,8 @@ dataset('invalid publishing options', [
     'YouTube unsupported privacy' => [Platform::YouTube, 'youtube', ['privacy_status' => 'followers']],
     'TikTok arbitrary mode override' => [Platform::TikTok, 'tiktok', ['publish_mode' => 'direct']],
     'YouTube arbitrary scope override' => [Platform::YouTube, 'youtube', ['granted_scope' => 'youtube.upload']],
+    'YouTube blank title' => [Platform::YouTube, 'youtube', ['title' => '']],
+    'YouTube invalid description' => [Platform::YouTube, 'youtube', ['description' => '<not allowed>']],
 ]);
 
 dataset('TikTok publishing settings edits', function (): array {

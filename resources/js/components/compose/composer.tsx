@@ -1,5 +1,5 @@
 import { Link, useHttp, usePage } from '@inertiajs/react';
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { Fragment, useEffect, useReducer, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import PostGifController from '@/actions/App/Http/Controllers/Gifs/PostGifController';
@@ -26,6 +26,7 @@ import {
     precheckNotices,
 } from '@/lib/compose/format-notices';
 import { postGifAttachment } from '@/lib/compose/gifs/attach';
+import { canChooseInstagramCover } from '@/lib/compose/instagram-cover';
 import {
     isAttachOnlyImage,
     wouldMixVideoAndImages,
@@ -40,6 +41,7 @@ import {
 import { buildPlatformPreview } from '@/lib/compose/platform-preview';
 import { precheckDestinations } from '@/lib/compose/precheck';
 import { readVideoMetadata, videoLimitsForTargets } from '@/lib/compose/video';
+import { canChooseYouTubeThumbnail } from '@/lib/compose/youtube';
 import {
     defaultSettings,
     normalizeSettings,
@@ -72,6 +74,7 @@ import DestinationSelector, {
 } from './destination-selector';
 import EditorBody, { type EditorBodyHandle } from './editor-body';
 import { ImageEditor } from './image-editor';
+import { InstagramCoverPicker } from './instagram-cover-picker';
 import { PlatformPreviewPanel } from './platform-preview-panel';
 import PlatformTabs from './platform-tabs';
 import SaveIndicator from './save-indicator';
@@ -81,6 +84,7 @@ import { SubmitBar } from './submit-bar';
 import { TargetStatusChips } from './target-status-chips';
 import { TikTokPublishingControls } from './tiktok-publishing-controls';
 import { VideoEditor } from './video-editor';
+import { YouTubeCoverPicker } from './youtube-cover-picker';
 import { YouTubePublishingControls } from './youtube-publishing-controls';
 
 /** What the image editor is currently working on. */
@@ -174,6 +178,9 @@ export default function Composer({
     >({});
     const deleteMentionHttp = useHttp<Record<string, never>, unknown>({});
     const [savedMentions, setSavedMentions] = useState(initialSavedMentions);
+    const [coverUploadingByAccount, setCoverUploadingByAccount] = useState<
+        Record<string, boolean>
+    >({});
     const [tiktokCreatorByAccount, setTikTokCreatorByAccount] = useState<
         Record<string, TikTokCreatorInfo | null>
     >({});
@@ -815,6 +822,7 @@ export default function Composer({
                 segmentBreaks: state.segmentBreaks,
                 tiktokByAccount: state.tiktokByAccount,
                 youtubeByAccount: state.youtubeByAccount,
+                instagramByAccount: state.instagramByAccount,
                 tiktokCreatorByAccount,
             })[0]?.reasons ?? [];
         if (reasons.length > 0) {
@@ -1046,6 +1054,7 @@ export default function Composer({
         segmentBreaks: state.segmentBreaks,
         tiktokByAccount: state.tiktokByAccount,
         youtubeByAccount: state.youtubeByAccount,
+        instagramByAccount: state.instagramByAccount,
         tiktokCreatorByAccount,
     });
     const notices = precheckNotices({
@@ -1352,20 +1361,103 @@ export default function Composer({
 
                 {!readOnly &&
                     tabAccounts
+                        .filter((account) => account.platform === 'instagram')
+                        .map((account) => {
+                            const options =
+                                state.instagramByAccount[account.id];
+                            const canChoose = canChooseInstagramCover(
+                                state,
+                                account,
+                            );
+                            if (!canChoose && !options?.cover_media_id)
+                                return null;
+
+                            return (
+                                <InstagramCoverPicker
+                                    key={account.id}
+                                    account={account}
+                                    postId={state.postId}
+                                    options={options}
+                                    canChoose={canChoose}
+                                    onChange={({ cover_media_id }) =>
+                                        dispatch({
+                                            type: 'setInstagramCover',
+                                            accountId: account.id,
+                                            mediaId: cover_media_id,
+                                        })
+                                    }
+                                    onUploadingChange={(uploading) =>
+                                        setCoverUploadingByAccount((previous) =>
+                                            (previous[account.id] ?? false) ===
+                                            uploading
+                                                ? previous
+                                                : {
+                                                      ...previous,
+                                                      [account.id]: uploading,
+                                                  },
+                                        )
+                                    }
+                                />
+                            );
+                        })}
+
+                {!readOnly &&
+                    tabAccounts
                         .filter((account) => account.platform === 'youtube')
                         .map((account) => (
-                            <YouTubePublishingControls
-                                key={account.id}
-                                account={account}
-                                options={state.youtubeByAccount[account.id]}
-                                onChange={(options) =>
-                                    dispatch({
-                                        type: 'setYouTubeOptions',
-                                        accountId: account.id,
-                                        options,
-                                    })
-                                }
-                            />
+                            <Fragment key={account.id}>
+                                <YouTubePublishingControls
+                                    account={account}
+                                    options={state.youtubeByAccount[account.id]}
+                                    onChange={(options) =>
+                                        dispatch({
+                                            type: 'setYouTubeOptions',
+                                            accountId: account.id,
+                                            options,
+                                        })
+                                    }
+                                />
+                                {(canChooseYouTubeThumbnail(state, account) ||
+                                    state.youtubeByAccount[account.id]
+                                        ?.thumbnail_media_id) && (
+                                    <YouTubeCoverPicker
+                                        account={account}
+                                        postId={state.postId}
+                                        formatIntent={
+                                            state.youtubeByAccount[account.id]
+                                                ?.format_intent
+                                        }
+                                        thumbnailMediaId={
+                                            state.youtubeByAccount[account.id]
+                                                ?.thumbnail_media_id
+                                        }
+                                        canChoose={canChooseYouTubeThumbnail(
+                                            state,
+                                            account,
+                                        )}
+                                        onChange={(mediaId) =>
+                                            dispatch({
+                                                type: 'setYouTubeThumbnail',
+                                                accountId: account.id,
+                                                mediaId,
+                                            })
+                                        }
+                                        onUploadingChange={(uploading) =>
+                                            setCoverUploadingByAccount(
+                                                (previous) =>
+                                                    (previous[account.id] ??
+                                                        false) === uploading
+                                                        ? previous
+                                                        : {
+                                                              ...previous,
+                                                              [account.id]:
+                                                                  uploading,
+                                                          },
+                                            )
+                                        }
+                                    />
+                                )}
+                            </Fragment>
                         ))}
 
                 {!readOnly &&
@@ -1605,7 +1697,12 @@ export default function Composer({
                                 (account) => account.handle,
                             )}
                             queueDisabled={queueState.status !== 'found'}
-                            uploading={mediaUploads.isUploading}
+                            uploading={
+                                mediaUploads.isUploading ||
+                                Object.values(coverUploadingByAccount).some(
+                                    Boolean,
+                                )
+                            }
                             onSaveDraft={flush}
                             onEnsurePost={ensurePost}
                             onOptimisticSubmit={publishStatus.applyOptimistic}

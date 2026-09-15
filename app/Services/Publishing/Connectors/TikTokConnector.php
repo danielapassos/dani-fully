@@ -222,7 +222,7 @@ class TikTokConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::Validation, 'TikTok captions must be no longer than 2,200 UTF-16 characters.');
         }
 
-        $videoUrl = app(PublicMediaUrl::class)->for($media);
+        $videoUrl = app(PublicMediaUrl::class)->forTikTok($media);
         if (parse_url($videoUrl, PHP_URL_SCHEME) !== 'https' || ! parse_url($videoUrl, PHP_URL_HOST)
             || parse_url($videoUrl, PHP_URL_USER) !== null || parse_url($videoUrl, PHP_URL_PASS) !== null) {
             return PublishResult::failure(ErrorKind::Unsupported, 'TikTok Direct Post requires an HTTPS media URL on a domain verified in the TikTok developer app.');

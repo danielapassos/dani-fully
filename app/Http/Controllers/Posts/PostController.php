@@ -65,7 +65,7 @@ class PostController extends Controller
             'all' => (int) $byStatus->sum(),
             'scheduled' => (int) ($byStatus[PostStatus::Scheduled->value] ?? 0),
             'draft' => (int) ($byStatus[PostStatus::Draft->value] ?? 0),
-            'published' => (int) ($byStatus[PostStatus::Published->value] ?? 0),
+            'published' => (int) ($byStatus[PostStatus::Published->value] ?? 0) + (int) ($byStatus[PostStatus::Completed->value] ?? 0),
             'missed' => (int) ($byStatus[PostStatus::Missed->value] ?? 0),
         ];
 
@@ -74,7 +74,8 @@ class PostController extends Controller
                 Post::query()
                     ->with(['author:id,name', 'workspace:id,is_initial', 'targets.account', 'media'])
                     ->where('status', '!=', PostStatus::Deleted->value)
-                    ->when($status !== '' && $status !== 'all', fn ($query) => $query->where('status', $status))
+                    ->when($status === 'published', fn ($query) => $query->whereIn('status', [PostStatus::Published->value, PostStatus::Completed->value]))
+                    ->when(! in_array($status, ['', 'all', 'published'], true), fn ($query) => $query->where('status', $status))
             )
                 // Order by the effective timeline date. Cursor pagination cannot
                 // build its keyset WHERE clause from a raw orderBy (those orders
@@ -134,10 +135,10 @@ class PostController extends Controller
     {
         $request->user()->can('create', Post::class) ?: abort(403);
 
-        // Only terminal posts are eligible — mirror the client capability model
-        // so the endpoint contract can't be bypassed for a draft/scheduled post.
+        // Drafts and terminal posts can be copied without re-uploading media.
+        // Active scheduled/publishing posts remain protected from duplication.
         in_array($post->status, [
-            PostStatus::Published, PostStatus::Partial, PostStatus::Failed, PostStatus::Missed,
+            PostStatus::Draft, PostStatus::Published, PostStatus::Partial, PostStatus::Failed, PostStatus::Missed,
             PostStatus::AwaitingAction, PostStatus::Completed,
         ], true) ?: abort(422, 'This post cannot be copied to a draft.');
 

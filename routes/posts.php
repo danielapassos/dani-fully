@@ -8,6 +8,7 @@ use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\Gifs\PostGifController;
 use App\Http\Controllers\Posts\CalendarController;
 use App\Http\Controllers\Posts\ComposerController;
+use App\Http\Controllers\Posts\InstagramCoverController;
 use App\Http\Controllers\Posts\NextSlotController;
 use App\Http\Controllers\Posts\PostController;
 use App\Http\Controllers\Posts\PostImageEditController;
@@ -21,6 +22,7 @@ use App\Http\Controllers\Posts\PostShareController;
 use App\Http\Controllers\Posts\PostTargetRetryController;
 use App\Http\Controllers\Posts\PostVideoUploadController;
 use App\Http\Controllers\Posts\PublishController;
+use App\Http\Controllers\Posts\YouTubeCoverController;
 use App\Models\AccountSet;
 use App\Models\Post;
 use App\Models\PostShare;
@@ -65,6 +67,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('posts', [PostController::class, 'store'])->name('posts.store');
     Route::put('posts/{post}', [PostController::class, 'update'])->name('posts.update');
     Route::get('posts/{post}', [ComposerController::class, 'show'])->name('posts.show');
+    Route::get('posts/{post}/instagram-covers', [InstagramCoverController::class, 'index'])->name('posts.instagram-covers.index');
+    Route::get('posts/{post}/youtube-covers', [YouTubeCoverController::class, 'index'])->name('posts.youtube-covers.index');
     Route::delete('posts/{post}', [PostController::class, 'destroy'])->name('posts.destroy');
     // Throttled: each call copies every media file on the source post.
     Route::post('posts/{post}/duplicate', [PostController::class, 'duplicate'])

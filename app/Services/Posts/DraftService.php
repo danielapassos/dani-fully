@@ -15,12 +15,15 @@ use App\Models\PostMediaPlacement;
 use App\Models\PostTarget;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\YouTubeThumbnail;
 use App\Support\InstanceSettings;
 use App\Support\LinkedInOrg;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class DraftService
 {
@@ -171,7 +174,7 @@ class DraftService
      * @param  list<string>  $accountIds
      * @param  list<string>  $segments
      * @param  array<string, bool>  $autoSplitByAccount
-     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null>  $overrideByAccount
+     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null}}|null>  $overrideByAccount
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
      * @param  array<string, string>  $formatByAccount
      */
@@ -214,8 +217,36 @@ class DraftService
                 $override ??= [];
                 $override['youtube'] = $currentOverride['youtube'];
             }
+            if ($account->platform === Platform::YouTube) {
+                if (is_array($override['youtube'] ?? null) && ! array_key_exists('thumbnail_media_id', $override['youtube'])
+                    && is_array($currentOverride['youtube'] ?? null) && array_key_exists('thumbnail_media_id', $currentOverride['youtube'])) {
+                    $override['youtube']['thumbnail_media_id'] = $currentOverride['youtube']['thumbnail_media_id'];
+                }
+                if ($current instanceof PostTarget
+                    && $this->youTubeUploadHasStarted($current)
+                    && ($override['youtube']['thumbnail_media_id'] ?? null) !== ($currentOverride['youtube']['thumbnail_media_id'] ?? null)) {
+                    throw ValidationException::withMessages(['targets' => 'The YouTube upload has already started. Copy it to a new draft to change its cover.']);
+                }
+                app(YouTubeThumbnail::class)->validateChoice($post->workspace_id, $override);
+            }
             if ($account->platform !== Platform::YouTube && is_array($override)) {
                 unset($override['youtube']);
+                $override = $override === [] ? null : $override;
+            }
+
+            if ($account->platform === Platform::Instagram) {
+                if (! is_array($override['instagram'] ?? null) && is_array($currentOverride['instagram'] ?? null)) {
+                    $override ??= [];
+                    $override['instagram'] = $currentOverride['instagram'];
+                }
+                if ($current instanceof PostTarget
+                    && ($current->remote_id !== null || ! empty($current->media_upload_state['container']['remote_ref']))
+                    && ($override['instagram']['cover_media_id'] ?? null) !== ($currentOverride['instagram']['cover_media_id'] ?? null)) {
+                    throw ValidationException::withMessages(['targets' => 'The Instagram upload has already started. Copy it to a new draft to change its cover.']);
+                }
+                app(InstagramReelCover::class)->validateChoice($post->workspace_id, $override);
+            } elseif (is_array($override)) {
+                unset($override['instagram']);
                 $override = $override === [] ? null : $override;
             }
 
@@ -381,6 +412,15 @@ class DraftService
         return DB::transaction(function () use ($post, $data): Post {
             $post = Post::withoutGlobalScopes()->lockForUpdate()->findOrFail($post->id);
 
+            if (! $post->status->isEditable()) {
+                throw ValidationException::withMessages(['post' => 'This post can no longer be edited. Copy it to a new draft to make changes.']);
+            }
+            foreach ($post->targets()->where('platform', Platform::YouTube->value)->lockForUpdate()->get() as $target) {
+                if ($this->youTubeUploadHasStarted($target)) {
+                    throw ValidationException::withMessages(['post' => 'The YouTube upload has already started. Copy it to a new draft to change its video, cover, or destinations.']);
+                }
+            }
+
             if ($data->expectedUpdatedAt !== null
                 && $post->updated_at->toIso8601String() !== Date::parse($data->expectedUpdatedAt)->toIso8601String()) {
                 throw new PostStaleWriteException;
@@ -449,6 +489,16 @@ class DraftService
 
             return $post->fresh(['targets', 'media']);
         });
+    }
+
+    private function youTubeUploadHasStarted(PostTarget $target): bool
+    {
+        return $target->remote_id !== null || ! empty($target->remote_ids)
+            || collect($target->media_upload_state ?? [])->contains(
+                static fn (mixed $state): bool => is_array($state) && (! empty($state['remote_ref'])
+                    || is_array($state['metadata']['thumbnail'] ?? null)
+                    || ($state['metadata']['thumbnail_session_pending'] ?? false) === true),
+            );
     }
 
     /**
@@ -596,6 +646,21 @@ class DraftService
      */
     private function attachMedia(Post $post, array $mediaIds): void
     {
+        $sourcePostIds = PostMedia::withoutGlobalScopes()
+            ->where('workspace_id', $post->workspace_id)
+            ->whereIn('id', $mediaIds)
+            ->whereNotNull('post_id')
+            ->where('post_id', '!=', $post->id)
+            ->pluck('post_id');
+        $sourcePosts = Post::withoutGlobalScopes()->whereKey($sourcePostIds)->orderBy('id')->lockForUpdate()->get();
+        foreach ($sourcePosts as $source) {
+            $startedYouTube = $source->targets()->where('platform', Platform::YouTube->value)->lockForUpdate()->get()
+                ->contains(fn (PostTarget $target): bool => $this->youTubeUploadHasStarted($target));
+            if (! $source->status->isEditable() || $startedYouTube) {
+                throw ValidationException::withMessages(['media_ids' => 'This media belongs to a post whose upload has started or can no longer be edited. Copy that post to a new draft instead of moving its media.']);
+            }
+        }
+
         $detachedMediaIds = PostMedia::withoutGlobalScopes()
             ->where('post_id', $post->id)
             ->whereNotIn('id', $mediaIds)

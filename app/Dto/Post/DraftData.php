@@ -18,7 +18,7 @@ final class DraftData
      * @param  list<string>  $destinationIds
      * @param  list<string>  $mediaIds
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
-     * @param  array<string, array{auto_split?: bool, format?: string, content_override?: array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null, placements?: list<array{media_id: string, segment_ref: string, position: int}>, segment_breaks?: list<string>}>  $targetsByAccount
+     * @param  array<string, array{auto_split?: bool, format?: string, content_override?: array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null}}|null, placements?: list<array{media_id: string, segment_ref: string, position: int}>, segment_breaks?: list<string>}>  $targetsByAccount
      * @param  list<string>  $segmentBreaks
      * @param  list<array{media_id: string, segment_ref: string, position: int}>  $placements
      */
@@ -128,7 +128,7 @@ final class DraftData
     }
 
     /**
-     * @return array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null
+     * @return array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null}}|null
      */
     public function overrideFor(string $accountId): ?array
     {
@@ -194,7 +194,7 @@ final class DraftData
     }
 
     /**
-     * @return array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null
+     * @return array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null}}|null
      */
     private static function readOverride(mixed $override): ?array
     {
@@ -226,8 +226,15 @@ final class DraftData
             ], true));
         }
 
+        if (isset($override['instagram']) && is_array($override['instagram'])) {
+            $normalized['instagram'] = array_intersect_key($override['instagram'], ['cover_media_id' => true]);
+        }
+
         if (isset($override['youtube']) && is_array($override['youtube'])) {
             $normalized['youtube'] = array_intersect_key($override['youtube'], array_fill_keys(YouTubePostOptions::FIELDS, true));
+            if (array_key_exists('description', $normalized['youtube']) && $normalized['youtube']['description'] === null) {
+                $normalized['youtube']['description'] = '';
+            }
         }
 
         return $normalized === [] ? null : $normalized;

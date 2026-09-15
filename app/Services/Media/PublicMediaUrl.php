@@ -7,7 +7,10 @@ namespace App\Services\Media;
 use App\Enums\Platform;
 use App\Models\PostMedia;
 use App\Support\FileStorage;
+use Illuminate\Http\Request;
+use Illuminate\Routing\UrlGenerator;
 use Illuminate\Support\Facades\URL;
+use RuntimeException;
 
 /**
  * Resolves a publicly reachable HTTPS URL for a stored media file, for
@@ -26,6 +29,37 @@ use Illuminate\Support\Facades\URL;
 class PublicMediaUrl
 {
     public function __construct(private readonly ImageToJpegConverter $converter) {}
+
+    public function forTikTok(PostMedia $media): string
+    {
+        $base = (string) config('app.url');
+        $parts = parse_url($base);
+        if (! is_array($parts) || ($parts['scheme'] ?? null) !== 'https' || empty($parts['host'])
+            || isset($parts['user']) || isset($parts['pass'])
+            || isset($parts['query']) || isset($parts['fragment'])) {
+            throw new RuntimeException('TikTok media delivery requires a canonical HTTPS application URL.');
+        }
+
+        // A clone keeps worker/browser host state out of the provider URL without
+        // changing the shared URL generator in a long-lived application worker.
+        /** @var UrlGenerator $urls */
+        $urls = clone URL::getFacadeRoot();
+        $urls->setRequest(Request::create($base));
+        $urls->forceRootUrl($base);
+        $urls->forceScheme('https');
+
+        return $urls->temporarySignedRoute('media.tiktok', now()->addHours(6), [
+            'mediaId' => $media->id,
+            'source' => $this->tikTokSourceVersion($media),
+        ]);
+    }
+
+    public function tikTokSourceVersion(PostMedia $media): string
+    {
+        return hash('sha256', json_encode([
+            $media->disk, $media->path, (int) $media->size_bytes, $media->mime,
+        ], JSON_THROW_ON_ERROR));
+    }
 
     /**
      * @param  Platform|null  $platform  The destination whose accepted image formats apply.

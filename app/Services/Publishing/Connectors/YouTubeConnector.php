@@ -14,6 +14,7 @@ use App\Models\PostTarget;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
 use App\Services\Publishing\Contracts\PublishConnector;
 use App\Services\Publishing\YouTubePostOptions;
+use App\Services\Publishing\YouTubeThumbnail;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
 use Illuminate\Http\Client\ConnectionException;
@@ -65,6 +66,19 @@ class YouTubeConnector implements PublishConnector
         }
 
         $media = $media[0];
+        foreach ($context->target->media_upload_state ?? [] as $storedMediaId => $entry) {
+            if ($storedMediaId === $media->id || ! is_array($entry)) {
+                continue;
+            }
+            $hasUpload = is_string($entry['remote_ref'] ?? null) && $entry['remote_ref'] !== '';
+            $hasFrozenCover = is_array($entry['metadata']['thumbnail'] ?? null);
+            if ($hasUpload || $hasFrozenCover) {
+                return PublishResult::awaitingAction(
+                    $context->target->remote_id === null ? [] : [$context->target->remote_id],
+                    'This YouTube upload is bound to a different video. The existing upload is retained; review the original video before changing its source.',
+                );
+            }
+        }
         $state = new MediaUploadState($context->target->media_upload_state);
         $storedPrivacy = (string) ($state->metadata($media->id)['privacy_status'] ?? '');
         $expectedPrivacy = in_array($storedPrivacy, ['private', 'unlisted', 'public'], true)
@@ -72,12 +86,20 @@ class YouTubeConnector implements PublishConnector
             : $options['privacyStatus'];
 
         try {
+            $thumbnailGate = $this->prepareThumbnail($context, $media, $state, $expectedPrivacy);
+            if ($thumbnailGate !== null) {
+                return $thumbnailGate;
+            }
+
             if ($context->target->remote_id !== null) {
                 return $this->processingStatus($context, $token, $context->target->remote_id, $expectedPrivacy);
             }
 
             $sealedSession = $state->remoteRef($media->id);
             if ($sealedSession === null) {
+                if (($state->metadata($media->id)['thumbnail_session_pending'] ?? false) === true) {
+                    return PublishResult::awaitingAction([], 'YouTube upload initialization has an unknown outcome. Review the channel before starting another upload.');
+                }
                 $sealedSession = $this->startSession($context, $media, $token, $options, $state);
             }
 
@@ -118,6 +140,13 @@ class YouTubeConnector implements PublishConnector
     private function startSession(PublishContext $context, PostMedia $media, string $token, array $options, MediaUploadState $state): string
     {
         [$title, $description] = $this->copy($context);
+        $metadata = $state->metadata($media->id);
+        $hasThumbnail = is_array($metadata['thumbnail'] ?? null);
+        if ($hasThumbnail) {
+            $metadata['thumbnail_session_pending'] = true;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
+        }
 
         $response = $this->http
             ->timeout(15)
@@ -139,7 +168,7 @@ class YouTubeConnector implements PublishConnector
                     'categoryId' => $options['categoryId'],
                 ],
                 'status' => [
-                    'privacyStatus' => $options['privacyStatus'],
+                    'privacyStatus' => $hasThumbnail ? 'private' : $options['privacyStatus'],
                     'selfDeclaredMadeForKids' => $options['madeForKids'],
                     'containsSyntheticMedia' => $options['containsSyntheticMedia'],
                 ],
@@ -151,6 +180,11 @@ class YouTubeConnector implements PublishConnector
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
         if ($response->failed()) {
+            if ($hasThumbnail && ! $response->serverError()) {
+                $metadata['thumbnail_session_pending'] = false;
+                $state->setMetadata($media->id, $metadata);
+                $this->persistState($context, $state);
+            }
             throw new YouTubeRequestFailed($response);
         }
 
@@ -159,11 +193,14 @@ class YouTubeConnector implements PublishConnector
 
         $state->markUploaded($media->id, $sealed);
         $state->setMetadata($media->id, [
+            ...$metadata,
+            ...($hasThumbnail ? ['thumbnail_session_pending' => false] : []),
             'uploaded_bytes' => 0,
             'total_bytes' => $media->size_bytes,
             'content_type' => $media->mime,
             'format_intent' => $options['formatIntent'],
-            'privacy_status' => $options['privacyStatus'],
+            'privacy_status' => $hasThumbnail ? $metadata['thumbnail']['intended_privacy'] : $options['privacyStatus'],
+            'snippet' => ['title' => $title, 'description' => $description],
             'outcome_unknown' => false,
         ]);
         $this->persistState($context, $state);
@@ -218,6 +255,9 @@ class YouTubeConnector implements PublishConnector
         }
 
         if (in_array($response->status(), [404, 410], true)) {
+            if (is_array($state->metadata($media->id)['thumbnail'] ?? null)) {
+                return PublishResult::awaitingAction([], 'The private YouTube upload session expired with no confirmed video ID. Review the channel before replacing the upload.');
+            }
             $state->forget($media->id);
             $this->persistState($context, $state);
 
@@ -335,7 +375,7 @@ class YouTubeConnector implements PublishConnector
             ->withToken($token)
             ->acceptJson()
             ->get(self::API_URL.'/videos', [
-                'part' => 'snippet,status,processingDetails',
+                'part' => 'snippet,status,processingDetails,contentDetails',
                 'id' => $videoId,
                 'maxResults' => 1,
             ]);
@@ -383,6 +423,11 @@ class YouTubeConnector implements PublishConnector
             );
         }
 
+        $thumbnailResult = $this->finishThumbnail($context, $token, $videoId, $item, $expectedPrivacy);
+        if ($thumbnailResult !== null) {
+            return $thumbnailResult;
+        }
+
         if ($privacyStatus !== $expectedPrivacy) {
             return PublishResult::failure(
                 ErrorKind::Unsupported,
@@ -395,12 +440,181 @@ class YouTubeConnector implements PublishConnector
             : PublishResult::completed([$videoId], "Uploaded to YouTube as {$privacyStatus}. This video is not publicly listed.");
     }
 
+    private function prepareThumbnail(PublishContext $context, PostMedia $media, MediaUploadState $state, string $expectedPrivacy): ?PublishResult
+    {
+        $metadata = $state->metadata($media->id);
+        if (is_array($metadata['thumbnail'] ?? null)) {
+            if ($expectedPrivacy !== 'private' && ! $this->canUpdateVideo($context)) {
+                return PublishResult::failure(ErrorKind::AuthExpired, 'Reconnect YouTube with video-management permission to publish after applying the cover. The existing private upload is retained.');
+            }
+
+            return null;
+        }
+        if (($context->target->content_override['youtube']['thumbnail_media_id'] ?? null) === null) {
+            return null;
+        }
+        if ($context->target->remote_id !== null || $state->remoteRef($media->id) !== null) {
+            return PublishResult::awaitingAction($context->target->remote_id === null ? [] : [$context->target->remote_id], 'This YouTube upload began without a cover. Review the existing video before changing its cover or visibility.');
+        }
+        if ($expectedPrivacy !== 'private' && ! $this->canUpdateVideo($context)) {
+            return PublishResult::failure(ErrorKind::AuthExpired, 'Reconnect YouTube with video-management permission before uploading a video with a cover for public or unlisted release.');
+        }
+        $thumbnails = app(YouTubeThumbnail::class);
+        $error = $thumbnails->validationError($context->target);
+        $thumbnail = $thumbnails->resolve($context->target);
+        if ($error !== null || $thumbnail === null) {
+            return PublishResult::failure(ErrorKind::Validation, $error ?? 'The selected YouTube thumbnail is unavailable.');
+        }
+        $bytes = $this->thumbnailBytes($thumbnail);
+        $metadata['privacy_status'] = $expectedPrivacy;
+        $metadata['thumbnail'] = [
+            'media_id' => $thumbnail->id,
+            'disk' => $thumbnail->disk,
+            'path' => $thumbnail->path,
+            'mime' => $thumbnail->mime,
+            'size_bytes' => strlen($bytes),
+            'sha256' => hash('sha256', $bytes),
+            'intended_privacy' => $expectedPrivacy,
+            'state' => 'pending',
+        ];
+        $state->setMetadata($media->id, $metadata);
+        $this->persistState($context, $state);
+
+        return null;
+    }
+
+    private function canUpdateVideo(PublishContext $context): bool
+    {
+        return app(YouTubeThumbnail::class)->canRelease($context->account);
+    }
+
+    private function thumbnailBytes(PostMedia $thumbnail): string
+    {
+        $stream = Storage::disk($thumbnail->disk)->readStream($thumbnail->path);
+        if (! is_resource($stream)) {
+            throw new RuntimeException('The approved YouTube thumbnail could not be opened. The video will remain private.');
+        }
+        try {
+            $bytes = stream_get_contents($stream, 50 * 1024 * 1024 + 1);
+        } finally {
+            fclose($stream);
+        }
+        if (! is_string($bytes) || strlen($bytes) !== $thumbnail->size_bytes || strlen($bytes) > 50 * 1024 * 1024) {
+            throw new RuntimeException('The approved YouTube thumbnail could not be read intact. The video will remain private.');
+        }
+
+        return $bytes;
+    }
+
+    /** @param array<string, mixed> $item */
+    private function finishThumbnail(PublishContext $context, string $token, string $videoId, array $item, string $expectedPrivacy): ?PublishResult
+    {
+        $media = $context->effectiveMedia()[0];
+        $state = new MediaUploadState($context->target->media_upload_state);
+        $metadata = $state->metadata($media->id);
+        $thumbnail = $metadata['thumbnail'] ?? null;
+        if (! is_array($thumbnail)) {
+            return null;
+        }
+        $privacy = (string) ($item['status']['privacyStatus'] ?? '');
+        $sha256 = (string) ($thumbnail['sha256'] ?? '');
+        $hasReceipt = preg_match('/^[a-f0-9]{64}$/', $sha256) === 1
+            && ($thumbnail['accepted_sha256'] ?? null) === $sha256
+            && ($thumbnail['accepted_video_id'] ?? null) === $videoId
+            && is_array($thumbnail['receipt'] ?? null)
+            && $thumbnail['receipt'] !== [];
+        if (! $hasReceipt) {
+            if ($privacy !== 'private') {
+                return PublishResult::awaitingAction([$videoId], 'YouTube has not confirmed the approved cover, and the existing video is not private. Review its visibility before continuing.');
+            }
+            $source = app(YouTubeThumbnail::class)->available($context->target->post->workspace_id)
+                ->whereKey((string) ($thumbnail['media_id'] ?? ''))->first();
+            if ($source === null || $source->disk !== ($thumbnail['disk'] ?? null)
+                || $source->path !== ($thumbnail['path'] ?? null) || $source->mime !== ($thumbnail['mime'] ?? null)) {
+                return PublishResult::awaitingAction([$videoId], 'The originally approved YouTube cover is unavailable or changed. The existing video remains private.');
+            }
+            $bytes = $this->thumbnailBytes($source);
+            if (! hash_equals($sha256, hash('sha256', $bytes)) || strlen($bytes) !== ($thumbnail['size_bytes'] ?? null)) {
+                return PublishResult::awaitingAction([$videoId], 'The YouTube cover no longer matches the approved file. The existing video remains private.');
+            }
+            $thumbnail['state'] = 'submitting';
+            $metadata['thumbnail'] = $thumbnail;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
+
+            $response = $this->http->timeout(45)->connectTimeout(5)->withToken($token)->acceptJson()
+                ->withBody($bytes, $source->mime)
+                ->post('https://www.googleapis.com/upload/youtube/v3/thumbnails/set?'.http_build_query([
+                    'videoId' => $videoId, 'uploadType' => 'media',
+                ]));
+            $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
+            if ($response->failed()) {
+                if (in_array($response->status(), [400, 403, 404], true) && ! in_array($this->youtubeFailureKind($response), [ErrorKind::AuthExpired, ErrorKind::RateLimited], true)) {
+                    return PublishResult::awaitingAction([$videoId], 'YouTube could not apply the custom cover; the channel or Short may not support this API operation. The existing video remains private. '.$this->providerMessage($response, 'Review thumbnail eligibility.'));
+                }
+
+                return $this->httpFailure($response, 'YouTube could not confirm the custom cover; the existing video remains private.');
+            }
+            if (! is_array($response->json('items.0')) || $response->json('items.0') === []) {
+                return PublishResult::failure(ErrorKind::ServerError, 'YouTube returned no thumbnail receipt. The existing video remains private.', retryAfter: 10);
+            }
+            $thumbnail['accepted_sha256'] = $sha256;
+            $thumbnail['accepted_video_id'] = $videoId;
+            $thumbnail['receipt'] = $response->json('items.0');
+            $thumbnail['state'] = 'accepted';
+            $metadata['thumbnail'] = $thumbnail;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
+
+            return PublishResult::failure(ErrorKind::MediaProcessing, 'The YouTube cover was uploaded. Confirming it before releasing the private video.', retryAfter: 5);
+        }
+        if (($item['contentDetails']['hasCustomThumbnail'] ?? false) !== true) {
+            return PublishResult::failure(ErrorKind::MediaProcessing, 'Waiting for YouTube to confirm the custom cover. The video has not been released by Shoutrrr.', retryAfter: 10);
+        }
+        $thumbnail['state'] = 'confirmed';
+        $metadata['thumbnail'] = $thumbnail;
+        $state->setMetadata($media->id, $metadata);
+        $this->persistState($context, $state);
+        if ($privacy === $expectedPrivacy) {
+            $thumbnail['privacy_update_pending'] = false;
+            $metadata['thumbnail'] = $thumbnail;
+            $state->setMetadata($media->id, $metadata);
+            $this->persistState($context, $state);
+
+            return null;
+        }
+        if ($privacy !== 'private') {
+            return PublishResult::awaitingAction([$videoId], 'The YouTube video visibility changed outside this upload. Review it before continuing.');
+        }
+        if (! $this->canUpdateVideo($context)) {
+            return PublishResult::failure(ErrorKind::AuthExpired, 'Reconnect YouTube with video-management permission to release the video after its cover. The existing video remains private.');
+        }
+        $status = array_intersect_key((array) ($item['status'] ?? []), array_flip([
+            'license', 'embeddable', 'publicStatsViewable', 'selfDeclaredMadeForKids', 'containsSyntheticMedia',
+        ]));
+        $status['privacyStatus'] = $expectedPrivacy;
+        $thumbnail['privacy_update_pending'] = true;
+        $metadata['thumbnail'] = $thumbnail;
+        $state->setMetadata($media->id, $metadata);
+        $this->persistState($context, $state);
+        $response = $this->http->timeout(15)->connectTimeout(5)->withToken($token)->acceptJson()
+            ->put(self::API_URL.'/videos?part=status', ['id' => $videoId, 'status' => $status]);
+        $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
+        if ($response->failed()) {
+            return $this->httpFailure($response, 'YouTube could not confirm the requested visibility. The existing video ID is retained.');
+        }
+
+        return PublishResult::failure(ErrorKind::MediaProcessing, 'The custom cover is confirmed. Verifying the requested YouTube visibility.', retryAfter: 5);
+    }
+
     /** @return array{0: string, 1: string} */
     private function copy(PublishContext $context): array
     {
+        $options = app(YouTubePostOptions::class)->resolve($context->target) ?? [];
         $description = trim(implode("\n\n", array_filter(array_map(trim(...), $context->segments))));
         $firstLine = trim((string) strtok($description, "\n"));
-        $title = $firstLine;
+        $title = $options['title'] ?? $firstLine;
+        $description = $options['description'] ?? $description;
 
         if ($title === '') {
             throw new RuntimeException('YouTube requires a video title.');
@@ -409,8 +623,8 @@ class YouTubeConnector implements PublishConnector
             throw new RuntimeException('YouTube titles and descriptions cannot contain angle brackets.');
         }
 
-        $title = mb_substr($title, 0, 100);
-        $description = mb_strcut($description, 0, 5_000, 'UTF-8');
+        $title = array_key_exists('title', $options) ? $title : mb_substr($title, 0, 100);
+        $description = array_key_exists('description', $options) ? $description : mb_strcut($description, 0, 5_000, 'UTF-8');
 
         return [$title, $description];
     }

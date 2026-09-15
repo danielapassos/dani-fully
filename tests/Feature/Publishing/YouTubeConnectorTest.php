@@ -9,6 +9,7 @@ use App\Models\PostTarget;
 use App\Services\Publishing\Connectors\YouTubeConnector;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -113,6 +114,10 @@ test('youtube completes a resumable upload and waits for public processing', fun
     expect($result->isSuccessful())->toBeTrue()
         ->and($result->remoteIds)->toBe(['video_42'])
         ->and($context->target->fresh()->remote_id)->toBe('video_42')
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['snippet'])->toBe([
+            'title' => 'A sharp YouTube title',
+            'description' => "A sharp YouTube title\n\nThe rest of the description.",
+        ])
         ->and(json_encode($context->target->fresh()->media_upload_state))->not->toContain('upload-42');
 
     Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
@@ -195,6 +200,71 @@ test('youtube rejects malformed post declarations without falling back to instan
         'has_paid_product_placement' => false, 'notify_subscribers' => false,
     ]],
 ]);
+
+test('youtube publishes independent title and description overrides while preserving omitted copy defaults', function (array $copy, string $title, string $description): void {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://www.googleapis.com/upload/youtube/v3/videos*' => Http::response(['error' => ['message' => 'stop after init']], 400),
+    ]);
+    $settings = [
+        'privacy_status' => 'private', 'category_id' => '22', 'format_intent' => 'video',
+        'made_for_kids' => false, 'contains_synthetic_media' => false,
+        'has_paid_product_placement' => false, 'notify_subscribers' => false,
+        ...$copy,
+    ];
+    $video = PostMedia::factory()->video()->create();
+    app(YouTubeConnector::class)->publish(youtubePublishContext([$video], ['content_override' => ['youtube' => $settings]]));
+
+    Http::assertSent(fn (Request $request): bool => $request['snippet']['title'] === $title
+        && $request['snippet']['description'] === $description);
+    Http::assertSentCount(1);
+})->with([
+    'both independent fields' => [['title' => 'Exact title', 'description' => 'Independent description'], 'Exact title', 'Independent description'],
+    'title only' => [['title' => 'Exact title'], 'Exact title', "A sharp YouTube title\n\nThe rest of the description."],
+    'description only' => [['description' => 'Independent description'], 'A sharp YouTube title', 'Independent description'],
+    'blank description' => [['description' => ''], 'A sharp YouTube title', ''],
+    'normalized blank description' => [['description' => null], 'A sharp YouTube title', ''],
+]);
+
+test('a stored YouTube session retains its original copy and never opens another upload after a draft copy edit', function (): void {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/existing.mp4', '0123456789');
+    $video = PostMedia::factory()->video()->create(['disk' => 'public', 'path' => 'media/existing.mp4', 'size_bytes' => 10]);
+    $session = 'https://www.googleapis.com/upload/youtube/v3/videos?upload_id=existing-copy';
+    $originalSnippet = ['title' => 'Original title', 'description' => 'Original description'];
+    $context = youtubePublishContext([$video], [
+        'content_override' => ['youtube' => [
+            'privacy_status' => 'public', 'category_id' => '22', 'format_intent' => 'video',
+            'made_for_kids' => false, 'contains_synthetic_media' => false,
+            'has_paid_product_placement' => false, 'notify_subscribers' => false,
+            'title' => 'Later draft title', 'description' => 'Later draft description',
+        ]],
+        'media_upload_state' => [$video->id => [
+            'remote_ref' => Crypt::encryptString($session),
+            'metadata' => [
+                'uploaded_bytes' => 0, 'total_bytes' => 10, 'content_type' => 'video/mp4',
+                'privacy_status' => 'private', 'format_intent' => 'video',
+                'snippet' => $originalSnippet, 'outcome_unknown' => false,
+            ],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        $session => Http::response(['id' => 'existing-video'], 200),
+        'https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [[
+            'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'private'],
+            'processingDetails' => ['processingStatus' => 'succeeded'],
+        ]]]),
+    ]);
+
+    $result = app(YouTubeConnector::class)->publish($context);
+    expect($result->isSuccessful())->toBeTrue()
+        ->and($result->outcome)->toBe('completed')
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['snippet'])->toBe($originalSnippet)
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['privacy_status'])->toBe('private');
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
+    Http::assertSentCount(2);
+});
 
 test('youtube requires positive processing completion evidence', function (string $upload, string $processing) {
     Http::fake([

@@ -15,7 +15,14 @@ export type PlatformName =
 
 export type PostFormat = 'feed' | 'reels' | 'story';
 
+export type InstagramPostOptions = {
+    cover_media_id: string | null;
+};
+
 export type YouTubePostOptions = Partial<{
+    thumbnail_media_id: string | null;
+    title: string;
+    description: string;
     privacy_status: 'private' | 'unlisted' | 'public';
     category_id: string;
     format_intent: 'video' | 'short';
@@ -204,6 +211,7 @@ export type TargetView = {
     content_override: {
         segments?: string[];
         media_ids?: string[];
+        instagram?: InstagramPostOptions;
         tiktok?: TikTokPostOptions;
         youtube?: YouTubePostOptions;
     } | null;

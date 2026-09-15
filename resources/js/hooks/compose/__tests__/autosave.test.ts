@@ -59,13 +59,15 @@ function draftState(overrides: Partial<ComposerState> = {}): ComposerState {
 function Harness({
     state,
     onSaved,
+    accountIds = [],
 }: {
     state: ComposerState;
     onSaved: () => void;
+    accountIds?: string[];
 }) {
     const { flush } = useAutosave({
         state,
-        accountIds: [],
+        accountIds,
         dispatch: vi.fn(),
         onSaved,
     });
@@ -157,6 +159,78 @@ describe('autosave debounce reset on placement-only changes', () => {
     afterEach(() => {
         vi.useRealTimers();
     });
+
+    it.each([
+        {
+            platform: 'instagram',
+            type: 'setInstagramCover' as const,
+            optionKey: 'instagram',
+            mediaKey: 'cover_media_id',
+        },
+        {
+            platform: 'youtube',
+            type: 'setYouTubeThumbnail' as const,
+            optionKey: 'youtube',
+            mediaKey: 'thumbnail_media_id',
+        },
+    ])(
+        'resets for $platform cover-only edits and saves the latest reference separately from post media',
+        async ({ platform, type, optionKey, mediaKey }) => {
+            const onSaved = vi.fn();
+            const accountIds = [`${platform}-account`];
+            const base = composerReducer(
+                draftState({
+                    postId: 'post-1',
+                    baselineUpdatedAt: post.updated_at,
+                }),
+                {
+                    type,
+                    accountId: accountIds[0],
+                    mediaId: 'first-cover',
+                },
+            );
+            act(() =>
+                root?.render(
+                    createElement(Harness, {
+                        state: base,
+                        onSaved,
+                        accountIds,
+                    }),
+                ),
+            );
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(250);
+            });
+            const changed = composerReducer(base, {
+                type,
+                accountId: accountIds[0],
+                mediaId: 'latest-cover',
+            });
+            act(() =>
+                root?.render(
+                    createElement(Harness, {
+                        state: changed,
+                        onSaved,
+                        accountIds,
+                    }),
+                ),
+            );
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(250);
+            });
+            expect(httpPut).not.toHaveBeenCalled();
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(250);
+            });
+            expect(httpPut).toHaveBeenCalledOnce();
+            const body = transform.mock.calls.at(-1)?.[0]();
+            expect(body.targets[0].content_override).toEqual({
+                [optionKey]: { [mediaKey]: 'latest-cover' },
+            });
+            expect(body.media_ids).toEqual([]);
+            expect(body.placements).toEqual([]);
+        },
+    );
 
     it('resets the timer for a placements-only edit mid-window, so the latest placements are saved (not the stale ones)', async () => {
         const onSaved = vi.fn();

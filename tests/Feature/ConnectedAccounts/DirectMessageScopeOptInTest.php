@@ -68,6 +68,7 @@ test('tiktok and youtube upload scopes require publishing readiness', function (
     'TikTok inbox upload' => [Platform::TikTok, 'services.tiktok.inbox_enabled', 'video.upload'],
     'TikTok Direct Post' => [Platform::TikTok, 'services.tiktok.direct_post_enabled', 'video.publish'],
     'YouTube upload' => [Platform::YouTube, 'services.youtube.publishing_enabled', 'https://www.googleapis.com/auth/youtube.upload'],
+    'YouTube cover release' => [Platform::YouTube, 'services.youtube.publishing_enabled', 'https://www.googleapis.com/auth/youtube.force-ssl'],
 ]);
 
 test('x callback records dm_enabled true when the dm scopes are granted', function () {

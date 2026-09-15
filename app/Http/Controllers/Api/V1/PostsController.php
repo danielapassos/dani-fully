@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Posts\DraftService;
 use App\Services\Posts\PostStaleWriteException;
+use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\YouTubePostOptions;
 use App\Support\CursorPage;
 use App\Support\PostListItem;
@@ -84,6 +85,7 @@ class PostsController extends Controller
             'targets.*.content_override.media_ids.*' => ['string'],
             ...TikTokPostOptions::draftRules(),
             ...YouTubePostOptions::draftRules(),
+            ...InstagramReelCover::draftRules(),
         ]);
 
         /** @var User $user */
@@ -140,6 +142,7 @@ class PostsController extends Controller
             'targets.*.content_override.media_ids.*' => ['string'],
             ...TikTokPostOptions::draftRules(),
             ...YouTubePostOptions::draftRules(),
+            ...InstagramReelCover::draftRules(),
             'targets.*.segment_breaks' => ['nullable', 'array'],
             'targets.*.segment_breaks.*' => ['string'],
             'targets.*.placements' => ['nullable', 'array'],

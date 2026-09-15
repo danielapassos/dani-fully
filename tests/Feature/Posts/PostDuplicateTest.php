@@ -178,18 +178,36 @@ test('targets for deleted accounts are skipped', function (): void {
     expect($draft->targets()->count())->toBe(0);
 });
 
-test('a draft post is not eligible to be copied', function (): void {
+test('a draft can be copied without moving its media or publishing either post', function (): void {
+    $post = publishedPostWithMediaAndTarget($this->workspace, $this->user);
+    $post->forceFill(['status' => PostStatus::Draft, 'published_at' => null])->save();
+    $post->targets()->update(['status' => PostTargetStatus::Pending->value, 'remote_id' => null, 'posted_at' => null]);
+    $sourceMedia = $post->media()->sole();
+
+    $response = $this->actingAs($this->user)->post(route('posts.duplicate', $post));
+    $draft = Post::query()->whereKeyNot($post->id)->sole();
+    $copy = $draft->media()->sole();
+
+    $response->assertRedirect(route('posts.show', $draft));
+    expect($post->fresh()->status)->toBe(PostStatus::Draft)
+        ->and($sourceMedia->fresh()->post_id)->toBe($post->id)
+        ->and($copy->id)->not->toBe($sourceMedia->id)
+        ->and($copy->path)->not->toBe($sourceMedia->path)
+        ->and(Storage::disk('public')->get($copy->path))->toBe(Storage::disk('public')->get($sourceMedia->path))
+        ->and($draft->status)->toBe(PostStatus::Draft)
+        ->and($draft->published_at)->toBeNull()
+        ->and($draft->targets()->sole()->status)->toBe(PostTargetStatus::Pending);
+});
+
+test('an active post cannot be copied', function (PostStatus $status): void {
     $post = Post::factory()->for($this->workspace)->create([
         'author_id' => $this->user->id,
-        'status' => PostStatus::Draft->value,
+        'status' => $status,
     ]);
 
-    $this->actingAs($this->user)
-        ->post(route('posts.duplicate', $post))
-        ->assertStatus(422);
-
-    expect(Post::query()->where('status', PostStatus::Draft->value)->count())->toBe(1);
-});
+    $this->actingAs($this->user)->post(route('posts.duplicate', $post))->assertStatus(422);
+    expect(Post::query()->count())->toBe(1);
+})->with([PostStatus::Scheduled, PostStatus::Publishing]);
 
 test('a post from another workspace cannot be duplicated', function (): void {
     $post = publishedPostWithMediaAndTarget($this->workspace, $this->user);
@@ -199,3 +217,23 @@ test('a post from another workspace cannot be duplicated', function (): void {
         ->post(route('posts.duplicate', $post))
         ->assertNotFound();
 });
+
+test('copied cover references use copied media without changing the source', function (string $platform, string $field): void {
+    $post = publishedPostWithMediaAndTarget($this->workspace, $this->user);
+    $sourceMedia = $post->media()->sole();
+    $sourceTarget = $post->targets()->sole();
+    $sourceTarget->forceFill([
+        'content_override' => [$platform => [$field => $sourceMedia->id]],
+    ])->save();
+
+    $this->actingAs($this->user)->post(route('posts.duplicate', $post))->assertRedirect();
+
+    $draft = Post::query()->where('status', PostStatus::Draft->value)->sole();
+    $copy = $draft->media()->sole();
+    expect($draft->targets()->sole()->content_override[$platform][$field])->toBe($copy->id)
+        ->and($sourceTarget->fresh()->content_override[$platform][$field])->toBe($sourceMedia->id)
+        ->and(Storage::disk('public')->get($copy->path))->toBe('IMG');
+})->with([
+    'Instagram' => ['instagram', 'cover_media_id'],
+    'YouTube' => ['youtube', 'thumbnail_media_id'],
+]);

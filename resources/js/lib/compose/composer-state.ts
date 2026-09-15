@@ -1,8 +1,13 @@
 import { segmentRefs } from '@/lib/compose/tiptap-doc';
 import {
+    normalizeYouTubePostOptions,
+    youtubePostOptionsEqual,
+} from '@/lib/compose/youtube';
+import {
     type Account,
     BASE_TAB,
     type Destination,
+    type InstagramPostOptions,
     type MediaView,
     type MentionPlaceholder,
     type Placement,
@@ -51,6 +56,7 @@ export type ComposerState = {
     autoSplitByAccount: Record<string, boolean>;
     formatByAccount: Record<string, PostFormat>;
     overrideByAccount: Record<string, string[] | undefined>;
+    instagramByAccount: Record<string, InstagramPostOptions>;
     tiktokByAccount: Record<string, TikTokPostOptions>;
     youtubeByAccount: Record<string, YouTubePostOptions>;
     media: MediaView[];
@@ -77,6 +83,11 @@ export type ComposerAction =
     | { type: 'toggleAutoSplit'; accountId: string }
     | { type: 'setFormat'; accountId: string; format: PostFormat }
     | {
+          type: 'setInstagramCover';
+          accountId: string;
+          mediaId: string | null;
+      }
+    | {
           type: 'setTikTokOptions';
           accountId: string;
           options: TikTokPostOptions;
@@ -86,6 +97,7 @@ export type ComposerAction =
           accountId: string;
           options: YouTubePostOptions;
       }
+    | { type: 'setYouTubeThumbnail'; accountId: string; mediaId: string | null }
     | { type: 'disableAutoSplit'; accountIds: string[] }
     | { type: 'setOverrideSegments'; accountId: string; segments: string[] }
     | { type: 'discardOverride'; accountId: string }
@@ -164,6 +176,7 @@ export function initialComposerState(
         autoSplitByAccount: {},
         formatByAccount: {},
         overrideByAccount: {},
+        instagramByAccount: {},
         tiktokByAccount: {},
         youtubeByAccount: {},
         media: [],
@@ -403,6 +416,7 @@ function hydrate(post: PostView): ComposerState {
     const autoSplitByAccount: Record<string, boolean> = {};
     const formatByAccount: Record<string, PostFormat> = {};
     const overrideByAccount: Record<string, string[] | undefined> = {};
+    const instagramByAccount: Record<string, InstagramPostOptions> = {};
     const tiktokByAccount: Record<string, TikTokPostOptions> = {};
     const youtubeByAccount: Record<string, YouTubePostOptions> = {};
     const placementState = placementStateFromPost(post);
@@ -411,9 +425,15 @@ function hydrate(post: PostView): ComposerState {
         autoSplitByAccount[target.connected_account_id] = target.auto_split;
         formatByAccount[target.connected_account_id] = target.format;
         const overrideSegments = target.content_override?.segments;
+        if (target.content_override?.instagram) {
+            instagramByAccount[target.connected_account_id] = {
+                cover_media_id:
+                    target.content_override.instagram.cover_media_id ?? null,
+            };
+        }
         if (target.content_override?.youtube) {
             youtubeByAccount[target.connected_account_id] =
-                target.content_override.youtube;
+                normalizeYouTubePostOptions(target.content_override.youtube);
         }
         if (target.content_override?.tiktok) {
             tiktokByAccount[target.connected_account_id] =
@@ -452,6 +472,7 @@ function hydrate(post: PostView): ComposerState {
         autoSplitByAccount,
         formatByAccount,
         overrideByAccount,
+        instagramByAccount,
         tiktokByAccount,
         youtubeByAccount,
         media: post.media,
@@ -564,12 +585,58 @@ export function composerReducer(
                 saveState: 'dirty',
             };
 
+        case 'setInstagramCover':
+            if (
+                (state.instagramByAccount[action.accountId]?.cover_media_id ??
+                    null) === action.mediaId
+            ) {
+                return state;
+            }
+            return {
+                ...state,
+                instagramByAccount: {
+                    ...state.instagramByAccount,
+                    [action.accountId]: { cover_media_id: action.mediaId },
+                },
+                saveState: 'dirty',
+            };
+
+        case 'setYouTubeThumbnail':
+            if (
+                (state.youtubeByAccount[action.accountId]?.thumbnail_media_id ??
+                    null) === action.mediaId
+            ) {
+                return state;
+            }
+            return {
+                ...state,
+                youtubeByAccount: {
+                    ...state.youtubeByAccount,
+                    [action.accountId]: {
+                        ...state.youtubeByAccount[action.accountId],
+                        thumbnail_media_id: action.mediaId,
+                    },
+                },
+                saveState: 'dirty',
+            };
+
         case 'setYouTubeOptions':
             return {
                 ...state,
                 youtubeByAccount: {
                     ...state.youtubeByAccount,
-                    [action.accountId]: action.options,
+                    [action.accountId]: {
+                        ...action.options,
+                        ...(action.options.thumbnail_media_id === undefined &&
+                        state.youtubeByAccount[action.accountId]
+                            ?.thumbnail_media_id !== undefined
+                            ? {
+                                  thumbnail_media_id:
+                                      state.youtubeByAccount[action.accountId]
+                                          .thumbnail_media_id,
+                              }
+                            : {}),
+                    },
                 },
                 saveState: 'dirty',
             };
@@ -922,6 +989,7 @@ export type PutTarget = {
     content_override: {
         segments?: string[];
         media_ids?: string[];
+        instagram?: InstagramPostOptions;
         tiktok?: TikTokPostOptions;
         youtube?: YouTubePostOptions;
     } | null;
@@ -985,6 +1053,12 @@ export function buildPutBody(
                   }
                 : null;
 
+        if (state.instagramByAccount[accountId]) {
+            content_override = {
+                ...content_override,
+                instagram: state.instagramByAccount[accountId],
+            };
+        }
         if (state.youtubeByAccount[accountId]) {
             content_override = {
                 ...content_override,
@@ -1100,12 +1174,44 @@ export function contentMatchesServer(
                 ? []
                 : post.targets.map((target) => target.connected_account_id),
     );
+    const serverInstagram = Object.fromEntries(
+        post.targets
+            .filter(
+                (target) => target.content_override?.instagram?.cover_media_id,
+            )
+            .map((target) => [
+                target.connected_account_id,
+                target.content_override?.instagram?.cover_media_id,
+            ]),
+    );
+    const localInstagramKeys = Object.keys(state.instagramByAccount)
+        .filter(
+            (id) =>
+                comparedAccountIds.has(id) &&
+                state.instagramByAccount[id].cover_media_id != null,
+        )
+        .sort();
+    if (
+        JSON.stringify(localInstagramKeys) !==
+            JSON.stringify(Object.keys(serverInstagram).sort()) ||
+        localInstagramKeys.some(
+            (key) =>
+                state.instagramByAccount[key].cover_media_id !==
+                serverInstagram[key],
+        )
+    ) {
+        return false;
+    }
     const serverYouTube = Object.fromEntries(
         post.targets
             .filter((target) => target.content_override?.youtube)
             .map((target) => [
                 target.connected_account_id,
-                target.content_override?.youtube,
+                target.content_override?.youtube
+                    ? normalizeYouTubePostOptions(
+                          target.content_override.youtube,
+                      )
+                    : undefined,
             ]),
     );
     const localYouTubeKeys = Object.keys(state.youtubeByAccount)
@@ -1116,8 +1222,10 @@ export function contentMatchesServer(
             JSON.stringify(Object.keys(serverYouTube).sort()) ||
         localYouTubeKeys.some(
             (key) =>
-                JSON.stringify(state.youtubeByAccount[key]) !==
-                JSON.stringify(serverYouTube[key]),
+                !youtubePostOptionsEqual(
+                    state.youtubeByAccount[key],
+                    serverYouTube[key] ?? {},
+                ),
         )
     ) {
         return false;

@@ -9,6 +9,7 @@ import { youtubeOptionsComplete } from '@/lib/compose/youtube';
 import { platformLabel } from '@/lib/platforms';
 import type {
     Account,
+    InstagramPostOptions,
     MediaView,
     MentionPlaceholder,
     PlatformLimits,
@@ -22,6 +23,10 @@ import type {
 export type BlockReason =
     | TikTokIssue
     | 'youtube_options_required'
+    | 'youtube_thumbnail_unavailable'
+    | 'youtube_thumbnail_release_scope_required'
+    | 'youtube_thumbnail_requires_video'
+    | 'instagram_cover_requires_reel'
     | 'empty'
     | 'publishing_unavailable'
     | 'media_required'
@@ -168,6 +173,7 @@ type PrecheckDestinationsInput = {
     /** Ordered segment break ids used to resolve placement refs. */
     segmentBreaks?: string[];
     youtubeByAccount?: Record<string, YouTubePostOptions>;
+    instagramByAccount?: Record<string, InstagramPostOptions>;
     tiktokByAccount?: Record<string, TikTokPostOptions>;
     tiktokCreatorByAccount?: Record<string, TikTokCreatorInfo | null>;
 };
@@ -238,6 +244,7 @@ export function precheckDestinations({
     placementsByAccount,
     segmentBreaks = [],
     youtubeByAccount,
+    instagramByAccount,
     tiktokByAccount,
     tiktokCreatorByAccount,
 }: PrecheckDestinationsInput): AccountBlock[] {
@@ -269,6 +276,15 @@ export function precheckDestinations({
             format: formatByAccount[account.id] ?? 'feed',
             limits: platformLimits,
         });
+        if (
+            account.platform === 'instagram' &&
+            instagramByAccount?.[account.id]?.cover_media_id &&
+            (formatByAccount[account.id] === 'story' ||
+                targetMedia.length !== 1 ||
+                targetMedia[0].kind !== 'video')
+        ) {
+            reasons.push('instagram_cover_requires_reel');
+        }
         if (
             account.platform === 'youtube' &&
             youtubeByAccount !== undefined &&
@@ -351,8 +367,16 @@ export function describeReason(
             return `${label} allows only one GIF and won't mix it with other media`;
         case 'reels_requires_video':
             return `${label} Reels need a video`;
+        case 'instagram_cover_requires_reel':
+            return 'use exactly one video in an Instagram Reel or feed post, or remove its cover';
         case 'youtube_options_required':
-            return 'Choose YouTube visibility, format, audience, and disclosure settings before publishing.';
+            return 'Complete YouTube publishing settings and fix any title or description errors before publishing.';
+        case 'youtube_thumbnail_unavailable':
+            return 'Choose an existing JPEG or PNG image up to 8 MB from this workspace for the YouTube cover.';
+        case 'youtube_thumbnail_release_scope_required':
+            return 'Reconnect this YouTube account to grant video management access before publishing with a cover. The upload stays private until YouTube accepts the cover.';
+        case 'youtube_thumbnail_requires_video':
+            return 'A custom YouTube cover requires exactly one video. Add a video or remove the cover.';
         case 'story_requires_media':
             return `${label} Stories need an image or video`;
         default:

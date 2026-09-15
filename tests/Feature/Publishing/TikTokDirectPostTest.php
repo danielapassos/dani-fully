@@ -11,6 +11,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 
 function directTikTokOptions(array $overrides = []): array
 {
@@ -67,6 +68,7 @@ function fakeTikTokDirect(array $creator = [], string $status = 'PUBLISH_COMPLET
 beforeEach(function () {
     config()->set('services.tiktok.direct_post_enabled', true);
     config()->set('services.tiktok.inbox_enabled', false);
+    config()->set('app.url', 'https://shoutrrr.example.test');
     config()->set('media.public_url', 'https://media.example.test');
     Storage::fake('local');
     Http::preventStrayRequests();
@@ -87,7 +89,9 @@ test('direct post uses the latest creator restrictions and exact reviewed option
         && $request['post_info']['disable_comment'] === false
         && $request['post_info']['disable_duet'] === true
         && $request['post_info']['video_cover_timestamp_ms'] === 1000
-        && $request['source_info'] === ['source' => 'PULL_FROM_URL', 'video_url' => 'https://media.example.test/videos/direct.mp4']);
+        && $request['source_info']['source'] === 'PULL_FROM_URL'
+        && str_starts_with($request['source_info']['video_url'], 'https://shoutrrr.example.test/provider-media/tiktok/'.$context->media[0]->id.'?')
+        && URL::hasValidSignature(Illuminate\Http\Request::create($request['source_info']['video_url'])));
     Http::assertSentCount(3);
 });
 
