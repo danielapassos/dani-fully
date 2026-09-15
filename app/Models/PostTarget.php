@@ -91,6 +91,85 @@ class PostTarget extends Model
     /** @use HasFactory<PostTargetFactory> */
     use HasFactory, HasUuids;
 
+    public const string TIKTOK_INBOX_MESSAGE = 'Uploaded to your TikTok inbox. Open TikTok to finish posting; this is not live.';
+
+    /** Read recorded provider evidence without sending another upload or changing the row. */
+    public function publicationStatus(): PostTargetStatus
+    {
+        if (in_array($this->status, [PostTargetStatus::Deleting, PostTargetStatus::Deleted], true)) {
+            return $this->status;
+        }
+
+        $recorded = data_get($this->media_upload_state, 'publication.status');
+        if (in_array($recorded, [PostTargetStatus::AwaitingAction->value, PostTargetStatus::Completed->value], true)) {
+            return PostTargetStatus::from($recorded);
+        }
+
+        if ($this->platform === Platform::TikTok && $this->status === PostTargetStatus::Publishing && $this->remote_id === null) {
+            $hasReference = false;
+            foreach ($this->media_upload_state ?? [] as $entry) {
+                if (! is_array($entry) || ! is_string($entry['remote_ref'] ?? null) || $entry['remote_ref'] === '') {
+                    continue;
+                }
+
+                $hasReference = true;
+                if (data_get($entry, 'metadata.provider_status') === 'SEND_TO_USER_INBOX') {
+                    return PostTargetStatus::AwaitingAction;
+                }
+                if (data_get($entry, 'metadata.provider_status') === 'PUBLISH_COMPLETE') {
+                    return PostTargetStatus::Completed;
+                }
+            }
+
+            if ($hasReference) {
+                $message = 'Video sent to TikTok. Open TikTok to finish the native post.';
+                $inboxConfirmed = ($this->error_kind === ErrorKind::MediaProcessing && $this->error_message === $message)
+                    || $this->attemptLogs()->where('error_kind', ErrorKind::MediaProcessing->value)->where('error_message', $message)->exists();
+                if ($inboxConfirmed) {
+                    return PostTargetStatus::AwaitingAction;
+                }
+            }
+        }
+
+        if ($this->platform === Platform::YouTube && $this->status === PostTargetStatus::Published) {
+            foreach ($this->media_upload_state ?? [] as $entry) {
+                if (is_array($entry) && in_array(data_get($entry, 'metadata.privacy_status'), ['private', 'unlisted'], true)) {
+                    return PostTargetStatus::Completed;
+                }
+            }
+        }
+
+        return $this->status;
+    }
+
+    public function publicationMessage(?PostTargetStatus $status = null): ?string
+    {
+        $message = data_get($this->media_upload_state, 'publication.message');
+        if (is_string($message) && $message !== '') {
+            return $message;
+        }
+
+        $status ??= $this->publicationStatus();
+        if ($status === PostTargetStatus::AwaitingAction) {
+            return $this->platform === Platform::TikTok ? self::TIKTOK_INBOX_MESSAGE : 'Complete the remaining step on the connected platform.';
+        }
+
+        if ($status === PostTargetStatus::Completed) {
+            if ($this->platform === Platform::YouTube) {
+                foreach ($this->media_upload_state ?? [] as $entry) {
+                    $privacy = is_array($entry) ? data_get($entry, 'metadata.privacy_status') : null;
+                    if (in_array($privacy, ['private', 'unlisted'], true)) {
+                        return "Uploaded to YouTube as {$privacy}. This video is not publicly listed.";
+                    }
+                }
+            }
+
+            return 'Upload complete. A public post has not been confirmed.';
+        }
+
+        return null;
+    }
+
     /**
      * Whether this target may be manually dispatched again without risking a
      * duplicate provider-side post. Unknown failures include deliberately
@@ -99,7 +178,7 @@ class PostTarget extends Model
      */
     public function canRetryManually(): bool
     {
-        return $this->status->isRetryable()
+        return $this->publicationStatus()->isRetryable()
             && $this->error_kind !== ErrorKind::Unknown
             && $this->account?->canPublish() === true;
     }

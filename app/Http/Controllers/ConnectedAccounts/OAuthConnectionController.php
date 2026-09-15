@@ -14,6 +14,7 @@ use App\Services\ConnectedAccounts\OAuthConnectionFlow;
 use App\Services\ConnectedAccounts\Threads\ThreadsTokenExchanger;
 use App\Services\ConnectedAccounts\XAccountCapabilities;
 use App\Support\InstanceSettings;
+use App\Support\OAuthGrantedScopes;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -102,25 +103,21 @@ class OAuthConnectionController extends Controller
             }
         }
 
-        if (in_array($resolved, [Platform::Instagram, Platform::TikTok, Platform::YouTube], true)) {
-            $capabilities = [
-                ...($data->capabilities ?? []),
-                'oauth_scopes' => array_values((array) $oauthUser->approvedScopes),
-            ];
+        $scopeCapabilities = OAuthGrantedScopes::capabilities($oauthUser->approvedScopes);
+        $granted = $scopeCapabilities['oauth_scopes'];
+        $capabilities = [...($data->capabilities ?? []), ...$scopeCapabilities];
 
-            if ($resolved === Platform::Instagram) {
-                $capabilities['instagram_login'] = true;
-            }
-
-            $data = $data->withCapabilities($capabilities);
+        if ($resolved === Platform::Instagram) {
+            $capabilities['instagram_login'] = true;
         }
+
+        $data = $data->withCapabilities($capabilities);
 
         if ($resolved->supportsDirectMessages()) {
             // Record whether the provider actually granted the DM scope(s) this
             // app requested, so the Messages inbox only polls/sends through
             // accounts that can reach the DM API (others are silently excluded
             // rather than 403ing at poll time).
-            $granted = array_values((array) $oauthUser->approvedScopes);
             $required = $this->directMessageScopeDeltas($resolved);
             $dmGranted = $required !== [] && array_diff($required, $granted) === [];
 
@@ -134,8 +131,10 @@ class OAuthConnectionController extends Controller
             // Management read scope, so the engagement inbox only polls accounts
             // that can read replies (others 403). `approvedScopes` comes from the
             // token response's `scope` field.
-            $linkedInGrantedScopes = array_values((array) $oauthUser->approvedScopes);
+            $linkedInGrantedScopes = $granted;
             $data = $data->withCapabilities([
+                ...($data->capabilities ?? []),
+                'linkedin_account_type' => 'person',
                 'linkedin_engagement' => in_array('r_member_social_feed', $linkedInGrantedScopes, true),
             ]);
         }
@@ -293,6 +292,10 @@ class OAuthConnectionController extends Controller
 
         if ($platform === Platform::TikTok && config('services.tiktok.inbox_enabled')) {
             $scopes[] = 'video.upload';
+        }
+
+        if ($platform === Platform::TikTok && config('services.tiktok.direct_post_enabled')) {
+            $scopes[] = 'video.publish';
         }
 
         if ($platform === Platform::YouTube && config('services.youtube.publishing_enabled')) {

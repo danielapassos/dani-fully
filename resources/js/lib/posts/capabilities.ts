@@ -18,6 +18,28 @@ export function targetCanRetry(target: RetryTarget): boolean {
     );
 }
 
+export function postDeletionDescription(
+    post: Pick<PostView, 'status'> & {
+        targets?: Pick<PostView['targets'][number], 'status'>[];
+    },
+): string {
+    if (
+        post.status === 'awaiting_action' ||
+        post.status === 'completed' ||
+        post.targets?.some(
+            (target) =>
+                target.status === 'awaiting_action' ||
+                target.status === 'completed',
+        )
+    ) {
+        return 'This removes the Shoutrrr record and deletes the connected upload where the platform supports it. Inbox transfers may still need removal in TikTok.';
+    }
+
+    return post.status === 'draft' || post.status === 'scheduled'
+        ? 'This removes the post. The content is not kept.'
+        : 'Published copies will be removed from connected accounts where possible.';
+}
+
 export interface PostCapabilities {
     canEdit: boolean;
     canSchedule: boolean;
@@ -64,6 +86,13 @@ export function postCapabilities(post: PostView): PostCapabilities {
             return {
                 ...NONE,
                 canReschedule: true,
+                canDelete: true,
+                canDuplicate: true,
+            };
+        case 'awaiting_action':
+        case 'completed':
+            return {
+                ...NONE,
                 canDelete: true,
                 canDuplicate: true,
             };

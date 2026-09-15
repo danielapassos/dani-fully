@@ -9,6 +9,7 @@ use App\Http\Controllers\ConnectedAccounts\DiscordConnectionController;
 use App\Http\Controllers\ConnectedAccounts\LinkedInPageConnectionController;
 use App\Http\Controllers\ConnectedAccounts\MetaConnectionController;
 use App\Http\Controllers\ConnectedAccounts\OAuthConnectionController;
+use App\Http\Controllers\ConnectedAccounts\TikTokCreatorInfoController;
 use App\Http\Controllers\OAuth\BlueskyClientMetadataController;
 use App\Models\ConnectedAccount;
 use Illuminate\Support\Facades\Route;
@@ -30,6 +31,10 @@ Route::bind('account', fn (string $value): ConnectedAccount => ConnectedAccount:
 
 Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::get('accounts', [ConnectedAccountController::class, 'index'])->name('accounts.index');
+
+    Route::get('accounts/{account}/tiktok/creator-info', TikTokCreatorInfoController::class)
+        ->middleware('throttle:15,1')
+        ->name('accounts.tiktok.creator-info');
 
     Route::get('accounts/connect/bluesky/oauth', [BlueskyOAuthController::class, 'redirect'])
         ->middleware('throttle:10,1')

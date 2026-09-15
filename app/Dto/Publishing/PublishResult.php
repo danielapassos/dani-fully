@@ -18,6 +18,8 @@ final readonly class PublishResult
         public ?int $httpStatus = null,
         public ?string $responseExcerpt = null,
         public ?int $retryAfter = null,
+        public string $outcome = 'published',
+        public ?string $statusMessage = null,
     ) {}
 
     /**
@@ -26,6 +28,18 @@ final readonly class PublishResult
     public static function success(array $remoteIds): self
     {
         return new self(remoteIds: $remoteIds);
+    }
+
+    /** @param list<string> $remoteIds Actual post IDs only, never upload-operation references. */
+    public static function awaitingAction(array $remoteIds, string $message): self
+    {
+        return new self(remoteIds: $remoteIds, outcome: 'awaiting_action', statusMessage: $message);
+    }
+
+    /** @param list<string> $remoteIds Actual post IDs only, never upload-operation references. */
+    public static function completed(array $remoteIds, string $message): self
+    {
+        return new self(remoteIds: $remoteIds, outcome: 'completed', statusMessage: $message);
     }
 
     public static function failure(ErrorKind $kind, string $message, ?int $httpStatus = null, ?string $excerpt = null, ?int $retryAfter = null): self

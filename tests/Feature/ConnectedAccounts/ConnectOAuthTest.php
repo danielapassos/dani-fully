@@ -262,6 +262,54 @@ test('callback records the YouTube upload scope used by the publishing gate', fu
         ->and($account->canPublish())->toBeTrue();
 });
 
+test('callback preserves actual grant evidence without treating missing scope responses as denial', function (string $platform, string $driver, ?array $approved, array $expected, string $permissionStatus) {
+    config()->set("services.{$driver}.client_id", 'client-id');
+    config()->set("services.{$driver}.client_secret", 'client-secret');
+    config()->set('messages.direct_messages_enabled', false);
+    ownerActingIn();
+    fakeOAuthUser($driver, [
+        'id' => 'grant-account',
+        'nickname' => 'creator',
+        'token' => 'provider-token',
+        'approvedScopes' => $approved,
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://api.x.com/2/users/me*' => Http::response([
+            'data' => ['id' => 'grant-account', 'subscription_type' => 'Basic', 'verified_type' => 'none'],
+        ]),
+        'https://graph.threads.net/access_token*' => Http::response([
+            'access_token' => 'long-token', 'expires_in' => 5_184_000,
+        ]),
+    ]);
+
+    test()->get("/accounts/callback/{$platform}")->assertRedirect(route('accounts.index'));
+
+    $account = ConnectedAccount::withoutGlobalScopes()->firstWhere('remote_account_id', 'grant-account');
+    expect($account->capabilities['oauth_scopes'])->toBe($expected)
+        ->and($account->capabilities['oauth_scopes_verified'])->toBe($expected !== [])
+        ->and($account->publishingPermissionStatus())->toBe($permissionStatus)
+        ->and($account->canPublish())->toBe($permissionStatus !== 'missing');
+
+    if ($platform === 'x') {
+        expect($account->xSubscriptionTier())->toBe('basic');
+    }
+    if ($platform === 'linkedin') {
+        expect($account->capabilities['linkedin_engagement'])->toBeTrue();
+    }
+    if ($platform === 'instagram') {
+        expect($account->usesInstagramLogin())->toBeTrue();
+    }
+})->with([
+    'X normalized grants' => ['x', 'x', [' users.read ', 'tweet.read', 'tweet.write', 'tweet.write', ''], ['users.read', 'tweet.read', 'tweet.write'], 'granted'],
+    'LinkedIn grants survive engagement merge' => ['linkedin', 'linkedin-openid', ['w_member_social', 'r_member_social_feed'], ['w_member_social', 'r_member_social_feed'], 'granted'],
+    'LinkedIn comma separated token scope' => ['linkedin', 'linkedin-openid', ['w_member_social,r_member_social_feed'], ['w_member_social', 'r_member_social_feed'], 'granted'],
+    'Instagram declined publishing' => ['instagram', 'instagram', ['instagram_business_basic'], ['instagram_business_basic'], 'missing'],
+    'Instagram omitted permissions' => ['instagram', 'instagram', null, [], 'unknown'],
+    'Threads omitted scope response' => ['threads', 'threads', [''], [], 'unknown'],
+    'Threads known missing publishing' => ['threads', 'threads', ['threads_basic'], ['threads_basic'], 'missing'],
+]);
+
 test('linkedin connect requests the community management feed scopes only when enabled', function () {
     config()->set('services.linkedin-openid.client_id', 'cid');
     config()->set('services.linkedin-openid.client_secret', 'secret');

@@ -15,6 +15,47 @@ export type PlatformName =
 
 export type PostFormat = 'feed' | 'reels' | 'story';
 
+export type YouTubePostOptions = Partial<{
+    privacy_status: 'private' | 'unlisted' | 'public';
+    category_id: string;
+    format_intent: 'video' | 'short';
+    made_for_kids: boolean;
+    contains_synthetic_media: boolean;
+    has_paid_product_placement: boolean;
+    notify_subscribers: boolean;
+}>;
+
+export type TikTokPrivacy =
+    | 'PUBLIC_TO_EVERYONE'
+    | 'MUTUAL_FOLLOW_FRIENDS'
+    | 'FOLLOWER_OF_CREATOR'
+    | 'SELF_ONLY';
+
+export type TikTokPostOptions = {
+    privacy_level?: TikTokPrivacy;
+    disable_comment: boolean;
+    disable_duet: boolean;
+    disable_stitch: boolean;
+    commercial_content: boolean;
+    brand_organic_toggle: boolean;
+    brand_content_toggle: boolean;
+    is_aigc: boolean;
+    music_usage_confirmed: boolean;
+    branded_content_policy_confirmed: boolean;
+    video_cover_timestamp_ms?: number;
+};
+
+export type TikTokCreatorInfo = {
+    creator_username: string;
+    creator_nickname: string;
+    creator_avatar_url: string | null;
+    privacy_level_options: TikTokPrivacy[];
+    comment_disabled: boolean;
+    duet_disabled: boolean;
+    stitch_disabled: boolean;
+    max_video_post_duration_sec: number;
+};
+
 /**
  * Per-platform display text / handles for a mention, plus the non-platform
  * `linkedin_urn` key which carries a raw LinkedIn company URL / numeric id /
@@ -63,6 +104,7 @@ export type Account = {
     publishing_ready?: boolean;
     /** Actionable explanation shown beside a connection that cannot publish. */
     publishing_unavailable_reason?: string | null;
+    tiktok_direct_post_enabled?: boolean;
 };
 
 export type AccountSet = {
@@ -124,6 +166,8 @@ export type PendingUpload = {
 export type TargetStatus =
     | 'pending'
     | 'publishing'
+    | 'awaiting_action'
+    | 'completed'
     | 'published'
     | 'failed'
     | 'skipped'
@@ -134,6 +178,8 @@ export type PostStatus =
     | 'draft'
     | 'scheduled'
     | 'publishing'
+    | 'awaiting_action'
+    | 'completed'
     | 'published'
     | 'partial'
     | 'failed'
@@ -155,11 +201,17 @@ export type TargetView = {
     display_name: string | null;
     avatar_url: string | null;
     sections: string[];
-    content_override: { segments?: string[]; media_ids?: string[] } | null;
+    content_override: {
+        segments?: string[];
+        media_ids?: string[];
+        tiktok?: TikTokPostOptions;
+        youtube?: YouTubePostOptions;
+    } | null;
     auto_split: boolean;
     format: PostFormat;
     issues: string[];
     status: TargetStatus;
+    status_message?: string | null;
     error_kind: string | null;
     error_message: string | null;
     /** Server-authoritative manual retry gate. Optional for older/partial payloads. */

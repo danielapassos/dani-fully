@@ -39,11 +39,17 @@ class GetCalendarTool extends WorkspaceTool
             ->whereIn('status', [
                 PostStatus::Scheduled->value, PostStatus::Published->value,
                 PostStatus::Partial->value, PostStatus::Failed->value,
+                PostStatus::AwaitingAction->value, PostStatus::Completed->value,
             ])
             ->where(fn ($q) => $q
                 ->whereBetween('scheduled_at', [$start, $end])
-                ->orWhereBetween('published_at', [$start, $end]))
-            ->orderByRaw('COALESCE(scheduled_at, published_at) ASC')
+                ->orWhereBetween('published_at', [$start, $end])
+                ->orWhere(fn ($completed) => $completed
+                    ->whereIn('status', [PostStatus::AwaitingAction->value, PostStatus::Completed->value])
+                    ->whereNull('scheduled_at')
+                    ->whereNull('published_at')
+                    ->whereBetween('updated_at', [$start, $end])))
+            ->orderByRaw('COALESCE(scheduled_at, published_at, updated_at) ASC')
             ->get()
             ->map(fn (Post $post): array => PostListItem::make($post));
 

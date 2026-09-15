@@ -54,10 +54,16 @@ class DraftService
             ]);
 
             $accountIds = $this->resolveDestinationAccountIds($workspaceId, $destination);
+            $overrides = [];
+            foreach ($accountIds as $accountId) {
+                if ($data?->hasOverrideFor($accountId)) {
+                    $overrides[$accountId] = $data->overrideFor($accountId);
+                }
+            }
             // Pass the DraftData so the created targets carry the thread's
             // segment_breaks from the first save (placements settle on the next
             // PUT once their media is attached).
-            $this->syncTargets($post, $accountIds, $segments, [], [], $post->mentions ?? [], [], $data);
+            $this->syncTargets($post, $accountIds, $segments, [], $overrides, $post->mentions ?? [], [], $data);
 
             return $post->load('targets');
         });
@@ -165,7 +171,7 @@ class DraftService
      * @param  list<string>  $accountIds
      * @param  list<string>  $segments
      * @param  array<string, bool>  $autoSplitByAccount
-     * @param  array<string, array{segments: list<string>, media_ids?: list<string>}|null>  $overrideByAccount
+     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null>  $overrideByAccount
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
      * @param  array<string, string>  $formatByAccount
      */
@@ -197,6 +203,21 @@ class DraftService
             $override = array_key_exists($accountId, $overrideByAccount)
                 ? $overrideByAccount[$accountId]
                 : $currentOverride;
+
+            if ($account->platform === Platform::TikTok && ! is_array($override['tiktok'] ?? null)
+                && is_array($currentOverride['tiktok'] ?? null)) {
+                $override ??= [];
+                $override['tiktok'] = $currentOverride['tiktok'];
+            }
+            if ($account->platform === Platform::YouTube && ! is_array($override['youtube'] ?? null)
+                && is_array($currentOverride['youtube'] ?? null)) {
+                $override ??= [];
+                $override['youtube'] = $currentOverride['youtube'];
+            }
+            if ($account->platform !== Platform::YouTube && is_array($override)) {
+                unset($override['youtube']);
+                $override = $override === [] ? null : $override;
+            }
 
             $currentFormat = $current instanceof PostTarget ? $current->format->value : null;
             $format = $formatByAccount[$accountId] ?? $currentFormat ?? 'feed';

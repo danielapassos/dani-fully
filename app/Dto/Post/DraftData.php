@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Dto\Post;
 
+use App\Services\Publishing\YouTubePostOptions;
+
 final class DraftData
 {
     /**
@@ -16,7 +18,7 @@ final class DraftData
      * @param  list<string>  $destinationIds
      * @param  list<string>  $mediaIds
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
-     * @param  array<string, array{auto_split?: bool, format?: string, content_override?: array{segments: list<string>, media_ids?: list<string>}|null, placements?: list<array{media_id: string, segment_ref: string, position: int}>, segment_breaks?: list<string>}>  $targetsByAccount
+     * @param  array<string, array{auto_split?: bool, format?: string, content_override?: array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null, placements?: list<array{media_id: string, segment_ref: string, position: int}>, segment_breaks?: list<string>}>  $targetsByAccount
      * @param  list<string>  $segmentBreaks
      * @param  list<array{media_id: string, segment_ref: string, position: int}>  $placements
      */
@@ -126,7 +128,7 @@ final class DraftData
     }
 
     /**
-     * @return array{segments: list<string>, media_ids?: list<string>}|null
+     * @return array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null
      */
     public function overrideFor(string $accountId): ?array
     {
@@ -192,7 +194,7 @@ final class DraftData
     }
 
     /**
-     * @return array{segments: list<string>, media_ids?: list<string>}|null
+     * @return array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>}|null
      */
     private static function readOverride(mixed $override): ?array
     {
@@ -208,13 +210,27 @@ final class DraftData
             ? array_values(array_map(static fn (mixed $s): string => (string) $s, $override['segments']))
             : [(string) ($override['text'] ?? '')];
 
-        $normalized = ['segments' => $segments];
+        $normalized = array_key_exists('segments', $override) || array_key_exists('text', $override)
+            ? ['segments' => $segments]
+            : [];
 
         if (array_key_exists('media_ids', $override)) {
             $normalized['media_ids'] = array_values(is_array($override['media_ids']) ? $override['media_ids'] : []);
         }
 
-        return $normalized;
+        if (isset($override['tiktok']) && is_array($override['tiktok'])) {
+            $normalized['tiktok'] = array_intersect_key($override['tiktok'], array_fill_keys([
+                'privacy_level', 'disable_comment', 'disable_duet', 'disable_stitch', 'commercial_content',
+                'brand_organic_toggle', 'brand_content_toggle', 'is_aigc', 'music_usage_confirmed',
+                'branded_content_policy_confirmed', 'video_cover_timestamp_ms',
+            ], true));
+        }
+
+        if (isset($override['youtube']) && is_array($override['youtube'])) {
+            $normalized['youtube'] = array_intersect_key($override['youtube'], array_fill_keys(YouTubePostOptions::FIELDS, true));
+        }
+
+        return $normalized === [] ? null : $normalized;
     }
 
     /**

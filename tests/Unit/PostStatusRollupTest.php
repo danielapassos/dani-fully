@@ -86,5 +86,21 @@ test('failed alongside deleted rolls up to Partial, not Failed', function () {
     app(PostStatusRollup::class)->recompute($post);
 
     expect($post->refresh()->status)->toBe(PostStatus::Partial)
-        ->and($post->published_at)->not->toBeNull();
+        ->and($post->published_at)->toBeNull();
 });
+
+test('nonpublic outcomes roll up without inventing a publication time', function (array $targets, PostStatus $expected) {
+    $post = rollupPost($targets);
+
+    app(PostStatusRollup::class)->recompute($post);
+
+    expect($post->refresh()->status)->toBe($expected)
+        ->and($post->published_at)->toBeNull();
+})->with([
+    'inbox' => [[PostTargetStatus::AwaitingAction], PostStatus::AwaitingAction],
+    'completed privately' => [[PostTargetStatus::Completed], PostStatus::Completed],
+    'inbox and completed' => [[PostTargetStatus::AwaitingAction, PostTargetStatus::Completed], PostStatus::AwaitingAction],
+    'inbox and failed' => [[PostTargetStatus::AwaitingAction, PostTargetStatus::Failed], PostStatus::AwaitingAction],
+    'completed and failed' => [[PostTargetStatus::Completed, PostTargetStatus::Failed], PostStatus::Partial],
+    'another target active' => [[PostTargetStatus::AwaitingAction, PostTargetStatus::Publishing], PostStatus::Publishing],
+]);

@@ -49,6 +49,18 @@ describe('windowDays', () => {
 });
 
 describe('postsByDay', () => {
+    it.each(['awaiting_action', 'completed'] as const)(
+        'keeps an immediate %s upload on the calendar without a publication timestamp',
+        (status) => {
+            const upload = post({ status, updated_at: '2026-06-21T02:00:00Z' });
+
+            expect(
+                postsByDay([upload], 'America/New_York').get('2026-06-20'),
+            ).toEqual([upload]);
+            expect(upload.published_at).toBeNull();
+        },
+    );
+
     it('buckets posts by their local scheduled/published day', () => {
         const a = post({ id: 'a', scheduled_at: '2026-06-20T09:00:00Z' });
         const b = post({ id: 'b', scheduled_at: '2026-06-20T18:30:00Z' });

@@ -8,6 +8,8 @@ import {
     type Placement,
     type PostFormat,
     type PostView,
+    type TikTokPostOptions,
+    type YouTubePostOptions,
 } from '@/types/compose';
 
 /** Placement key used for media added before any explicit segment break exists. */
@@ -49,6 +51,8 @@ export type ComposerState = {
     autoSplitByAccount: Record<string, boolean>;
     formatByAccount: Record<string, PostFormat>;
     overrideByAccount: Record<string, string[] | undefined>;
+    tiktokByAccount: Record<string, TikTokPostOptions>;
+    youtubeByAccount: Record<string, YouTubePostOptions>;
     media: MediaView[];
     /** Ordered ids of tiptap segment breaks; segment refs are derived from these. */
     segmentBreaks: string[];
@@ -72,6 +76,16 @@ export type ComposerAction =
     | { type: 'setAutoRepost'; value: boolean | null }
     | { type: 'toggleAutoSplit'; accountId: string }
     | { type: 'setFormat'; accountId: string; format: PostFormat }
+    | {
+          type: 'setTikTokOptions';
+          accountId: string;
+          options: TikTokPostOptions;
+      }
+    | {
+          type: 'setYouTubeOptions';
+          accountId: string;
+          options: YouTubePostOptions;
+      }
     | { type: 'disableAutoSplit'; accountIds: string[] }
     | { type: 'setOverrideSegments'; accountId: string; segments: string[] }
     | { type: 'discardOverride'; accountId: string }
@@ -150,6 +164,8 @@ export function initialComposerState(
         autoSplitByAccount: {},
         formatByAccount: {},
         overrideByAccount: {},
+        tiktokByAccount: {},
+        youtubeByAccount: {},
         media: [],
         segmentBreaks: [],
         placements: {},
@@ -387,12 +403,22 @@ function hydrate(post: PostView): ComposerState {
     const autoSplitByAccount: Record<string, boolean> = {};
     const formatByAccount: Record<string, PostFormat> = {};
     const overrideByAccount: Record<string, string[] | undefined> = {};
+    const tiktokByAccount: Record<string, TikTokPostOptions> = {};
+    const youtubeByAccount: Record<string, YouTubePostOptions> = {};
     const placementState = placementStateFromPost(post);
 
     for (const target of post.targets) {
         autoSplitByAccount[target.connected_account_id] = target.auto_split;
         formatByAccount[target.connected_account_id] = target.format;
         const overrideSegments = target.content_override?.segments;
+        if (target.content_override?.youtube) {
+            youtubeByAccount[target.connected_account_id] =
+                target.content_override.youtube;
+        }
+        if (target.content_override?.tiktok) {
+            tiktokByAccount[target.connected_account_id] =
+                target.content_override.tiktok;
+        }
         if (overrideSegments !== undefined && overrideSegments !== null) {
             overrideByAccount[target.connected_account_id] = overrideSegments;
         }
@@ -426,6 +452,8 @@ function hydrate(post: PostView): ComposerState {
         autoSplitByAccount,
         formatByAccount,
         overrideByAccount,
+        tiktokByAccount,
+        youtubeByAccount,
         media: post.media,
         segmentBreaks: post.segment_breaks ?? [],
         placements: placementState.placements,
@@ -532,6 +560,26 @@ export function composerReducer(
                     [action.accountId]: !(
                         state.autoSplitByAccount[action.accountId] ?? true
                     ),
+                },
+                saveState: 'dirty',
+            };
+
+        case 'setYouTubeOptions':
+            return {
+                ...state,
+                youtubeByAccount: {
+                    ...state.youtubeByAccount,
+                    [action.accountId]: action.options,
+                },
+                saveState: 'dirty',
+            };
+
+        case 'setTikTokOptions':
+            return {
+                ...state,
+                tiktokByAccount: {
+                    ...state.tiktokByAccount,
+                    [action.accountId]: action.options,
                 },
                 saveState: 'dirty',
             };
@@ -871,7 +919,12 @@ export type PutTarget = {
     connected_account_id: string;
     auto_split: boolean;
     format: PostFormat;
-    content_override: { segments: string[]; media_ids: string[] } | null;
+    content_override: {
+        segments?: string[];
+        media_ids?: string[];
+        tiktok?: TikTokPostOptions;
+        youtube?: YouTubePostOptions;
+    } | null;
     segment_breaks?: string[];
     placements?: Placement[];
 };
@@ -924,13 +977,26 @@ export function buildPutBody(
         // in content_override.media_ids — the old per-account exclude mechanism
         // is retired. media_ids here is the full set purely to satisfy the
         // stored override shape; publishing reads placements, not this field.
-        const content_override =
+        let content_override: PutTarget['content_override'] =
             override !== undefined
                 ? {
                       segments: override,
                       media_ids: state.media.map((m) => m.id),
                   }
                 : null;
+
+        if (state.youtubeByAccount[accountId]) {
+            content_override = {
+                ...content_override,
+                youtube: state.youtubeByAccount[accountId],
+            };
+        }
+        if (state.tiktokByAccount[accountId]) {
+            content_override = {
+                ...content_override,
+                tiktok: state.tiktokByAccount[accountId],
+            };
+        }
 
         const divergedPlacements = state.placementsByAccount[accountId];
 
@@ -1025,6 +1091,59 @@ export function contentMatchesServer(
     }
 
     const localOverrides = normalizeOverrides(state.overrideByAccount);
+    const comparedAccountIds = new Set(
+        state.destination.kind === 'account'
+            ? [state.destination.id]
+            : state.destination.kind === 'accounts'
+              ? state.destination.ids
+              : state.destination.kind === 'none'
+                ? []
+                : post.targets.map((target) => target.connected_account_id),
+    );
+    const serverYouTube = Object.fromEntries(
+        post.targets
+            .filter((target) => target.content_override?.youtube)
+            .map((target) => [
+                target.connected_account_id,
+                target.content_override?.youtube,
+            ]),
+    );
+    const localYouTubeKeys = Object.keys(state.youtubeByAccount)
+        .filter((id) => comparedAccountIds.has(id))
+        .sort();
+    if (
+        JSON.stringify(localYouTubeKeys) !==
+            JSON.stringify(Object.keys(serverYouTube).sort()) ||
+        localYouTubeKeys.some(
+            (key) =>
+                JSON.stringify(state.youtubeByAccount[key]) !==
+                JSON.stringify(serverYouTube[key]),
+        )
+    ) {
+        return false;
+    }
+    const serverTikTok = Object.fromEntries(
+        post.targets
+            .filter((target) => target.content_override?.tiktok)
+            .map((target) => [
+                target.connected_account_id,
+                target.content_override?.tiktok,
+            ]),
+    );
+    const localTikTokKeys = Object.keys(state.tiktokByAccount)
+        .filter((id) => comparedAccountIds.has(id))
+        .sort();
+    if (
+        JSON.stringify(localTikTokKeys) !==
+            JSON.stringify(Object.keys(serverTikTok).sort()) ||
+        localTikTokKeys.some(
+            (key) =>
+                JSON.stringify(state.tiktokByAccount[key]) !==
+                JSON.stringify(serverTikTok[key]),
+        )
+    ) {
+        return false;
+    }
     const serverOverrides: Record<string, string> = {};
     for (const target of post.targets) {
         const segments = target.content_override?.segments;

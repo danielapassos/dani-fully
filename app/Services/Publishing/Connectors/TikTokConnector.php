@@ -9,8 +9,12 @@ use App\Dto\Publishing\PublishContext;
 use App\Dto\Publishing\PublishResult;
 use App\Enums\ErrorKind;
 use App\Enums\UsageCategory;
+use App\Exceptions\TikTokCreatorInfoException;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
+use App\Services\ConnectedAccounts\TikTok\TikTokCreatorInfo;
+use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
+use App\Services\Media\PublicMediaUrl;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
 use App\Services\Publishing\Contracts\PublishConnector;
 use App\Services\Usage\Concerns\TracksUsage;
@@ -28,9 +32,8 @@ use Psr\Http\Message\StreamInterface;
 use RuntimeException;
 
 /**
- * Transfers one video to the creator's TikTok inbox. TikTok, not this app,
- * owns the final caption/privacy/music choices and the creator must publish it
- * natively. The connector keeps polling until TikTok reports the final post.
+ * Publishes one video through Direct Post, or preserves an existing creator
+ * inbox transfer. A saved publish id is always reconciled in its original mode.
  */
 class TikTokConnector implements PublishConnector
 {
@@ -46,10 +49,10 @@ class TikTokConnector implements PublishConnector
 
     public function publish(PublishContext $context): PublishResult
     {
-        if (! config('services.tiktok.inbox_enabled')) {
+        if (! config('services.tiktok.inbox_enabled') && ! config('services.tiktok.direct_post_enabled')) {
             return PublishResult::failure(
                 ErrorKind::Unsupported,
-                'TikTok inbox publishing is disabled until the developer app and upload permission are ready.',
+                'TikTok publishing is disabled until the developer app and posting permission are ready.',
             );
         }
 
@@ -61,7 +64,7 @@ class TikTokConnector implements PublishConnector
         $media = $context->effectiveMedia();
 
         if (count($media) !== 1 || ! $media[0]->isVideo()) {
-            return PublishResult::failure(ErrorKind::Validation, 'TikTok inbox publishing requires exactly one video.');
+            return PublishResult::failure(ErrorKind::Validation, 'TikTok publishing requires exactly one video.');
         }
 
         $media = $media[0];
@@ -83,6 +86,10 @@ class TikTokConnector implements PublishConnector
                 }
 
                 $this->validateStoredSize($media);
+                if (($state->metadata($media->id)['publish_mode'] ?? (config('services.tiktok.direct_post_enabled') ? 'direct' : 'inbox')) === 'direct') {
+                    return $this->publishDirect($context, $token, $media, $state);
+                }
+
                 $chunkSize = min(self::CHUNK_BYTES, $media->size_bytes);
                 // TikTok merges the remainder into the final chunk, rather than
                 // accepting an additional chunk smaller than its 5 MiB minimum.
@@ -92,6 +99,12 @@ class TikTokConnector implements PublishConnector
                 if ($chunkCount === 1) {
                     $chunkSize = $media->size_bytes;
                 }
+
+                $state->setMetadata($media->id, [
+                    ...$state->metadata($media->id),
+                    'publish_mode' => 'inbox',
+                    'source' => 'FILE_UPLOAD',
+                ]);
 
                 // An inbox-init response can be lost after TikTok creates the
                 // transfer. Persist the mutation boundary first so a retry cannot
@@ -128,6 +141,7 @@ class TikTokConnector implements PublishConnector
 
                 $state->markUploaded($media->id, $publishId);
                 $state->setMetadata($media->id, [
+                    'publish_mode' => 'inbox',
                     'source' => 'FILE_UPLOAD',
                     'total_bytes' => $media->size_bytes,
                     'content_type' => $media->mime,
@@ -180,6 +194,93 @@ class TikTokConnector implements PublishConnector
 
             return PublishResult::failure(ErrorKind::Validation, 'The TikTok video could not be read or its saved upload session is invalid. Check the video and existing inbox transfer before retrying.');
         }
+    }
+
+    private function publishDirect(PublishContext $context, string $token, PostMedia $media, MediaUploadState $state): PublishResult
+    {
+        if (! in_array('video.publish', (array) ($context->account->capabilities['oauth_scopes'] ?? []), true)) {
+            return PublishResult::failure(ErrorKind::AuthExpired, 'Reconnect this TikTok account and approve Direct Post access (video.publish).');
+        }
+
+        $options = $state->metadata($media->id)['post_options'] ?? $context->target->content_override['tiktok'] ?? [];
+        $options = is_array($options) ? $options : [];
+
+        try {
+            $creator = app(TikTokCreatorInfo::class)->query($context->account, $token);
+        } catch (TikTokCreatorInfoException $exception) {
+            return PublishResult::failure($exception->errorKind, $exception->getMessage(), $exception->httpStatus);
+        }
+
+        $validator = app(TikTokPostOptions::class);
+        $issues = $validator->issues($options, $creator, $media->duration_seconds);
+        if ($issues !== []) {
+            return PublishResult::failure(ErrorKind::Validation, $validator->describe($issues[0]));
+        }
+
+        $caption = implode("\n\n", $context->segments);
+        if (intdiv(strlen((string) mb_convert_encoding($caption, 'UTF-16LE', 'UTF-8')), 2) > 2200) {
+            return PublishResult::failure(ErrorKind::Validation, 'TikTok captions must be no longer than 2,200 UTF-16 characters.');
+        }
+
+        $videoUrl = app(PublicMediaUrl::class)->for($media);
+        if (parse_url($videoUrl, PHP_URL_SCHEME) !== 'https' || ! parse_url($videoUrl, PHP_URL_HOST)
+            || parse_url($videoUrl, PHP_URL_USER) !== null || parse_url($videoUrl, PHP_URL_PASS) !== null) {
+            return PublishResult::failure(ErrorKind::Unsupported, 'TikTok Direct Post requires an HTTPS media URL on a domain verified in the TikTok developer app.');
+        }
+
+        $postInfo = [
+            'title' => $caption,
+            'privacy_level' => $options['privacy_level'],
+            'disable_comment' => $options['disable_comment'] ?? true,
+            'disable_duet' => $options['disable_duet'] ?? true,
+            'disable_stitch' => $options['disable_stitch'] ?? true,
+            'brand_organic_toggle' => $options['brand_organic_toggle'] ?? false,
+            'brand_content_toggle' => $options['brand_content_toggle'] ?? false,
+            'is_aigc' => $options['is_aigc'] ?? false,
+        ];
+        if (isset($options['video_cover_timestamp_ms'])) {
+            $postInfo['video_cover_timestamp_ms'] = $options['video_cover_timestamp_ms'];
+        }
+
+        $state->setMetadata($media->id, [
+            ...$state->metadata($media->id),
+            'publish_mode' => 'direct',
+            'post_options' => $options,
+            'source' => 'PULL_FROM_URL',
+            'privacy_level' => $options['privacy_level'],
+        ]);
+        $this->setInitOutcomeUnknown($state, $media, true);
+        $this->persistState($context, $state);
+
+        $response = $this->request($token)->post(self::BASE_URL.'/video/init/', [
+            'post_info' => $postInfo,
+            'source_info' => ['source' => 'PULL_FROM_URL', 'video_url' => $videoUrl],
+        ]);
+        $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
+
+        if ($failure = $this->failure($response, 'TikTok could not initialize Direct Post.')) {
+            if ($response->serverError()) {
+                return $this->initNeedsReview();
+            }
+
+            $this->setInitOutcomeUnknown($state, $media, false);
+            $this->persistState($context, $state);
+
+            return $this->initializationFailure($response, $failure);
+        }
+
+        $publishId = trim((string) $response->json('data.publish_id'));
+        if ($publishId === '') {
+            return $this->initNeedsReview();
+        }
+
+        $metadata = $state->metadata($media->id);
+        $state->markUploaded($media->id, $publishId);
+        $state->setMetadata($media->id, $metadata);
+        $this->setInitOutcomeUnknown($state, $media, false);
+        $this->persistState($context, $state);
+
+        return $this->status($context, $token, $publishId, $media, $state);
     }
 
     private function upload(PublishContext $context, string $token, string $publishId, PostMedia $media, MediaUploadState $state): PublishResult
@@ -418,7 +519,7 @@ class TikTokConnector implements PublishConnector
     {
         return PublishResult::failure(
             ErrorKind::Unknown,
-            'TikTok may already have created this inbox transfer, but Shoutrrr did not receive its publish id. Check the TikTok inbox before retrying.',
+            'TikTok may already have created this submission, but Shoutrrr did not receive its publish id. Reconcile the existing submission before retrying; another attempt could duplicate it.',
         );
     }
 
@@ -437,11 +538,15 @@ class TikTokConnector implements PublishConnector
     {
         $response ??= $this->statusResponse($context, $token, $publishId);
 
-        if ($failure = $this->failure($response, 'TikTok could not read the inbox transfer status.')) {
+        if ($failure = $this->failure($response, 'TikTok could not read the submission status.')) {
             return $failure;
         }
 
         $status = strtoupper((string) $response->json('data.status'));
+        $metadata = $state->metadata($media->id);
+        $metadata['provider_status'] = $status;
+        $state->setMetadata($media->id, $metadata);
+        $this->persistState($context, $state);
 
         if (in_array($status, ['SEND_TO_USER_INBOX', 'PUBLISH_COMPLETE'], true)
             && ($state->metadata($media->id)['source'] ?? null) === 'FILE_UPLOAD') {
@@ -467,7 +572,11 @@ class TikTokConnector implements PublishConnector
                 // TikTok never exposes a public post id for it. The publish_id
                 // remains in media_upload_state as an operation tracker; it must
                 // not be promoted to a video id or polled forever.
-                return PublishResult::success([]);
+                $privacy = $state->metadata($media->id)['privacy_level'] ?? null;
+
+                return PublishResult::completed([], $privacy === 'SELF_ONLY'
+                    ? 'TikTok finished the private post. It is not publicly visible.'
+                    : 'TikTok completed the submission but has not supplied a public post URL. Public publication is not confirmed.');
             }
 
             return PublishResult::success($ids);
@@ -479,7 +588,7 @@ class TikTokConnector implements PublishConnector
             if ($reason === 'auth_removed') {
                 return PublishResult::failure(
                     ErrorKind::AuthExpired,
-                    'The TikTok creator removed access while the inbox handoff was processing; reconnect the account.',
+                    'The TikTok creator removed access while the submission was processing; reconnect the account.',
                 );
             }
 
@@ -487,25 +596,30 @@ class TikTokConnector implements PublishConnector
                 // TikTok documents these as retryable. The existing publish_id is
                 // terminal once status is FAILED, so discard it before returning a
                 // retryable result; the next job must initialize a fresh handoff.
+                // Retain delivery mode and explicit creator choices across the new
+                // transfer; an inbox retry must never become a Direct Post.
+                $previous = $state->metadata($media->id);
                 $state->forget($media->id);
+                $state->setMetadata($media->id, array_filter([
+                    'publish_mode' => $previous['publish_mode'] ?? 'inbox',
+                    'post_options' => $previous['post_options'] ?? null,
+                    'privacy_level' => $previous['privacy_level'] ?? null,
+                    'previous_failed_publish_id' => $publishId,
+                ], static fn (mixed $value): bool => $value !== null));
                 $context->target->forceFill(['media_upload_state' => $state->toArray()])->save();
 
                 return PublishResult::failure(
                     ErrorKind::ServerError,
-                    "TikTok could not complete the inbox handoff ({$reason}); retrying with a fresh transfer.",
+                    "TikTok could not complete the submission ({$reason}); retrying with a fresh transfer.",
                     retryAfter: 30,
                 );
             }
 
-            return PublishResult::failure(ErrorKind::Validation, "TikTok could not complete the inbox handoff ({$reason}).");
+            return PublishResult::failure(ErrorKind::Validation, "TikTok could not complete the submission ({$reason}).");
         }
 
         if ($status === 'SEND_TO_USER_INBOX') {
-            return PublishResult::failure(
-                ErrorKind::MediaProcessing,
-                'Video sent to TikTok. Open TikTok to finish the native post.',
-                retryAfter: 60,
-            );
+            return PublishResult::awaitingAction([], 'Uploaded to your TikTok inbox. This is not a live post; it still needs completion in TikTok.');
         }
 
         if (in_array($status, ['PROCESSING_UPLOAD', 'PROCESSING_DOWNLOAD'], true)) {
@@ -538,16 +652,20 @@ class TikTokConnector implements PublishConnector
             ? $detail : null;
         $reason = match ($code) {
             'invalid_param', 'invalid_params' => 'TikTok rejected the upload parameters.',
-            'scope_not_authorized' => 'Reconnect the TikTok account and approve video uploads.',
+            'scope_not_authorized' => 'Reconnect the TikTok account and approve the configured publishing permission.',
             'access_token_invalid' => 'Reconnect the TikTok account to renew access.',
             'spam_risk_too_many_pending_share' => 'Finish or remove pending uploads in TikTok before sending another video.',
             'spam_risk_user_banned_from_posting' => 'TikTok has restricted posting for this account.',
+            'unaudited_client_can_only_post_to_private_accounts' => 'TikTok has not approved this app for public Direct Post. Complete the provider audit; Shoutrrr will not silently change your chosen visibility.',
+            'url_ownership_unverified' => 'Verify the media URL domain or prefix in the TikTok developer app before Direct Post.',
+            'privacy_level_option_mismatch' => 'Refresh the TikTok creator settings and choose one of the permitted visibility options.',
+            'reached_active_user_cap' => 'The TikTok app has reached its active creator limit. Check the developer app access tier.',
             default => 'Check the TikTok developer app status before retrying.',
         };
 
         return PublishResult::failure(
             $failure->errorKind ?? ErrorKind::Unknown,
-            'TikTok could not initialize the inbox upload ('.$code.'). '.($detail !== null ? $detail.' ' : '').$reason,
+            'TikTok could not initialize the submission ('.$code.'). '.($detail !== null ? $detail.' ' : '').$reason,
             $failure->httpStatus,
             json_encode(['code' => $code, 'message' => $detail, 'log_id' => $logId], JSON_THROW_ON_ERROR),
             $failure->retryAfter,
@@ -563,7 +681,7 @@ class TikTokConnector implements PublishConnector
 
         $kind = match (true) {
             $response->status() === 429 || $code === 'rate_limit_exceeded' => ErrorKind::RateLimited,
-            $response->status() === 401 || $code === 'access_token_invalid' => ErrorKind::AuthExpired,
+            $response->status() === 401 || in_array($code, ['access_token_invalid', 'scope_not_authorized'], true) => ErrorKind::AuthExpired,
             $response->status() >= 500 => ErrorKind::ServerError,
             default => ErrorKind::Validation,
         };

@@ -15,6 +15,7 @@ use App\Support\UsageOperation;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Uri;
 
 /**
  * Best-effort reaction metrics for Discord. A webhook can re-fetch the messages
@@ -42,11 +43,16 @@ class DiscordMetricsConnector implements MetricsConnector
 
         foreach ($ids as $id) {
             try {
+                $webhook = Uri::of($webhookUrl);
+                $endpoint = (string) $webhook
+                    ->withPath(rtrim($webhook->path(), '/').'/messages/'.rawurlencode($id))
+                    ->withoutQuery('wait')
+                    ->withoutFragment();
                 $response = $this->http
                     ->timeout(10)
                     ->connectTimeout(5)
                     ->acceptJson()
-                    ->get($webhookUrl.'/messages/'.$id);
+                    ->get($endpoint);
             } catch (ConnectionException $e) {
                 return PostMetricsResult::failed($e->getMessage());
             }

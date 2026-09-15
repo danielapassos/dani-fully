@@ -9,6 +9,8 @@ enum PostTargetStatus: string
     case Pending = 'pending';
     case Publishing = 'publishing';
     case Published = 'published';
+    case AwaitingAction = 'awaiting_action';
+    case Completed = 'completed';
     case Failed = 'failed';
     case Skipped = 'skipped';
     case Deleting = 'deleting';

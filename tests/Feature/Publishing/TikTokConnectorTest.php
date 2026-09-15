@@ -93,6 +93,7 @@ function tiktokStoredUploadContext(PostMedia $video, array $overrides = []): Pub
 
 beforeEach(function () {
     config()->set('services.tiktok.inbox_enabled', true);
+    config()->set('services.tiktok.direct_post_enabled', false);
     Storage::fake('local');
     Http::preventStrayRequests();
 });
@@ -108,7 +109,7 @@ test('tiktok stays fail closed until inbox publishing is explicitly enabled', fu
     Http::assertNothingSent();
 });
 
-test('tiktok transfers one video and keeps the target processing until native finish', function (string $uploadBase) {
+test('tiktok transfers one video and reports inbox delivery without claiming publication', function (string $uploadBase) {
     $uploadUrl = $uploadBase.'?upload_id=test-upload&upload_token=test-upload-secret';
     Http::fake(function (Request $request) use ($uploadUrl) {
         if (str_contains($request->url(), '/inbox/video/init/')) {
@@ -132,8 +133,8 @@ test('tiktok transfers one video and keeps the target processing until native fi
     $context = tiktokPublishContext([$video]);
     $result = tiktokPublishConnector()->publish($context);
 
-    expect($result->errorKind)->toBe(ErrorKind::MediaProcessing)
-        ->and($result->errorMessage)->toContain('Open TikTok')
+    expect($result->outcome)->toBe('awaiting_action')
+        ->and($result->statusMessage)->toContain('not a live post')
         ->and($context->target->fresh()->media_upload_state[$video->id]['remote_ref'])->toBe('publish-42');
 
     Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/inbox/video/init/')
@@ -179,7 +180,7 @@ test('tiktok publishes the placed video while ignoring media excluded for that t
         tiktokPublishContext([$image, $video], [], [0 => [$video]]),
     );
 
-    expect($result->errorKind)->toBe(ErrorKind::MediaProcessing);
+    expect($result->outcome)->toBe('awaiting_action');
     Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/inbox/video/init/'));
 });
 
@@ -330,7 +331,8 @@ test('tiktok clears a failed publish tracker before retrying a documented transi
 
     expect($result->errorKind)->toBe(ErrorKind::ServerError)
         ->and($result->retryAfter)->toBe(30)
-        ->and($context->target->fresh()->media_upload_state)->not->toHaveKey($video->id);
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['publish_mode'])->toBe('inbox')
+        ->and($context->target->fresh()->media_upload_state[$video->id])->not->toHaveKey('remote_ref');
 });
 
 test('tiktok marks removed creator access as an authentication failure', function () {
@@ -406,7 +408,7 @@ test('tiktok uploads one chunk per invocation and merges trailing bytes into the
 
     $context->target->refresh();
     $second = tiktokPublishConnector()->publish($context);
-    expect($second->errorMessage)->toContain('Open TikTok')
+    expect($second->statusMessage)->toContain('not a live post')
         ->and($puts)->toHaveCount(2)
         ->and($puts[1])->toBe([['bytes 8388608-16777224/16777225'], str_repeat('b', $chunk).'remainder']);
     Http::assertSentCount(4);
@@ -436,8 +438,8 @@ test('tiktok declares the complete file size when sending a single chunk with a 
 
     $result = tiktokPublishConnector()->publish($context);
 
-    expect($result->errorKind)->toBe(ErrorKind::MediaProcessing)
-        ->and($result->errorMessage)->toContain('Open TikTok')
+    expect($result->outcome)->toBe('awaiting_action')
+        ->and($result->statusMessage)->toContain('not a live post')
         ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['upload_complete'])->toBeTrue();
     Http::assertSentCount(3);
 })->with(['first byte above chunk' => 8388609, 'failed production video' => 9071797, 'last single chunk size' => 16777215]);
@@ -483,7 +485,7 @@ test('tiktok reconciles a lost or rejected chunk response before deciding which 
     });
     $context->target->refresh();
     $result = tiktokPublishConnector()->publish($context);
-    expect($result->errorKind)->toBe(ErrorKind::MediaProcessing)
+    expect($accepted ? $result->outcome : $result->errorKind)->toBe($accepted ? 'awaiting_action' : ErrorKind::MediaProcessing)
         ->and($context->target->fresh()->media_upload_state[$video->id]['remote_ref'])->toBe('publish-42');
 })->with([
     'lost unaccepted chunk' => ['network', false],
@@ -535,7 +537,8 @@ test('tiktok honors delivery even when an interrupted upload URL has expired', f
 
     $result = tiktokPublishConnector()->publish($context);
 
-    expect($result->isSuccessful())->toBe($status === 'PUBLISH_COMPLETE')
+    expect($result->isSuccessful())->toBeTrue()
+        ->and($result->outcome)->toBe($status === 'PUBLISH_COMPLETE' ? 'completed' : 'awaiting_action')
         ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['upload_complete'])->toBeTrue()
         ->and($context->target->fresh()->media_upload_state[$video->id]['metadata'])->not->toHaveKey('upload_url');
     Http::assertSentCount(1);
@@ -640,7 +643,7 @@ test('tiktok reads only the next authenticated S3 byte range and closes the sour
 
     $result = tiktokPublishConnector()->publish($context);
 
-    expect($result->errorMessage)->toContain('Open TikTok')
+    expect($result->statusMessage)->toContain('not a live post')
         ->and($source->isReadable())->toBeFalse();
     Http::assertSent(fn (Request $request): bool => $request->method() === 'PUT'
         && $request->body() === str_repeat('b', $chunk).'remainder'
@@ -727,7 +730,7 @@ test('tiktok retries transient private storage failures at the same byte range w
 
     $context->target->refresh();
     $second = tiktokPublishConnector()->publish($context);
-    expect($second->errorMessage)->toContain('Open TikTok')
+    expect($second->statusMessage)->toContain('not a live post')
         ->and($context->target->fresh()->media_upload_state[$video->id]['remote_ref'])->toBe('publish-42');
     Http::assertSentCount(2);
 })->with(['timeout', 'server']);

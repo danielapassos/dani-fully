@@ -67,6 +67,19 @@ test('dispatcher never seeds a second chain for an already publishing target', f
     Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
+test('dispatcher never resends a completed nonpublic upload', function (PostTargetStatus $status) {
+    $post = Post::factory()->create(['status' => PostStatus::Completed]);
+    $target = PostTarget::factory()->for($post)->create(['status' => $status]);
+    Bus::fake();
+
+    $dispatcher = app(PublishDispatcher::class);
+    expect($dispatcher->hasRunnableTargets($post))->toBeFalse();
+    $dispatcher->dispatchForPost($post);
+
+    expect($target->fresh()->status)->toBe($status);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+})->with([PostTargetStatus::AwaitingAction, PostTargetStatus::Completed]);
+
 test('dispatcher marks a blocked target failed instead of dispatching it', function () {
     Bus::fake();
 

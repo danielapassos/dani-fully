@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Enums\PostTargetStatus;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Posts\PublishPrecheck;
 use App\Services\Publishing\ManualRetryEligibility;
+use App\Services\Publishing\PostStatusRollup;
 use App\Services\Publishing\TargetMediaSelection;
 
 final class PostView
@@ -23,6 +25,9 @@ final class PostView
 
         $mediaSelection = app(TargetMediaSelection::class);
         $retryEligibility = app(ManualRetryEligibility::class);
+        $status = app(PostStatusRollup::class)->displayStatus($post);
+        $nonPublicOnly = $post->targets->contains(fn (PostTarget $target): bool => in_array($target->publicationStatus(), [PostTargetStatus::AwaitingAction, PostTargetStatus::Completed], true))
+            && ! $post->targets->contains(fn (PostTarget $target): bool => $target->publicationStatus() === PostTargetStatus::Published);
         $issuesByAccount = collect(app(PublishPrecheck::class)->blockingTargets($post))
             ->keyBy('connected_account_id');
         $defaultAccountId = $post->workspace()->value('default_connected_account_id');
@@ -35,10 +40,10 @@ final class PostView
             'base_text' => $post->base_text,
             'segments' => $post->segments,
             'mentions' => $post->mentions ?? [],
-            'status' => $post->status->value,
+            'status' => $status->value,
             'scheduled_at' => $post->scheduled_at?->toIso8601String(),
             'auto_repost' => $post->auto_repost,
-            'published_at' => $post->published_at?->toIso8601String(),
+            'published_at' => $nonPublicOnly ? null : $post->published_at?->toIso8601String(),
             'updated_at' => $post->updated_at->toIso8601String(),
             'destination' => self::destination($post),
             'targets' => $post->targets
@@ -46,6 +51,8 @@ final class PostView
                 ->map(function (PostTarget $target) use ($issuesByAccount, $mediaSelection, $post, $retryEligibility): array {
                     $selection = $mediaSelection->resolve($target, $target->placements);
                     $retry = $retryEligibility->evaluate($target, $post);
+                    $status = $target->publicationStatus();
+                    $projected = $status !== $target->status;
 
                     return [
                         'id' => $target->id,
@@ -66,9 +73,10 @@ final class PostView
                         'content_override' => $target->content_override,
                         'auto_split' => $target->auto_split,
                         'format' => $target->format->value,
-                        'status' => $target->status->value,
-                        'error_kind' => $target->error_kind?->value,
-                        'error_message' => $target->error_message,
+                        'status' => $status->value,
+                        'status_message' => $target->publicationMessage($status),
+                        'error_kind' => $projected ? null : $target->error_kind?->value,
+                        'error_message' => $projected ? null : $target->error_message,
                         'can_retry' => $retry['allowed'],
                         'retry_blocked_reason' => ! $retry['allowed'] && $target->status->isRetryable()
                             ? $retry['reason']

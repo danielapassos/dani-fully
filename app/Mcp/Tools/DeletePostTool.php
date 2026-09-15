@@ -38,7 +38,7 @@ class DeletePostTool extends WorkspaceTool
             return $denied;
         }
 
-        $hadBeenPublished = in_array($post->status, [PostStatus::Published, PostStatus::Partial, PostStatus::Failed], true);
+        $hadBeenPublished = in_array($post->status, [PostStatus::Published, PostStatus::Partial, PostStatus::Failed, PostStatus::AwaitingAction, PostStatus::Completed], true);
         $consequence = $hadBeenPublished
             ? 'This will delete the post from its connected accounts where possible.'
             : 'This will permanently delete the draft.';
@@ -61,7 +61,7 @@ class DeletePostTool extends WorkspaceTool
 
         $post->forceFill(['status' => PostStatus::Deleted->value, 'deleted_at' => now()])->save();
 
-        return Response::text(json_encode(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for published targets.'], JSON_THROW_ON_ERROR));
+        return Response::text(json_encode(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for completed uploads where possible.'], JSON_THROW_ON_ERROR));
     }
 
     /**

@@ -13,6 +13,7 @@ use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
 use App\Services\Publishing\Contracts\PublishConnector;
+use App\Services\Publishing\YouTubePostOptions;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
 use Illuminate\Http\Client\ConnectionException;
@@ -44,7 +45,7 @@ class YouTubeConnector implements PublishConnector
             );
         }
 
-        $options = $this->options();
+        $options = $this->options($context);
         if ($options === null) {
             return PublishResult::failure(
                 ErrorKind::Validation,
@@ -367,6 +368,14 @@ class YouTubeConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::MediaProcessing, 'YouTube is processing the uploaded video.', retryAfter: 15);
         }
 
+        if (
+            ! in_array($uploadStatus, ['', 'processed'], true)
+            || ! in_array($processingStatus, ['', 'succeeded'], true)
+            || ($uploadStatus !== 'processed' && $processingStatus !== 'succeeded')
+        ) {
+            return PublishResult::failure(ErrorKind::ServerError, 'YouTube has not confirmed that video processing completed.');
+        }
+
         if ($privacyStatus === '') {
             return PublishResult::failure(
                 ErrorKind::ServerError,
@@ -381,7 +390,9 @@ class YouTubeConnector implements PublishConnector
             );
         }
 
-        return PublishResult::success([$videoId]);
+        return $privacyStatus === 'public'
+            ? PublishResult::success([$videoId])
+            : PublishResult::completed([$videoId], "Uploaded to YouTube as {$privacyStatus}. This video is not publicly listed.");
     }
 
     /** @return array{0: string, 1: string} */
@@ -407,36 +418,21 @@ class YouTubeConnector implements PublishConnector
     /**
      * @return array{privacyStatus: string, categoryId: string, formatIntent: string, madeForKids: bool, containsSyntheticMedia: bool, hasPaidProductPlacement: bool, notifySubscribers: bool}|null
      */
-    private function options(): ?array
+    private function options(PublishContext $context): ?array
     {
-        $privacy = (string) config('services.youtube.privacy_status');
-        $category = (string) config('services.youtube.category_id');
-        $format = (string) config('services.youtube.format_intent');
-        $madeForKids = config('services.youtube.made_for_kids');
-        $synthetic = config('services.youtube.contains_synthetic_media');
-        $paid = config('services.youtube.has_paid_product_placement');
-        $notify = config('services.youtube.notify_subscribers');
-
-        if (
-            ! in_array($privacy, ['private', 'unlisted', 'public'], true)
-            || ! preg_match('/^\d{1,3}$/', $category)
-            || ! in_array($format, ['video', 'short'], true)
-            || ! is_bool($madeForKids)
-            || ! is_bool($synthetic)
-            || ! is_bool($paid)
-            || ! is_bool($notify)
-        ) {
+        $options = app(YouTubePostOptions::class)->resolve($context->target);
+        if ($options === null) {
             return null;
         }
 
         return [
-            'privacyStatus' => $privacy,
-            'categoryId' => $category,
-            'formatIntent' => $format,
-            'madeForKids' => $madeForKids,
-            'containsSyntheticMedia' => $synthetic,
-            'hasPaidProductPlacement' => $paid,
-            'notifySubscribers' => $notify,
+            'privacyStatus' => $options['privacy_status'],
+            'categoryId' => $options['category_id'],
+            'formatIntent' => $options['format_intent'],
+            'madeForKids' => $options['made_for_kids'],
+            'containsSyntheticMedia' => $options['contains_synthetic_media'],
+            'hasPaidProductPlacement' => $options['has_paid_product_placement'],
+            'notifySubscribers' => $options['notify_subscribers'],
         ];
     }
 

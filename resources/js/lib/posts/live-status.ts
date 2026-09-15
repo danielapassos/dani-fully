@@ -17,12 +17,16 @@ export function postLiveStatus(
                 : 'Scheduled';
         case 'publishing':
             return 'Publishing now…';
+        case 'awaiting_action':
+            return 'Action needed on the connected platform';
+        case 'completed':
+            return 'Upload complete';
         case 'published':
             return post.published_at
                 ? `Published ${dayjs(post.published_at).fromNow()}`
                 : 'Published';
         case 'partial':
-            return 'Partially published';
+            return 'Partially completed';
         case 'failed':
             return 'Failed to publish';
         case 'missed':

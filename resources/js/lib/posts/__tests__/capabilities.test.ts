@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { postCapabilities, targetCanRetry } from '@/lib/posts/capabilities';
+import {
+    postCapabilities,
+    postDeletionDescription,
+    targetCanRetry,
+} from '@/lib/posts/capabilities';
 import type { PostView } from '@/types/compose';
 
 function post(partial: Partial<PostView>): PostView {
@@ -19,6 +23,36 @@ function post(partial: Partial<PostView>): PostView {
 }
 
 describe('postCapabilities', () => {
+    it.each(['awaiting_action', 'completed'] as const)(
+        '%s allows deletion and duplication but never retry or another publish',
+        (status) => {
+            const target = {
+                status,
+                can_retry: true,
+            } as PostView['targets'][number];
+            const delivered = post({ status, targets: [target] });
+
+            expect(postCapabilities(delivered)).toEqual({
+                canDelete: true,
+                canDuplicate: true,
+                canEdit: false,
+                canSchedule: false,
+                canReschedule: false,
+                canUnschedule: false,
+                canRetry: false,
+            });
+            expect(targetCanRetry(target)).toBe(false);
+            expect(postDeletionDescription(delivered)).toBe(
+                'This removes the Shoutrrr record and deletes the connected upload where the platform supports it. Inbox transfers may still need removal in TikTok.',
+            );
+            expect(
+                postDeletionDescription(
+                    post({ status: 'partial', targets: [target] }),
+                ),
+            ).not.toContain('Published copies');
+        },
+    );
+
     it('draft: edit/schedule/delete, no duplicate', () => {
         const c = postCapabilities(post({ status: 'draft' }));
         expect(c).toMatchObject({

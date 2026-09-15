@@ -7,13 +7,15 @@ import { PlatformGlyphStack } from '@/components/common/platform-glyph-stack';
 import type { PostRowData } from '@/components/posts/post-row';
 import { useSchedulingTimezone } from '@/hooks/posts/use-scheduling-timezone';
 import { toUserTz } from '@/lib/datetime/dayjs';
+import { postCalendarTimestamp } from '@/lib/posts/status';
 import { cn } from '@/lib/utils';
 
-type Tone = 'scheduled' | 'published' | 'failed';
+type Tone = 'scheduled' | 'published' | 'awaiting_action' | 'failed';
 
 function toneOf(status: PostRowData['status']): Tone {
     if (status === 'failed' || status === 'partial') return 'failed';
-    if (status === 'published') return 'published';
+    if (status === 'published' || status === 'completed') return 'published';
+    if (status === 'awaiting_action') return 'awaiting_action';
     return 'scheduled';
 }
 
@@ -29,6 +31,11 @@ const toneStyles: Record<
     published: {
         chip: 'bg-muted text-muted-foreground hover:bg-muted/80',
         strip: 'bg-muted-foreground/40',
+        pulse: false,
+    },
+    awaiting_action: {
+        chip: 'bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-300',
+        strip: 'bg-amber-500',
         pulse: false,
     },
     failed: {
@@ -53,9 +60,8 @@ export function PostChip({
         });
 
     const tz = useSchedulingTimezone();
-    const when = post.scheduled_at
-        ? toUserTz(post.scheduled_at, tz).format('h:mma')
-        : '';
+    const at = postCalendarTimestamp(post);
+    const when = at ? toUserTz(at, tz).format('h:mma') : '';
     const tone = toneStyles[toneOf(post.status)];
     const targetCount = post.target_count ?? 0;
     const label = post.base_text || 'Untitled';

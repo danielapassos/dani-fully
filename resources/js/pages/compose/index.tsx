@@ -20,8 +20,16 @@ export default function ComposePage({
 }: ComposePageProps) {
     const { features } = usePage().props;
     const title = firstLineTitle(post?.segments ?? ['']);
-    const isPublished = Boolean(
-        post && post.targets.some((t) => t.status === 'published'),
+    const hasDeliveryDetails = Boolean(
+        post &&
+        (post.status === 'awaiting_action' ||
+            post.status === 'completed' ||
+            post.targets.some(
+                (t) =>
+                    t.status === 'published' ||
+                    t.status === 'awaiting_action' ||
+                    t.status === 'completed',
+            )),
     );
     usePostStatusPoll(post);
 
@@ -53,7 +61,7 @@ export default function ComposePage({
                     {post && <PostPageActions post={post} />}
                 </div>
 
-                {post && isPublished ? (
+                {post && hasDeliveryDetails ? (
                     <PublishedPostView
                         post={post}
                         showMetrics={Boolean(features?.analytics)}

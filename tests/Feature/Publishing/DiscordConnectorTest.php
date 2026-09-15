@@ -18,7 +18,7 @@ const DISCORD_HOOK = 'https://discord.com/api/webhooks/1/tok';
  * @param  list<PostMedia>  $media
  * @param  array<string, mixed>  $targetOverrides
  */
-function discordContext(array $segments, array $media = [], array $targetOverrides = []): PublishContext
+function discordContext(array $segments, array $media = [], array $targetOverrides = [], string $webhookUrl = DISCORD_HOOK): PublishContext
 {
     $target = PostTarget::factory()->create(array_merge(['platform' => Platform::Discord->value], $targetOverrides));
     $account = ConnectedAccount::factory()->create([
@@ -31,7 +31,7 @@ function discordContext(array $segments, array $media = [], array $targetOverrid
         segments: $segments,
         media: $media,
         account: $account,
-        credentials: ['webhook_url' => DISCORD_HOOK],
+        credentials: ['webhook_url' => $webhookUrl],
     );
 }
 
@@ -56,6 +56,40 @@ test('discord treats a lost webhook response as an unconfirmed outcome', functio
         ->and($result->errorKind?->isRetryable())->toBeFalse()
         ->and($result->errorMessage)->toContain('check Discord');
 });
+
+test('discord preserves the webhook thread and requires a saved-message receipt', function (string $query, bool $withMedia) {
+    $media = [];
+    if ($withMedia) {
+        Storage::fake('public');
+        Storage::disk('public')->put('media/thread.jpg', 'thread-image-bytes');
+        $media[] = PostMedia::factory()->create(['disk' => 'public', 'path' => 'media/thread.jpg', 'mime' => 'image/jpeg']);
+    }
+
+    Http::fake([DISCORD_HOOK.'*' => Http::response(['id' => 'thread-message'])]);
+
+    $result = app(DiscordPublishConnector::class)->publish(
+        discordContext(['hello thread'], $media, webhookUrl: DISCORD_HOOK.$query),
+    );
+
+    expect($result->isSuccessful())->toBeTrue()
+        ->and($result->remoteIds)->toBe(['thread-message']);
+
+    Http::assertSentCount(1);
+    Http::assertSent(function ($request) use ($withMedia): bool {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+
+        return $request->method() === 'POST'
+            && parse_url($request->url(), PHP_URL_PATH) === '/api/webhooks/1/tok'
+            && $parameters === ['thread_id' => '123456789', 'wait' => 'true']
+            && ($withMedia
+                ? str_contains($request->body(), 'thread-image-bytes')
+                : $request['content'] === 'hello thread');
+    });
+})->with([
+    'text in existing thread' => ['?thread_id=123456789', false],
+    'override disabled receipt' => ['?thread_id=123456789&wait=false', false],
+    'attachment in existing thread' => ['?thread_id=123456789&wait=false', true],
+]);
 
 test('discord posts each segment as its own sequential message and accumulates remote_ids', function () {
     Http::fake([DISCORD_HOOK.'?wait=true' => Http::sequence()
@@ -217,4 +251,27 @@ test('discord delete removes each message best-effort', function () {
 
     Http::assertSent(fn ($request) => str_contains($request->url(), '/messages/m1') && $request->method() === 'DELETE');
     Http::assertSent(fn ($request) => str_contains($request->url(), '/messages/m2') && $request->method() === 'DELETE');
+});
+
+test('discord deletes messages in the existing webhook thread', function () {
+    Http::fake([
+        DISCORD_HOOK.'/messages/m1?thread_id=123456789' => Http::response([], 204),
+        DISCORD_HOOK.'/messages/m2?thread_id=123456789' => Http::response([], 404),
+    ]);
+
+    $target = PostTarget::factory()->create([
+        'platform' => Platform::Discord->value,
+        'remote_id' => 'm1',
+        'remote_ids' => ['m1', 'm2'],
+    ]);
+
+    app(DiscordPublishConnector::class)->delete($target, [
+        'webhook_url' => DISCORD_HOOK.'?thread_id=123456789&wait=false',
+    ]);
+
+    Http::assertSentCount(2);
+    foreach (['m1', 'm2'] as $id) {
+        Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
+            && $request->url() === DISCORD_HOOK.'/messages/'.$id.'?thread_id=123456789');
+    }
 });

@@ -2,11 +2,7 @@ import { Link } from '@inertiajs/react';
 import { useState } from 'react';
 
 import { FilterTabs } from '@/components/common/filter-tabs';
-import {
-    PostRow,
-    type PostRowData,
-    type PostStatus,
-} from '@/components/posts/post-row';
+import { PostRow, type PostRowData } from '@/components/posts/post-row';
 import {
     Empty,
     EmptyDescription,
@@ -27,18 +23,26 @@ const FILTERS: { id: FilterId; label: string }[] = [
 ];
 
 /** Collapse a real status onto the dashboard's coarse filter buckets. */
-function filterBucket(status: PostStatus): FilterId | null {
-    switch (status) {
+function filterBucket(
+    post: Pick<PostRowData, 'status' | 'targets'>,
+): FilterId | null {
+    switch (post.status) {
         case 'scheduled':
         case 'publishing':
         case 'missed':
             return 'scheduled';
         case 'published':
-        case 'partial':
         case 'failed':
             return 'published';
+        case 'partial':
+            return post.targets?.some((target) => target.status === 'published')
+                ? 'published'
+                : 'all';
         case 'draft':
             return 'draft';
+        case 'awaiting_action':
+        case 'completed':
+            return 'all';
         default:
             return null;
     }
@@ -47,11 +51,11 @@ function filterBucket(status: PostStatus): FilterId | null {
 export function RecentFeed({ posts }: { posts: PostRowData[] }) {
     const [tab, setTab] = useState<FilterId>('all');
 
-    const rows = posts.filter((post) => filterBucket(post.status) !== null);
+    const rows = posts.filter((post) => filterBucket(post) !== null);
     const filtered =
         tab === 'all'
             ? rows
-            : rows.filter((post) => filterBucket(post.status) === tab);
+            : rows.filter((post) => filterBucket(post) === tab);
 
     const tabs = FILTERS.map((filter) => ({
         value: filter.id,
@@ -59,7 +63,7 @@ export function RecentFeed({ posts }: { posts: PostRowData[] }) {
         count:
             filter.id === 'all'
                 ? rows.length
-                : rows.filter((post) => filterBucket(post.status) === filter.id)
+                : rows.filter((post) => filterBucket(post) === filter.id)
                       .length,
     }));
 

@@ -22,8 +22,17 @@ const STATUS_CHIP: Record<string, { label: string; className: string }> = {
         className:
             'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500 ring-emerald-500/20',
     },
+    awaiting_action: {
+        label: 'Action needed',
+        className:
+            'bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-amber-500/20',
+    },
+    completed: {
+        label: 'Upload complete',
+        className: 'bg-muted text-muted-foreground ring-border',
+    },
     partial: {
-        label: 'Partly out',
+        label: 'Partially completed',
         className:
             'bg-amber-500/10 text-amber-600 dark:text-amber-500 ring-amber-500/20',
     },
@@ -52,7 +61,13 @@ const STATUS_CHIP: Record<string, { label: string; className: string }> = {
     },
 };
 
-export function StatusChip({ status }: { status: string | null }) {
+export function StatusChip({
+    status,
+    platform,
+}: {
+    status: string | null;
+    platform?: string;
+}) {
     // 'pending' is resting state of an unpublished target — not meaningful to viewers.
     if (!status || status === 'pending') {
         return null;
@@ -69,7 +84,9 @@ export function StatusChip({ status }: { status: string | null }) {
             )}
         >
             <span className="size-1.5 rounded-full bg-current" />
-            {meta.label}
+            {status === 'awaiting_action' && platform === 'tiktok'
+                ? 'In TikTok inbox'
+                : meta.label}
         </span>
     );
 }
@@ -200,7 +217,7 @@ function PlatformCard({
                         </p>
                     </div>
                 </div>
-                <StatusChip status={target.status} />
+                <StatusChip status={target.status} platform={target.platform} />
             </div>
 
             <div className="mt-4 space-y-2.5">

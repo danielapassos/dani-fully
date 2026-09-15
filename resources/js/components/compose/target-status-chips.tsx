@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/tooltip';
 import {
     type TargetTone,
+    targetStatusMessage,
     targetStatusMeta,
 } from '@/lib/compose/publish-status';
 import { targetCanRetry } from '@/lib/posts/capabilities';
@@ -21,6 +22,7 @@ const TONE_CLASS: Record<TargetTone, string> = {
     pending: 'bg-muted text-muted-foreground',
     active: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
     success: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500',
+    warning: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
     error: 'bg-destructive/10 text-destructive',
     muted: 'bg-muted text-muted-foreground',
 };
@@ -35,6 +37,7 @@ export type ChipTarget = Pick<
     | 'id'
     | 'platform'
     | 'status'
+    | 'status_message'
     | 'error_kind'
     | 'error_message'
     | 'can_retry'
@@ -67,7 +70,8 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
     return (
         <ul className="flex flex-col gap-1.5">
             {targets.map((target) => {
-                const meta = targetStatusMeta(target.status);
+                const meta = targetStatusMeta(target.status, target.platform);
+                const statusMessage = targetStatusMessage(target);
                 const isFailed = target.status === 'failed';
                 const isSkipped = target.status === 'skipped';
                 const canRetry = targetCanRetry(target);
@@ -106,7 +110,7 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
                 return (
                     <li
                         key={target.id}
-                        className="flex items-center gap-2 text-[12px]"
+                        className="flex flex-wrap items-center gap-2 text-[12px]"
                     >
                         <span
                             aria-hidden="true"
@@ -235,6 +239,11 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
                                     aria-hidden="true"
                                 />
                             </a>
+                        )}
+                        {statusMessage && (
+                            <p className="basis-full pl-6 leading-relaxed text-muted-foreground">
+                                {statusMessage}
+                            </p>
                         )}
                     </li>
                 );

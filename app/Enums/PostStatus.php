@@ -10,6 +10,8 @@ enum PostStatus: string
     case Scheduled = 'scheduled';
     case Publishing = 'publishing';
     case Published = 'published';
+    case AwaitingAction = 'awaiting_action';
+    case Completed = 'completed';
     case Partial = 'partial';
     case Failed = 'failed';
     case Missed = 'missed';
@@ -22,7 +24,9 @@ enum PostStatus: string
             self::Scheduled => 'Scheduled',
             self::Publishing => 'Publishing',
             self::Published => 'Published',
-            self::Partial => 'Partially published',
+            self::AwaitingAction => 'Action needed',
+            self::Completed => 'Upload complete',
+            self::Partial => 'Partially completed',
             self::Failed => 'Failed',
             self::Missed => 'Missed',
             self::Deleted => 'Deleted',

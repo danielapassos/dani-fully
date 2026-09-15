@@ -13,8 +13,10 @@ use App\Jobs\DeletePostTarget;
 use App\Models\Post;
 use App\Models\PostTarget;
 use App\Models\User;
+use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Posts\DraftService;
 use App\Services\Posts\PostStaleWriteException;
+use App\Services\Publishing\YouTubePostOptions;
 use App\Support\CursorPage;
 use App\Support\PostListItem;
 use App\Support\PostView;
@@ -30,7 +32,7 @@ class PostsController extends Controller
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'status' => ['nullable', 'string', 'in:draft,scheduled,publishing,published,partial,failed,deleted'],
+            'status' => ['nullable', 'string', Rule::enum(PostStatus::class)],
             'q' => ['nullable', 'string', 'max:200'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
@@ -73,6 +75,15 @@ class PostsController extends Controller
             'destination.kind' => ['required', Rule::in(['all', 'set', 'account'])],
             'destination.id' => ['nullable', 'string', 'required_if:destination.kind,set,account'],
             'auto_repost' => ['sometimes', 'nullable', 'boolean'],
+            'targets' => ['array'],
+            'targets.*.connected_account_id' => ['required', 'string'],
+            'targets.*.content_override' => ['nullable', 'array'],
+            'targets.*.content_override.segments' => ['array'],
+            'targets.*.content_override.segments.*' => ['nullable', 'string'],
+            'targets.*.content_override.media_ids' => ['array'],
+            'targets.*.content_override.media_ids.*' => ['string'],
+            ...TikTokPostOptions::draftRules(),
+            ...YouTubePostOptions::draftRules(),
         ]);
 
         /** @var User $user */
@@ -89,6 +100,7 @@ class PostsController extends Controller
             $segments,
             $validated['mentions'] ?? [],
             $validated['auto_repost'] ?? null,
+            DraftData::fromArray($validated),
         );
 
         return response()->json(['post' => PostView::make($post->fresh(['targets.account', 'media']))], 201);
@@ -126,6 +138,8 @@ class PostsController extends Controller
             'targets.*.content_override.segments.*' => ['nullable', 'string'],
             'targets.*.content_override.media_ids' => ['array'],
             'targets.*.content_override.media_ids.*' => ['string'],
+            ...TikTokPostOptions::draftRules(),
+            ...YouTubePostOptions::draftRules(),
             'targets.*.segment_breaks' => ['nullable', 'array'],
             'targets.*.segment_breaks.*' => ['string'],
             'targets.*.placements' => ['nullable', 'array'],
@@ -158,7 +172,7 @@ class PostsController extends Controller
         $model = $this->findPostOrFail($id);
         $this->authorize('delete', $model);
 
-        $hadBeenPublished = in_array($model->status, [PostStatus::Published, PostStatus::Partial, PostStatus::Failed], true);
+        $hadBeenPublished = in_array($model->status, [PostStatus::Published, PostStatus::Partial, PostStatus::Failed, PostStatus::AwaitingAction, PostStatus::Completed], true);
 
         $model->loadMissing('targets');
 
@@ -174,6 +188,6 @@ class PostsController extends Controller
 
         $model->forceFill(['status' => PostStatus::Deleted->value, 'deleted_at' => now()])->save();
 
-        return response()->json(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for published targets.']);
+        return response()->json(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for completed uploads where possible.']);
     }
 }

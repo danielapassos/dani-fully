@@ -18,6 +18,7 @@ use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\Notification;
 
 test('successful publish marks the target published with remote ids', function () {
     $target = publishTarget(['one', 'two']);
@@ -39,6 +40,124 @@ test('successful publish marks the target published with remote ids', function (
     expect(PostTargetAttempt::where('post_target_id', $target->id)->where('status', 'published')->count())->toBe(1);
     expect($target->post->refresh()->status)->toBe(PostStatus::Published);
 });
+
+test('a completed handoff stops processing without announcing a public post or sending it again', function (string $outcome, array $remoteIds) {
+    $target = publishTarget(['one']);
+    $target->forceFill([
+        'media_upload_state' => ['media-1' => ['remote_ref' => 'upload-operation', 'state' => 'processing']],
+        'next_attempt_at' => now()->addMinute(),
+    ])->save();
+    Bus::fake();
+    Notification::fake();
+    $message = $outcome === 'awaiting_action' ? 'Open TikTok to finish posting; this is not live.' : 'Uploaded privately.';
+    bindConnector($outcome === 'awaiting_action'
+        ? PublishResult::awaitingAction($remoteIds, $message)
+        : PublishResult::completed($remoteIds, $message));
+
+    $job = new PublishPostTarget($target);
+    $job->handle(app(PublishConnectorRegistry::class), app(TokenManager::class), app(PostStatusRollup::class), app(BackoffSchedule::class));
+
+    $target->refresh();
+    expect($target->status->value)->toBe($outcome)
+        ->and($target->post->refresh()->status->value)->toBe($outcome)
+        ->and($target->posted_at)->toBeNull()
+        ->and($target->post->published_at)->toBeNull()
+        ->and($target->remote_ids)->toBe($remoteIds)
+        ->and($target->remote_id)->toBe($remoteIds[0] ?? null)
+        ->and(data_get($target->media_upload_state, 'media-1.remote_ref'))->toBe('upload-operation')
+        ->and(data_get($target->media_upload_state, 'publication.message'))->toBe($message)
+        ->and($target->next_attempt_at)->toBeNull()
+        ->and($target->canRetryManually())->toBeFalse();
+    expect($target->attemptLogs()->sole()->status)->toBe($outcome);
+
+    bindConnector(fn () => throw new RuntimeException('completed transfers must not run again'));
+    $job->handle(app(PublishConnectorRegistry::class), app(TokenManager::class), app(PostStatusRollup::class), app(BackoffSchedule::class));
+    $job->failed(new RuntimeException('stale queue callback'));
+
+    expect($target->fresh()->status->value)->toBe($outcome);
+    Notification::assertNothingSent();
+    Bus::assertNotDispatched(PublishPostTarget::class);
+})->with([
+    'TikTok inbox' => ['awaiting_action', []],
+    'private YouTube video' => ['completed', ['video_42']],
+    'TikTok without public id' => ['completed', []],
+]);
+
+test('legacy confirmed TikTok inbox evidence is reconciled without invoking the connector', function () {
+    $target = publishTarget(['one']);
+    $target->forceFill([
+        'platform' => Platform::TikTok,
+        'status' => PostTargetStatus::Publishing,
+        'media_upload_state' => ['media-1' => ['remote_ref' => 'legacy-inbox-operation', 'metadata' => ['upload_complete' => true]]],
+        'next_attempt_at' => now()->addMinute(),
+    ])->save();
+    PostTargetAttempt::create([
+        'post_target_id' => $target->id,
+        'attempt_no' => 1,
+        'status' => 'retrying',
+        'error_kind' => ErrorKind::MediaProcessing,
+        'error_message' => 'Video sent to TikTok. Open TikTok to finish the native post.',
+        'started_at' => now(),
+        'finished_at' => now(),
+    ]);
+    Bus::fake();
+    Notification::fake();
+    bindConnector(fn () => throw new RuntimeException('must not resend an inbox delivery'));
+
+    (new PublishPostTarget($target))->handle(app(PublishConnectorRegistry::class), app(TokenManager::class), app(PostStatusRollup::class), app(BackoffSchedule::class));
+
+    expect($target->refresh()->status)->toBe(PostTargetStatus::AwaitingAction)
+        ->and($target->remote_id)->toBeNull()
+        ->and(data_get($target->media_upload_state, 'media-1.remote_ref'))->toBe('legacy-inbox-operation')
+        ->and($target->next_attempt_at)->toBeNull()
+        ->and($target->post->refresh()->status)->toBe(PostStatus::AwaitingAction);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+    Notification::assertNothingSent();
+});
+
+test('a YouTube upload id alone cannot reconcile a dead worker as publicly published', function () {
+    $target = publishTarget(['one']);
+    $target->forceFill([
+        'platform' => Platform::YouTube,
+        'status' => PostTargetStatus::Publishing,
+        'remote_id' => 'video_42',
+        'remote_ids' => ['video_42'],
+        'attempts' => 1,
+    ])->save();
+    Bus::fake();
+    Notification::fake();
+
+    (new PublishPostTarget($target))->failed(new RuntimeException('worker died before checking processing and privacy'));
+
+    expect($target->refresh()->status)->toBe(PostTargetStatus::Publishing)
+        ->and($target->posted_at)->toBeNull();
+    Bus::assertDispatched(PublishPostTarget::class);
+    Notification::assertNothingSent();
+});
+
+test('a retained TikTok transfer may finish polling with its original upload grant', function (bool $hasReference) {
+    config()->set('services.tiktok.direct_post_enabled', true);
+    $target = publishTarget(['one']);
+    $target->forceFill([
+        'platform' => Platform::TikTok,
+        'media_upload_state' => $hasReference ? ['media-1' => ['remote_ref' => 'existing-operation']] : null,
+    ])->save();
+    $target->account()->firstOrFail()->forceFill([
+        'platform' => Platform::TikTok,
+        'capabilities' => ['oauth_scopes' => ['video.upload']],
+    ])->save();
+    $calls = 0;
+    bindConnector(function () use (&$calls): PublishResult {
+        $calls++;
+
+        return PublishResult::awaitingAction([], 'Open TikTok to finish posting.');
+    });
+
+    (new PublishPostTarget($target))->handle(app(PublishConnectorRegistry::class), app(TokenManager::class), app(PostStatusRollup::class), app(BackoffSchedule::class));
+
+    expect($calls)->toBe($hasReference ? 1 : 0)
+        ->and($target->refresh()->status)->toBe($hasReference ? PostTargetStatus::AwaitingAction : PostTargetStatus::Skipped);
+})->with([true, false]);
 
 test('retryable failure schedules a retry and re-dispatches', function () {
     Bus::fake();

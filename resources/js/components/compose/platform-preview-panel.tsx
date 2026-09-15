@@ -79,7 +79,7 @@ function previewSummary(preview: PlatformPreview): string {
     }
 
     if (preview.platform === 'tiktok') {
-        return 'Sent to your TikTok inbox so you can finish it in TikTok.';
+        return 'Uses the TikTok delivery mode and visibility shown in publishing settings.';
     }
 
     if (preview.platform === 'youtube') {

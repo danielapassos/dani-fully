@@ -1,5 +1,11 @@
 import { replaceMentionTokens } from '@/lib/compose/mentions';
 import { measure } from '@/lib/compose/section-split';
+import {
+    TIKTOK_ISSUE_MESSAGES,
+    tiktokIssues,
+    type TikTokIssue,
+} from '@/lib/compose/tiktok';
+import { youtubeOptionsComplete } from '@/lib/compose/youtube';
 import { platformLabel } from '@/lib/platforms';
 import type {
     Account,
@@ -8,9 +14,14 @@ import type {
     PlatformLimits,
     PlatformName,
     PostFormat,
+    YouTubePostOptions,
+    TikTokCreatorInfo,
+    TikTokPostOptions,
 } from '@/types/compose';
 
 export type BlockReason =
+    | TikTokIssue
+    | 'youtube_options_required'
     | 'empty'
     | 'publishing_unavailable'
     | 'media_required'
@@ -156,6 +167,9 @@ type PrecheckDestinationsInput = {
     placementsByAccount?: Record<string, Record<string, string[]>>;
     /** Ordered segment break ids used to resolve placement refs. */
     segmentBreaks?: string[];
+    youtubeByAccount?: Record<string, YouTubePostOptions>;
+    tiktokByAccount?: Record<string, TikTokPostOptions>;
+    tiktokCreatorByAccount?: Record<string, TikTokCreatorInfo | null>;
 };
 
 /**
@@ -223,6 +237,9 @@ export function precheckDestinations({
     placements,
     placementsByAccount,
     segmentBreaks = [],
+    youtubeByAccount,
+    tiktokByAccount,
+    tiktokCreatorByAccount,
 }: PrecheckDestinationsInput): AccountBlock[] {
     const blocks: AccountBlock[] = [];
     for (const account of accounts) {
@@ -252,6 +269,26 @@ export function precheckDestinations({
             format: formatByAccount[account.id] ?? 'feed',
             limits: platformLimits,
         });
+        if (
+            account.platform === 'youtube' &&
+            youtubeByAccount !== undefined &&
+            !youtubeOptionsComplete(youtubeByAccount[account.id])
+        ) {
+            reasons.push('youtube_options_required');
+        }
+        if (
+            account.platform === 'tiktok' &&
+            account.tiktok_direct_post_enabled
+        ) {
+            reasons.push(
+                ...tiktokIssues(
+                    tiktokByAccount?.[account.id],
+                    tiktokCreatorByAccount?.[account.id],
+                    targetMedia.find((item) => item.kind === 'video')
+                        ?.duration_seconds,
+                ),
+            );
+        }
         if (reasons.length > 0) {
             blocks.push({
                 accountId: account.id,
@@ -273,6 +310,8 @@ export function describeReason(
     limits: PlatformLimits,
     publishingUnavailableReason?: string | null,
 ): string {
+    if (reason in TIKTOK_ISSUE_MESSAGES)
+        return TIKTOK_ISSUE_MESSAGES[reason as TikTokIssue];
     const label = platformLabel(platform);
     switch (reason) {
         case 'empty':
@@ -312,7 +351,11 @@ export function describeReason(
             return `${label} allows only one GIF and won't mix it with other media`;
         case 'reels_requires_video':
             return `${label} Reels need a video`;
+        case 'youtube_options_required':
+            return 'Choose YouTube visibility, format, audience, and disclosure settings before publishing.';
         case 'story_requires_media':
             return `${label} Stories need an image or video`;
+        default:
+            return 'review the publishing settings';
     }
 }

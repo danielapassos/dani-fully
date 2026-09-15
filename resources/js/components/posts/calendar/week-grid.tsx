@@ -6,6 +6,7 @@ import type { PostRowData } from '@/components/posts/post-row';
 import { useSchedulingTimezone } from '@/hooks/posts/use-scheduling-timezone';
 import { dayjs, toUserTz, weekRange } from '@/lib/datetime/dayjs';
 import type { Dayjs } from '@/lib/datetime/dayjs';
+import { postCalendarTimestamp } from '@/lib/posts/status';
 import { cn } from '@/lib/utils';
 
 import { PostChip } from './post-chip';
@@ -52,7 +53,7 @@ export function WeekGrid({
 
     const byCell = new Map<string, PostRowData[]>();
     for (const p of posts) {
-        const at = p.scheduled_at ?? p.published_at;
+        const at = postCalendarTimestamp(p);
         if (!at) continue;
         const d = toUserTz(at, tz);
         const key = `${d.format('YYYY-MM-DD')}-${d.hour()}`;

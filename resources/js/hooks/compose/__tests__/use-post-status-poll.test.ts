@@ -74,6 +74,32 @@ afterEach(() => {
 });
 
 describe('usePostStatusPoll', () => {
+    it.each(['awaiting_action', 'completed'] as const)(
+        'stops after %s and does not restart for a terminal upload',
+        (status) => {
+            act(() => {
+                root?.render(
+                    createElement(Harness, {
+                        value: post(
+                            [target('first', 'publishing')],
+                            'publishing',
+                        ),
+                    }),
+                );
+            });
+            act(() => {
+                root?.render(
+                    createElement(Harness, {
+                        value: post([target('first', status)], status),
+                    }),
+                );
+            });
+
+            expect(start).toHaveBeenCalledOnce();
+            expect(stop).toHaveBeenCalledOnce();
+        },
+    );
+
     it('keeps polling after the first target publishes while another is queued', () => {
         act(() => {
             root?.render(

@@ -12,6 +12,7 @@ use App\Enums\ErrorKind;
 use App\Enums\Platform;
 use App\Enums\PostTargetStatus;
 use App\Exceptions\TokenRefreshException;
+use App\Models\ConnectedAccount;
 use App\Models\PostTarget;
 use App\Models\PostTargetAttempt;
 use App\Notifications\AccountNeedsAttentionNotification;
@@ -65,6 +66,8 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     private const array TERMINAL = [
         PostTargetStatus::Published,
+        PostTargetStatus::AwaitingAction,
+        PostTargetStatus::Completed,
         PostTargetStatus::Failed,
         PostTargetStatus::Skipped,
         PostTargetStatus::Deleting,
@@ -118,6 +121,10 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $target = $this->target->fresh() ?? $this->target;
         $this->target = $target;
 
+        if ($this->reconcileRecordedOutcome($target, $rollup)) {
+            return;
+        }
+
         // Guard against a stale delayed retry or a double dispatch firing after the
         // target already reached a terminal state: doing nothing keeps it a no-op.
         if (in_array($target->status, self::TERMINAL, true)) {
@@ -162,7 +169,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         // Re-check provider flags and upload scopes at execution time. They can
         // change after the request was queued, and the connector must not be the
         // first place an unavailable publishing capability is discovered.
-        if ($account->status === ConnectedAccountStatus::Active && ! $account->canPublish()) {
+        if ($account->status === ConnectedAccountStatus::Active && ! $account->canPublish() && ! $this->canPollExistingTikTokTransfer($target, $account)) {
             $target->forceFill([
                 'status' => PostTargetStatus::Skipped->value,
                 'error_kind' => null,
@@ -233,7 +240,9 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
             }
         }
 
-        if ($result->isSuccessful()) {
+        if ($result->isSuccessful() && in_array($result->outcome, ['awaiting_action', 'completed'], true)) {
+            $this->onNonPublicCompletion($target, $attempt, $result);
+        } elseif ($result->isSuccessful()) {
             $this->onSuccess($target, $attempt, $result);
         } else {
             $this->onFailure($target, $attempt, $result, $backoff);
@@ -265,6 +274,10 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
     {
         $target = $this->target->fresh() ?? $this->target;
 
+        if ($this->reconcileRecordedOutcome($target, app(PostStatusRollup::class))) {
+            return;
+        }
+
         if (in_array($target->status, self::TERMINAL, true)) {
             return;
         }
@@ -272,7 +285,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $segmentCount = count($target->sections ?? []);
         $postedCount = count($this->postedRemoteIds($target));
 
-        if ($segmentCount > 0 && $postedCount >= $segmentCount) {
+        if ($target->platform !== Platform::YouTube && $segmentCount > 0 && $postedCount >= $segmentCount) {
             $this->reconcilePublished($target);
 
             return;
@@ -479,6 +492,72 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         ])->save();
 
         $this->notifyPublished($target);
+    }
+
+    private function reconcileRecordedOutcome(PostTarget $target, PostStatusRollup $rollup): bool
+    {
+        $status = $target->publicationStatus();
+        if ($status === $target->status || ! in_array($status, [PostTargetStatus::AwaitingAction, PostTargetStatus::Completed], true)) {
+            return false;
+        }
+
+        $this->onNonPublicCompletion($target, null, new PublishResult(
+            remoteIds: [],
+            outcome: $status->value,
+            statusMessage: $target->publicationMessage(),
+        ));
+        $rollup->recompute($target->post()->firstOrFail());
+
+        return true;
+    }
+
+    private function canPollExistingTikTokTransfer(PostTarget $target, ConnectedAccount $account): bool
+    {
+        if ($target->platform !== Platform::TikTok) {
+            return false;
+        }
+
+        $scopes = $account->capabilities['oauth_scopes'] ?? [];
+        if (! is_array($scopes) || array_intersect(['video.upload', 'video.publish'], $scopes) === []) {
+            return false;
+        }
+
+        foreach ($target->media_upload_state ?? [] as $entry) {
+            if (is_array($entry) && is_string($entry['remote_ref'] ?? null) && $entry['remote_ref'] !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function onNonPublicCompletion(PostTarget $target, ?PostTargetAttempt $attempt, PublishResult $result): void
+    {
+        $state = $target->media_upload_state ?? [];
+        $state['publication'] = ['status' => $result->outcome, 'message' => $result->statusMessage];
+        $existingIds = $target->remote_ids ?? array_filter([$target->remote_id]);
+        $remoteIds = array_values(array_unique([...$existingIds, ...$result->remoteIds]));
+
+        $target->forceFill([
+            'status' => $result->outcome,
+            'media_upload_state' => $state,
+            'remote_id' => $remoteIds[0] ?? $target->remote_id,
+            'remote_ids' => $remoteIds,
+            'posted_at' => null,
+            'error_kind' => null,
+            'error_message' => null,
+            'next_attempt_at' => null,
+        ])->save();
+
+        if ($attempt !== null) {
+            $attempt->forceFill([
+                'status' => $result->outcome,
+                'http_status' => $result->httpStatus,
+                'finished_at' => Date::now(),
+            ])->save();
+        } else {
+            $this->closeOpenAttempt($target, $result->outcome);
+        }
     }
 
     private function onFailure(PostTarget $target, PostTargetAttempt $attempt, PublishResult $result, BackoffSchedule $backoff): void

@@ -7,6 +7,7 @@ import { Plus } from '@/components/ui/icons';
 import { useSchedulingTimezone } from '@/hooks/posts/use-scheduling-timezone';
 import { dayjs, toUserTz, weekRange } from '@/lib/datetime/dayjs';
 import type { Dayjs } from '@/lib/datetime/dayjs';
+import { postCalendarTimestamp } from '@/lib/posts/status';
 import { cn } from '@/lib/utils';
 
 /** Strip tint mirrors the desktop PostChip tones (sky / muted / destructive). */
@@ -14,8 +15,11 @@ function stripTone(status: PostStatus): string {
     if (status === 'failed' || status === 'partial') {
         return 'bg-destructive';
     }
-    if (status === 'published') {
+    if (status === 'published' || status === 'completed') {
         return 'bg-muted-foreground/40';
+    }
+    if (status === 'awaiting_action') {
+        return 'bg-amber-500';
     }
 
     return 'bg-sky-500 dark:bg-sky-400';
@@ -40,7 +44,7 @@ export function postsByDay(
 ): Map<string, PostRowData[]> {
     const byDay = new Map<string, PostRowData[]>();
     for (const post of posts) {
-        const at = post.scheduled_at ?? post.published_at;
+        const at = postCalendarTimestamp(post);
         if (!at) {
             continue;
         }
@@ -83,8 +87,8 @@ export function AgendaList({ anchor, view, posts, onEmptyDayClick }: Props) {
                 const dayPosts = (byDay.get(key) ?? [])
                     .slice()
                     .sort((a, b) =>
-                        (a.scheduled_at ?? a.published_at ?? '').localeCompare(
-                            b.scheduled_at ?? b.published_at ?? '',
+                        (postCalendarTimestamp(a) ?? '').localeCompare(
+                            postCalendarTimestamp(b) ?? '',
                         ),
                     );
                 const isToday = day.isSame(today, 'day');
@@ -146,7 +150,7 @@ export function AgendaList({ anchor, view, posts, onEmptyDayClick }: Props) {
 
 function AgendaItem({ post }: { post: PostRowData }) {
     const tz = useSchedulingTimezone();
-    const at = post.scheduled_at ?? post.published_at;
+    const at = postCalendarTimestamp(post);
     const when = at ? toUserTz(at, tz).format('h:mm a') : '';
     const targetCount = post.target_count ?? 0;
     const label = post.base_text || 'Untitled';

@@ -54,3 +54,18 @@ it('returns scheduled + published posts whose date falls in the visible window',
             ->missing('posts')               // deferred — streamed in after the grid frame paints
             ->loadDeferredProps(fn ($reload) => $reload->has('posts', 2)));
 });
+
+it('keeps inbox deliveries and nonpublic uploads on their completion date in the calendar', function (PostStatus $status): void {
+    Post::factory()->for($this->workspace)->create([
+        'author_id' => $this->user->id,
+        'status' => $status,
+        'scheduled_at' => null,
+        'published_at' => null,
+        'updated_at' => '2026-06-15 09:00:00',
+    ]);
+
+    $this->actingAs($this->user)
+        ->get(route('calendar.month', ['yyyymm' => '2026-06']))
+        ->assertInertia(fn ($page) => $page
+            ->loadDeferredProps(fn ($reload) => $reload->has('posts', 1)->where('posts.0.status', $status->value)));
+})->with([PostStatus::AwaitingAction, PostStatus::Completed]);

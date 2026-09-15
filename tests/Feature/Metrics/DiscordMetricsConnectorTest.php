@@ -53,6 +53,32 @@ test('fetchPost treats a message with no reactions field as zero likes', functio
     expect($r->isOk())->toBeTrue()->and($r->likes)->toBe(0);
 });
 
+test('fetchPost preserves the existing webhook thread when reading reactions', function () {
+    Http::fake([
+        METRICS_HOOK.'/messages/m1?thread_id=123456789' => Http::response(['reactions' => [['count' => 3]]]),
+        METRICS_HOOK.'/messages/m2?thread_id=123456789' => Http::response(['reactions' => [['count' => 4]]]),
+    ]);
+
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::Discord->value]);
+    $target = PostTarget::factory()->create([
+        'platform' => Platform::Discord->value,
+        'remote_ids' => ['m1', 'm2'],
+    ]);
+
+    $result = $this->connector->fetchPost($account, $target, [
+        'webhook_url' => METRICS_HOOK.'?thread_id=123456789&wait=false',
+    ]);
+
+    expect($result->isOk())->toBeTrue()
+        ->and($result->likes)->toBe(7);
+
+    Http::assertSentCount(2);
+    foreach (['m1', 'm2'] as $id) {
+        Http::assertSent(fn ($request): bool => $request->method() === 'GET'
+            && $request->url() === METRICS_HOOK.'/messages/'.$id.'?thread_id=123456789');
+    }
+});
+
 test('fetchPost maps 429 to rate limited', function () {
     Http::fake([METRICS_HOOK.'/messages/m1' => Http::response(['message' => 'slow'], 429)]);
 

@@ -69,7 +69,7 @@ test('store persists the personal profile and selected pages', function () {
         'accessToken' => 'tok',
         'refreshToken' => 'ref',
         'tokenExpiresAt' => null,
-        'approvedScopes' => ['r_member_social_feed', 'r_organization_social'],
+        'approvedScopes' => ['r_member_social_feed', 'r_organization_social', 'w_organization_social'],
     ]]);
 
     test()->post(route('accounts.linkedin.store'), [
@@ -83,7 +83,13 @@ test('store persists the personal profile and selected pages', function () {
         ->and($page->isLinkedInOrganization())->toBeTrue()
         ->and($page->display_name)->toBe('Acme Inc')
         ->and($person->capabilities['linkedin_engagement'])->toBeTrue()
-        ->and($page->capabilities['linkedin_engagement'])->toBeTrue();
+        ->and($page->capabilities['linkedin_engagement'])->toBeTrue()
+        ->and($person->capabilities['oauth_scopes_verified'])->toBeTrue()
+        ->and($page->capabilities['oauth_scopes'])->toBe(['r_member_social_feed', 'r_organization_social', 'w_organization_social'])
+        ->and($person->publishingPermissionStatus())->toBe('missing')
+        ->and($person->canPublish())->toBeFalse()
+        ->and($page->publishingPermissionStatus())->toBe('granted')
+        ->and($page->canPublish())->toBeTrue();
 });
 
 test('store gates page engagement capability off when the org scope was not granted', function () {

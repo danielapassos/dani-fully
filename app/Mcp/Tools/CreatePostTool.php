@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Mcp\Tools;
 
+use App\Dto\Post\DraftData;
 use App\Mcp\Tools\Concerns\WorkspaceTool;
 use App\Models\Post;
 use App\Models\User;
+use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Posts\DraftService;
+use App\Services\Publishing\YouTubePostOptions;
 use App\Support\PostView;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -45,6 +48,15 @@ class CreatePostTool extends WorkspaceTool
             'destination' => ['required', 'array'],
             'destination.kind' => ['required', Rule::in(['all', 'set', 'account'])],
             'destination.id' => ['nullable', 'string', 'required_if:destination.kind,set,account'],
+            'targets' => ['array'],
+            'targets.*.connected_account_id' => ['required', 'string'],
+            'targets.*.content_override' => ['nullable', 'array'],
+            'targets.*.content_override.segments' => ['array'],
+            'targets.*.content_override.segments.*' => ['nullable', 'string'],
+            'targets.*.content_override.media_ids' => ['array'],
+            'targets.*.content_override.media_ids.*' => ['string'],
+            ...TikTokPostOptions::draftRules(),
+            ...YouTubePostOptions::draftRules(),
         ]);
 
         /** @var User $user */
@@ -60,6 +72,7 @@ class CreatePostTool extends WorkspaceTool
             $validated['destination'],
             $segments,
             $validated['mentions'] ?? [],
+            data: DraftData::fromArray($validated),
         );
 
         return Response::text(json_encode(PostView::make($post->fresh(['targets.account', 'media'])), JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
@@ -77,6 +90,7 @@ class CreatePostTool extends WorkspaceTool
                 'kind' => $schema->string()->enum(['all', 'set', 'account'])->required(),
                 'id' => $schema->string()->description('Account set id (kind=set) or connected account id (kind=account).'),
             ])->description('Where to post.')->required(),
+            'targets' => $schema->array()->description('Per-account declarations: connected_account_id and content_override.tiktok or content_override.youtube. Supply the explicit publishing choices for each selected account; missing choices remain incomplete drafts.'),
         ];
     }
 }

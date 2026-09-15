@@ -98,6 +98,34 @@ afterEach(() => {
 });
 
 describe('compose status polling', () => {
+    it.each(['awaiting_action', 'completed'] as const)(
+        'renders delivery details instead of an editable composer for %s',
+        (status) => {
+            const post = {
+                ...publishingPost(),
+                status,
+                published_at: null,
+                targets: [target('delivered', status)],
+            };
+
+            act(() => {
+                root?.render(
+                    createElement(ComposePage, {
+                        post,
+                        accounts: [],
+                        sets: [],
+                        limits: [],
+                        savedMentions: [],
+                    }),
+                );
+            });
+
+            expect(container?.textContent).toContain('published-view');
+            expect(container?.textContent).not.toContain('composer');
+            expect(usePostStatusPoll).toHaveBeenCalledWith(post);
+        },
+    );
+
     it('keeps the page-level poll mounted when the published view replaces the composer', () => {
         const post = publishingPost();
 

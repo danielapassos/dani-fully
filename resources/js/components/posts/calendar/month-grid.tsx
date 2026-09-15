@@ -11,6 +11,7 @@ import {
 import { useSchedulingTimezone } from '@/hooks/posts/use-scheduling-timezone';
 import { dayjs, monthRange, toUserTz } from '@/lib/datetime/dayjs';
 import type { Dayjs } from '@/lib/datetime/dayjs';
+import { postCalendarTimestamp } from '@/lib/posts/status';
 import { cn } from '@/lib/utils';
 
 import { PostChip } from './post-chip';
@@ -56,8 +57,8 @@ export function MonthGrid({
 
     const byDay = new Map<string, PostRowData[]>();
     for (const p of posts) {
-        if (!p.scheduled_at && !p.published_at) continue;
-        const at = p.scheduled_at ?? p.published_at!;
+        const at = postCalendarTimestamp(p);
+        if (!at) continue;
         const key = toUserTz(at, tz).format('YYYY-MM-DD');
         if (!byDay.has(key)) byDay.set(key, []);
         byDay.get(key)!.push(p);

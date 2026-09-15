@@ -43,6 +43,18 @@ function stack(): HTMLElement {
 }
 
 describe('PostChip multi-account indicator', () => {
+    it.each(['awaiting_action', 'completed'] as const)(
+        'renders a %s upload without an animated in-flight indicator',
+        (status) => {
+            const { container } = renderChip(
+                basePost({ status, scheduled_at: null }),
+            );
+
+            expect(container.querySelector('.animate-pulse')).toBeNull();
+            expect(container.querySelector('.animate-spin')).toBeNull();
+        },
+    );
+
     it('renders one glyph per platform with no remainder when every target is shown', () => {
         renderChip(
             basePost({

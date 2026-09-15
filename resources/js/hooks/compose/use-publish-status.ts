@@ -1,10 +1,11 @@
 import { useHttp } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
     applyOptimisticSubmit,
     type OptimisticSubmit,
 } from '@/lib/compose/publish-status';
+import { targetCanRetry } from '@/lib/posts/capabilities';
 import { retry as retryRoute } from '@/routes/posts/targets';
 import type { PostView } from '@/types/compose';
 
@@ -26,6 +27,7 @@ export function usePublishStatus({ pagePost }: UsePublishStatus) {
     const [retryingIds, setRetryingIds] = useState<ReadonlySet<string>>(
         () => new Set(),
     );
+    const inFlightRetries = useRef(new Set<string>());
     const http = useHttp<Record<string, never>, RetryResponse>({});
 
     // Adopt the freshest page `post` prop (Inertia replaces it on each poll
@@ -61,9 +63,16 @@ export function usePublishStatus({ pagePost }: UsePublishStatus) {
 
     /** Re-dispatch a single failed target, then adopt the response. */
     async function retry(targetId: string) {
-        if (!snapshot || retryingIds.has(targetId)) {
+        const target = snapshot?.targets.find((item) => item.id === targetId);
+        if (
+            !snapshot ||
+            !target ||
+            !targetCanRetry(target) ||
+            inFlightRetries.current.has(targetId)
+        ) {
             return;
         }
+        inFlightRetries.current.add(targetId);
         setRetryingIds((prev) => new Set(prev).add(targetId));
         try {
             const result = await http.post(
@@ -75,6 +84,7 @@ export function usePublishStatus({ pagePost }: UsePublishStatus) {
             );
             setSnapshot(result.post);
         } finally {
+            inFlightRetries.current.delete(targetId);
             setRetryingIds((prev) => {
                 const next = new Set(prev);
                 next.delete(targetId);

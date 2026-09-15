@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Auth\Socialite\InstagramProvider;
+use App\Support\OAuthGrantedScopes;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Laravel\Socialite\Facades\Socialite;
@@ -87,3 +88,31 @@ test('the instagram driver maps a professional account profile', function () {
     Http::assertSent(fn (Request $request): bool => str_starts_with($request->url(), 'https://graph.instagram.com/v25.0/me?')
         && $request->hasHeader('Authorization', 'Bearer instagram-token'));
 });
+
+test('instagram grants come only from permissions returned by the provider', function (array $permissionFields, array $expected) {
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://api.instagram.com/oauth/access_token' => Http::response([
+            'access_token' => 'short-token',
+            'user_id' => 'ig-42',
+            ...$permissionFields,
+        ]),
+        'https://graph.instagram.com/access_token*' => Http::response([
+            'access_token' => 'long-token',
+            'expires_in' => 5_184_000,
+        ]),
+    ]);
+
+    $response = Socialite::driver('instagram')->stateless()->getAccessTokenResponse('auth-code');
+    $capabilities = OAuthGrantedScopes::capabilities($response['scope']);
+
+    expect($capabilities['oauth_scopes'])->toBe($expected)
+        ->and($capabilities['oauth_scopes_verified'])->toBe($expected !== []);
+})->with([
+    'omitted permissions' => [[], []],
+    'null permissions' => [['permissions' => null], []],
+    'invalid permissions' => [['permissions' => false], []],
+    'empty permissions' => [['permissions' => []], []],
+    'only basic granted' => [['permissions' => ['instagram_business_basic']], ['instagram_business_basic']],
+    'string permissions' => [['permissions' => ' instagram_business_basic,instagram_business_content_publish,instagram_business_basic '], ['instagram_business_basic', 'instagram_business_content_publish']],
+]);

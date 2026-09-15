@@ -448,7 +448,7 @@ enum Platform: string
     public function publishingEnabled(): bool
     {
         return match ($this) {
-            self::TikTok => (bool) config('services.tiktok.inbox_enabled'),
+            self::TikTok => (bool) config('services.tiktok.direct_post_enabled') || (bool) config('services.tiktok.inbox_enabled'),
             self::YouTube => (bool) config('services.youtube.publishing_enabled'),
             default => true,
         };
@@ -460,7 +460,7 @@ enum Platform: string
     public function requiredPublishingScope(): ?string
     {
         return match ($this) {
-            self::TikTok => 'video.upload',
+            self::TikTok => config('services.tiktok.direct_post_enabled') ? 'video.publish' : 'video.upload',
             self::YouTube => 'https://www.googleapis.com/auth/youtube.upload',
             default => null,
         };

@@ -10,6 +10,7 @@ import {
     shouldPollPostStatus,
     OPTIMISTIC_PUBLISH,
     OPTIMISTIC_SCHEDULE,
+    targetStatusMessage,
     targetStatusMeta,
 } from '../publish-status';
 
@@ -63,6 +64,18 @@ describe('anyTargetActive', () => {
         ).toBe(false);
         expect(anyTargetActive([])).toBe(false);
     });
+
+    it('treats inbox handoffs and non-public uploads as terminal', () => {
+        const targets = [
+            target('inbox', 'awaiting_action'),
+            target('private', 'completed'),
+        ];
+
+        expect(anyTargetActive(targets)).toBe(false);
+        expect(isPostTerminal(post(targets))).toBe(true);
+        expect(shouldPollPostStatus(post(targets))).toBe(false);
+        expect(failedTargets(targets)).toEqual([]);
+    });
 });
 
 describe('isPostTerminal', () => {
@@ -88,6 +101,17 @@ describe('shouldPollPostStatus', () => {
         expect(shouldPollPostStatus(post([target('a', 'publishing')]))).toBe(
             true,
         );
+    });
+
+    it('continues polling an active destination alongside an inbox handoff', () => {
+        expect(
+            shouldPollPostStatus(
+                post([
+                    target('inbox', 'awaiting_action'),
+                    target('active', 'publishing'),
+                ]),
+            ),
+        ).toBe(true);
     });
 });
 
@@ -163,6 +187,30 @@ describe('applyOptimisticSubmit', () => {
 
         expect(before).toEqual(snapshot);
     });
+
+    it.each(['awaiting_action', 'completed'] as const)(
+        'never optimistically overwrites a %s post or target',
+        (status) => {
+            const delivered = {
+                ...target('delivered', status),
+                status_message: 'Stored provider outcome',
+                remote_id: 'existing-reference',
+            };
+            const mixed = post([delivered, target('pending', 'pending')]);
+            const after = applyOptimisticSubmit(mixed, OPTIMISTIC_PUBLISH);
+
+            expect(after.targets[0]).toBe(delivered);
+            expect(after.targets[1].status).toBe('publishing');
+
+            const terminal = { ...post([delivered]), status };
+            expect(applyOptimisticSubmit(terminal, OPTIMISTIC_PUBLISH)).toBe(
+                terminal,
+            );
+            expect(applyOptimisticSubmit(terminal, OPTIMISTIC_SCHEDULE)).toBe(
+                terminal,
+            );
+        },
+    );
 });
 
 describe('targetStatusMeta', () => {
@@ -177,5 +225,35 @@ describe('targetStatusMeta', () => {
             tone: 'success',
             spinning: false,
         });
+    });
+
+    it('distinguishes an inbox handoff from a completed upload and public publication', () => {
+        expect(targetStatusMeta('awaiting_action', 'tiktok')).toEqual({
+            label: 'In TikTok inbox',
+            tone: 'warning',
+            spinning: false,
+        });
+        expect(targetStatusMeta('awaiting_action').label).toBe('Action needed');
+        expect(targetStatusMeta('completed')).toEqual({
+            label: 'Upload complete',
+            tone: 'muted',
+            spinning: false,
+        });
+        expect(
+            targetStatusMessage({
+                platform: 'tiktok',
+                status: 'awaiting_action',
+            }),
+        ).toBe('Finish the post in TikTok. It is not live yet.');
+        expect(
+            targetStatusMessage({
+                platform: 'youtube',
+                status: 'completed',
+                status_message: 'Uploaded privately to YouTube.',
+            }),
+        ).toBe('Uploaded privately to YouTube.');
+        expect(
+            targetStatusMessage({ platform: 'youtube', status: 'completed' }),
+        ).toBe('The upload is complete. Public publishing is not confirmed.');
     });
 });

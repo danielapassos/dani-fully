@@ -6,6 +6,8 @@ namespace App\Http\Requests\Post;
 
 use App\Http\Requests\Post\Concerns\DerivesMentionHandleRules;
 use App\Models\Post;
+use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
+use App\Services\Publishing\YouTubePostOptions;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -38,6 +40,15 @@ class StorePostRequest extends FormRequest
             'destination.ids' => ['array', 'required_if:destination.kind,accounts'],
             'destination.ids.*' => ['string'],
             'auto_repost' => ['sometimes', 'nullable', 'boolean'],
+            'targets' => ['array'],
+            'targets.*.connected_account_id' => ['required', 'string'],
+            'targets.*.content_override' => ['nullable', 'array'],
+            'targets.*.content_override.segments' => ['array'],
+            'targets.*.content_override.segments.*' => ['nullable', 'string'],
+            'targets.*.content_override.media_ids' => ['array'],
+            'targets.*.content_override.media_ids.*' => ['string'],
+            ...TikTokPostOptions::draftRules(),
+            ...YouTubePostOptions::draftRules(),
             'segment_breaks' => ['array'],
             'segment_breaks.*' => ['string'],
             'placements' => ['array'],

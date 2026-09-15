@@ -1,4 +1,5 @@
 import type {
+    PlatformName,
     PostStatus,
     PostView,
     TargetStatus,
@@ -10,7 +11,13 @@ const ACTIVE_TARGET_STATUSES: ReadonlySet<TargetStatus> = new Set<TargetStatus>(
     ['pending', 'publishing', 'deleting'],
 );
 
-export type TargetTone = 'pending' | 'active' | 'success' | 'error' | 'muted';
+export type TargetTone =
+    | 'pending'
+    | 'active'
+    | 'success'
+    | 'warning'
+    | 'error'
+    | 'muted';
 
 export type TargetStatusMeta = {
     tone: TargetTone;
@@ -22,6 +29,12 @@ export type TargetStatusMeta = {
 const TARGET_STATUS_META: Record<TargetStatus, TargetStatusMeta> = {
     pending: { tone: 'pending', label: 'Queued', spinning: false },
     publishing: { tone: 'active', label: 'Publishing', spinning: true },
+    awaiting_action: {
+        tone: 'warning',
+        label: 'Action needed',
+        spinning: false,
+    },
+    completed: { tone: 'muted', label: 'Upload complete', spinning: false },
     published: { tone: 'success', label: 'Published', spinning: false },
     failed: { tone: 'error', label: 'Failed', spinning: false },
     skipped: { tone: 'muted', label: 'Skipped', spinning: false },
@@ -29,8 +42,37 @@ const TARGET_STATUS_META: Record<TargetStatus, TargetStatusMeta> = {
     deleted: { tone: 'muted', label: 'Deleted', spinning: false },
 };
 
-export function targetStatusMeta(status: TargetStatus): TargetStatusMeta {
+export function targetStatusMeta(
+    status: TargetStatus,
+    platform?: PlatformName,
+): TargetStatusMeta {
+    if (status === 'awaiting_action' && platform === 'tiktok') {
+        return {
+            ...TARGET_STATUS_META.awaiting_action,
+            label: 'In TikTok inbox',
+        };
+    }
+
     return TARGET_STATUS_META[status] ?? TARGET_STATUS_META.pending;
+}
+
+/** Explain terminal uploads without implying that the content is public. */
+export function targetStatusMessage(
+    target: Pick<TargetView, 'status' | 'platform' | 'status_message'>,
+): string | null {
+    if (target.status_message) {
+        return target.status_message;
+    }
+
+    if (target.status === 'awaiting_action') {
+        return target.platform === 'tiktok'
+            ? 'Finish the post in TikTok. It is not live yet.'
+            : 'Finish the required action on the connected platform. This post is not confirmed live.';
+    }
+
+    return target.status === 'completed'
+        ? 'The upload is complete. Public publishing is not confirmed.'
+        : null;
 }
 
 /** True while any target is still pending/publishing/deleting. */
@@ -60,12 +102,19 @@ export function failedTargets(targets: TargetView[]): TargetView[] {
 
 /**
  * Terminal target states that an optimistic submit must NOT disturb. These
- * mirror {@link PublishDispatcher::TERMINAL} on the server: already-published or
+ * mirror {@link PublishDispatcher::TERMINAL} on the server: delivered or
  * being-deleted/deleted targets are skipped when (re)dispatching, so optimistic
  * feedback should leave them as-is rather than flip them back to in-flight.
  */
 const OPTIMISTIC_SKIP_STATUSES: ReadonlySet<TargetStatus> =
-    new Set<TargetStatus>(['published', 'skipped', 'deleting', 'deleted']);
+    new Set<TargetStatus>([
+        'published',
+        'awaiting_action',
+        'completed',
+        'skipped',
+        'deleting',
+        'deleted',
+    ]);
 
 /**
  * The instant in-flight snapshot to show when the user hits Publish/Schedule,
@@ -99,6 +148,10 @@ export function applyOptimisticSubmit(
     post: PostView,
     optimistic: OptimisticSubmit,
 ): PostView {
+    if (post.status === 'awaiting_action' || post.status === 'completed') {
+        return post;
+    }
+
     return {
         ...post,
         status: optimistic.postStatus,

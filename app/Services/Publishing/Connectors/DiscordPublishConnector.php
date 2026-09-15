@@ -20,6 +20,7 @@ use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Uri;
 use RuntimeException;
 
 /**
@@ -118,7 +119,7 @@ class DiscordPublishConnector implements PublishConnector
      */
     private function send(string $webhookUrl, string $text, array $media): Response
     {
-        $endpoint = $webhookUrl.'?wait=true';
+        $endpoint = (string) Uri::of($webhookUrl)->withQuery(['wait' => 'true'])->withoutFragment();
 
         if ($media === []) {
             return $this->http()->post($endpoint, ['content' => $text]);
@@ -163,7 +164,12 @@ class DiscordPublishConnector implements PublishConnector
         }
 
         foreach ($ids as $id) {
-            $response = $this->http()->delete($webhookUrl.'/messages/'.$id);
+            $webhook = Uri::of($webhookUrl);
+            $endpoint = (string) $webhook
+                ->withPath(rtrim($webhook->path(), '/').'/messages/'.rawurlencode($id))
+                ->withoutQuery('wait')
+                ->withoutFragment();
+            $response = $this->http()->delete($endpoint);
 
             // 404 = already gone; any 2xx (Discord returns 204) = deleted.
             $succeeded = $response->successful() || $response->status() === 404;

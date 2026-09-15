@@ -161,6 +161,11 @@ test('blockingTargets passes a publish-ready YouTube target with a video', funct
         'connected_account_id' => $account->id,
         'platform' => Platform::YouTube->value,
         'sections' => ['YouTube caption'],
+        'content_override' => ['youtube' => [
+            'privacy_status' => 'public', 'category_id' => '22', 'format_intent' => 'video',
+            'made_for_kids' => false, 'contains_synthetic_media' => false,
+            'has_paid_product_placement' => false, 'notify_subscribers' => false,
+        ]],
     ]);
 
     $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
@@ -185,7 +190,7 @@ test('blockingTargets rejects a read-only YouTube connection before dispatch', f
     $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
 
     expect($blocked)->toHaveCount(1)
-        ->and($blocked[0]['issues'])->toBe(['publishing_unavailable']);
+        ->and($blocked[0]['issues'])->toContain('publishing_unavailable');
 });
 
 test('blockingTargets rejects TikTok while instance publishing is disabled', function () {
@@ -569,6 +574,11 @@ test('blockingTargets validates TikTok and YouTube against each targets placed v
         'connected_account_id' => $account->id,
         'platform' => $platform,
         'sections' => ['Video caption'],
+        'content_override' => $platform === Platform::YouTube ? ['youtube' => [
+            'privacy_status' => 'private', 'category_id' => '22', 'format_intent' => 'video',
+            'made_for_kids' => false, 'contains_synthetic_media' => false,
+            'has_paid_product_placement' => false, 'notify_subscribers' => false,
+        ]] : null,
     ]);
     PostMediaPlacement::factory()->create([
         'post_target_id' => $target->id,

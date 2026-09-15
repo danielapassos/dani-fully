@@ -73,6 +73,7 @@ export function useAutosave({
             mentions: state.mentions,
             destination: state.destination,
             auto_repost: state.autoRepost,
+            targets: buildPutBody(state, accountIds).targets,
             // Persist the thread structure and per-segment placements on the
             // very first save too, so a reload before the next autosave PUT
             // sees a consistent post (stale break ids would otherwise degrade
@@ -258,6 +259,8 @@ export function useAutosave({
         state.overrideByAccount,
         state.autoSplitByAccount,
         state.formatByAccount,
+        state.tiktokByAccount,
+        state.youtubeByAccount,
         state.media,
         state.autoRepost,
         state.placements,

@@ -27,6 +27,7 @@ import {
     engagementItems,
 } from '@/lib/posts/engagement-metrics';
 import { platformLabel, postPermalink } from '@/lib/posts/permalink';
+import { postStatusMeta } from '@/lib/posts/status';
 import { resolveTargetMediaBySection } from '@/lib/posts/target-media';
 import { cn } from '@/lib/utils';
 import { retry as retryRoute } from '@/routes/posts/targets';
@@ -238,7 +239,12 @@ function PublishedCard({
         target.status === 'published'
             ? postPermalink(target.platform, target.handle, target.remote_id)
             : null;
-    const when = publishedAt ? dayjs(publishedAt).fromNow() : 'now';
+    const when =
+        target.status === 'published'
+            ? publishedAt
+                ? dayjs(publishedAt).fromNow()
+                : 'now'
+            : null;
     const cardMediaBySection = resolveTargetMediaBySection(target, media);
     const sections = target.sections.length > 0 ? target.sections : [''];
     const isThread = sections.length > 1;
@@ -272,6 +278,11 @@ function PublishedCard({
             </div>
 
             <div className="p-4">
+                {target.status !== 'published' && (
+                    <div className="mb-4 border-b border-border pb-4">
+                        <TargetStatusChips targets={[target]} />
+                    </div>
+                )}
                 {sections.map((section, index) => {
                     const isLast = index === sections.length - 1;
 
@@ -307,7 +318,7 @@ function PublishedCard({
                                     )}
                                     <span className="truncate text-muted-foreground">
                                         {target.handle
-                                            ? `${target.handle} · `
+                                            ? `${target.handle}${when ? ' · ' : ''}`
                                             : ''}
                                         {when}
                                     </span>
@@ -330,7 +341,8 @@ function PublishedCard({
                     );
                 })}
 
-                {metricsBar(target, stat, showMetrics, loading)}
+                {target.status === 'published' &&
+                    metricsBar(target, stat, showMetrics, loading)}
             </div>
         </article>
     );
@@ -382,11 +394,14 @@ function SummaryStrip({
     showMetrics: boolean;
     loading: boolean;
 }) {
-    const when = post.published_at ? dayjs(post.published_at).fromNow() : null;
+    const when =
+        post.published_at && post.targets.some((t) => t.status === 'published')
+            ? dayjs(post.published_at).fromNow()
+            : null;
     const dotClass =
         post.status === 'published'
             ? 'bg-emerald-500'
-            : post.status === 'partial'
+            : post.status === 'partial' || post.status === 'awaiting_action'
               ? 'bg-amber-500'
               : 'bg-muted-foreground';
 
@@ -423,8 +438,8 @@ function SummaryStrip({
                         className={cn('size-2 rounded-full', dotClass)}
                         aria-hidden
                     />
-                    <span className="font-medium text-foreground capitalize">
-                        {post.status}
+                    <span className="font-medium text-foreground">
+                        {postStatusMeta[post.status].label}
                     </span>
                     {when && <span>· {when}</span>}
                     <span>
@@ -515,9 +530,17 @@ function PublishedBody({
     const publishedTargets = post.targets.filter(
         (t) => t.status === 'published',
     );
-    const otherTargets = post.targets.filter((t) => t.status !== 'published');
+    const previewTargets = post.targets.filter(
+        (t) =>
+            t.status === 'published' ||
+            t.status === 'awaiting_action' ||
+            t.status === 'completed',
+    );
+    const otherTargets = post.targets.filter(
+        (t) => !previewTargets.some((preview) => preview.id === t.id),
+    );
 
-    const [selectedId, setSelectedId] = useState(publishedTargets[0]?.id ?? '');
+    const [selectedId, setSelectedId] = useState(previewTargets[0]?.id ?? '');
     const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
     const stats = rawStats ?? null;
     const statsById = new Map(
@@ -525,8 +548,7 @@ function PublishedBody({
     );
 
     const selectedTarget =
-        publishedTargets.find((t) => t.id === selectedId) ??
-        publishedTargets[0];
+        previewTargets.find((t) => t.id === selectedId) ?? previewTargets[0];
 
     function retryTarget(targetId: string) {
         setRetryingIds((current) => new Set(current).add(targetId));
@@ -550,13 +572,15 @@ function PublishedBody({
         <section className="mt-6 space-y-4">
             <SummaryStrip
                 post={post}
-                platformCount={publishedTargets.length}
+                platformCount={
+                    new Set(post.targets.map((t) => t.platform)).size
+                }
                 stats={stats}
-                showMetrics={showMetrics}
+                showMetrics={showMetrics && publishedTargets.length > 0}
                 loading={loading}
             />
 
-            {publishedTargets.length > 1 && (
+            {previewTargets.length > 1 && (
                 <ToggleGroup
                     value={selectedTarget ? [selectedTarget.id] : []}
                     size="sm"
@@ -569,7 +593,7 @@ function PublishedBody({
                     }}
                     className="flex flex-wrap justify-start"
                 >
-                    {publishedTargets.map((target) => (
+                    {previewTargets.map((target) => (
                         <ToggleGroupItem
                             key={target.id}
                             value={target.id}
@@ -601,7 +625,7 @@ function PublishedBody({
             {otherTargets.length > 0 && (
                 <div className="rounded-2xl border border-border bg-card p-4 shadow-sm ring-1 ring-foreground/5">
                     <p className="mb-2.5 text-[12px] font-medium text-muted-foreground">
-                        Didn’t publish everywhere
+                        Other destinations
                     </p>
                     <TargetStatusChips
                         targets={otherTargets}
@@ -615,13 +639,16 @@ function PublishedBody({
 }
 
 /**
- * Read-only "how it landed" view for a published post: a totals strip plus one
+ * Read-only delivery details: a totals strip plus one
  * faithful platform card per target with the real engagement numbers wired into
  * each network's own action bar. Metrics arrive as a deferred prop, so content
  * renders immediately while the numbers skeleton-load.
  */
 export function PublishedPostView({ post, showMetrics }: Props) {
-    if (!showMetrics) {
+    const hasPublishedTarget = post.targets.some(
+        (t) => t.status === 'published',
+    );
+    if (!showMetrics || !hasPublishedTarget) {
         return <PublishedBody post={post} showMetrics={false} />;
     }
 

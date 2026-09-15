@@ -59,6 +59,7 @@ import {
     type PlatformName,
     type PostView,
     type WorkspaceMention,
+    type TikTokCreatorInfo,
 } from '@/types/compose';
 import type { GifItem } from '@/types/gifs';
 
@@ -78,7 +79,9 @@ import { ScheduleTray } from './schedule-tray';
 import { SegmentMediaRow } from './segment-media-row';
 import { SubmitBar } from './submit-bar';
 import { TargetStatusChips } from './target-status-chips';
+import { TikTokPublishingControls } from './tiktok-publishing-controls';
 import { VideoEditor } from './video-editor';
+import { YouTubePublishingControls } from './youtube-publishing-controls';
 
 /** What the image editor is currently working on. */
 type Editing =
@@ -171,6 +174,9 @@ export default function Composer({
     >({});
     const deleteMentionHttp = useHttp<Record<string, never>, unknown>({});
     const [savedMentions, setSavedMentions] = useState(initialSavedMentions);
+    const [tiktokCreatorByAccount, setTikTokCreatorByAccount] = useState<
+        Record<string, TikTokCreatorInfo | null>
+    >({});
     useEffect(() => {
         setSavedMentions(initialSavedMentions);
     }, [initialSavedMentions]);
@@ -807,6 +813,9 @@ export default function Composer({
                 placements: state.placements,
                 placementsByAccount: state.placementsByAccount,
                 segmentBreaks: state.segmentBreaks,
+                tiktokByAccount: state.tiktokByAccount,
+                youtubeByAccount: state.youtubeByAccount,
+                tiktokCreatorByAccount,
             })[0]?.reasons ?? [];
         if (reasons.length > 0) {
             return 'over';
@@ -1035,6 +1044,9 @@ export default function Composer({
         placements: state.placements,
         placementsByAccount: state.placementsByAccount,
         segmentBreaks: state.segmentBreaks,
+        tiktokByAccount: state.tiktokByAccount,
+        youtubeByAccount: state.youtubeByAccount,
+        tiktokCreatorByAccount,
     });
     const notices = precheckNotices({
         accounts: tabAccounts,
@@ -1337,6 +1349,68 @@ export default function Composer({
                         ))}
                     </div>
                 )}
+
+                {!readOnly &&
+                    tabAccounts
+                        .filter((account) => account.platform === 'youtube')
+                        .map((account) => (
+                            <YouTubePublishingControls
+                                key={account.id}
+                                account={account}
+                                options={state.youtubeByAccount[account.id]}
+                                onChange={(options) =>
+                                    dispatch({
+                                        type: 'setYouTubeOptions',
+                                        accountId: account.id,
+                                        options,
+                                    })
+                                }
+                            />
+                        ))}
+
+                {!readOnly &&
+                    tabAccounts
+                        .filter(
+                            (account) =>
+                                account.platform === 'tiktok' &&
+                                account.tiktok_direct_post_enabled,
+                        )
+                        .map((account) => {
+                            const placements =
+                                state.placementsByAccount[account.id] ??
+                                state.placements;
+                            const mediaIds = new Set(
+                                Object.values(placements).flat(),
+                            );
+                            const video = state.media.find(
+                                (item) =>
+                                    item.kind === 'video' &&
+                                    mediaIds.has(item.id),
+                            );
+                            return (
+                                <TikTokPublishingControls
+                                    key={account.id}
+                                    account={account}
+                                    options={state.tiktokByAccount[account.id]}
+                                    durationSeconds={video?.duration_seconds}
+                                    onChange={(options) =>
+                                        dispatch({
+                                            type: 'setTikTokOptions',
+                                            accountId: account.id,
+                                            options,
+                                        })
+                                    }
+                                    onCreatorInfo={(creator) =>
+                                        setTikTokCreatorByAccount(
+                                            (previous) => ({
+                                                ...previous,
+                                                [account.id]: creator,
+                                            }),
+                                        )
+                                    }
+                                />
+                            );
+                        })}
 
                 {/* Toolbar — editing controls when editable; just the attached
                 media when read-only (skipped entirely if there's none). */}

@@ -83,6 +83,7 @@ return [
         'client_secret' => env('TIKTOK_CLIENT_SECRET'),
         'redirect' => env('TIKTOK_REDIRECT_URI'),
         'inbox_enabled' => filter_var(env('TIKTOK_INBOX_ENABLED', false), FILTER_VALIDATE_BOOL),
+        'direct_post_enabled' => filter_var(env('TIKTOK_DIRECT_POST_ENABLED', false), FILTER_VALIDATE_BOOL),
     ],
 
     'youtube' => [

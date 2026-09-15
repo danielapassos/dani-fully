@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Auth\Socialite;
 
+use App\Support\OAuthGrantedScopes;
 use Illuminate\Support\Facades\Http;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\User;
@@ -69,18 +70,12 @@ class InstagramProvider extends AbstractProvider
             throw new RuntimeException('Instagram did not return a long-lived access token.');
         }
 
-        $permissions = $short['permissions'] ?? $this->getScopes();
-        if (is_string($permissions)) {
-            $permissions = array_filter(array_map('trim', explode(',', $permissions)));
-        }
-        if (! is_array($permissions)) {
-            $permissions = $this->getScopes();
-        }
+        $permissions = OAuthGrantedScopes::normalize($short['permissions'] ?? null);
 
         return [
             ...$long,
             'user_id' => $short['user_id'] ?? null,
-            'scope' => implode(',', array_values($permissions)),
+            'scope' => implode(',', $permissions),
         ];
     }
 

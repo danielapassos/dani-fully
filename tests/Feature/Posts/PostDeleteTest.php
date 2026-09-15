@@ -133,6 +133,8 @@ it('soft-deletes partial and failed posts via the remote-delete path', function 
 })->with([
     'partial' => [PostStatus::Partial],
     'failed' => [PostStatus::Failed],
+    'awaiting action with a remote post' => [PostStatus::AwaitingAction],
+    'completed private upload' => [PostStatus::Completed],
 ]);
 
 it('stops publishing targets before soft-deleting a publishing post', function (): void {

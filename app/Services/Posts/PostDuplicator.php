@@ -186,12 +186,19 @@ class PostDuplicator
     /**
      * Point an override's `media_ids` at the cloned media rows.
      *
-     * @param  array{text?: string|null, media_ids?: list<string>}|null  $override
+     * @param  array{text?: string|null, media_ids?: list<string>, tiktok?: array<string, mixed>}|null  $override
      * @param  array<string, string>  $mediaIdMap
-     * @return array{text?: string|null, media_ids?: list<string>}|null
+     * @return array{text?: string|null, media_ids?: list<string>, tiktok?: array<string, mixed>}|null
      */
     private function remapOverride(?array $override, array $mediaIdMap): ?array
     {
+        if (isset($override['tiktok'])) {
+            unset($override['tiktok']);
+            if ($override === []) {
+                return null;
+            }
+        }
+
         if ($override === null || ! isset($override['media_ids'])) {
             return $override;
         }

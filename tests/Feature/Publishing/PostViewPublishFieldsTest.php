@@ -2,10 +2,12 @@
 
 use App\Enums\ConnectedAccountStatus;
 use App\Enums\ErrorKind;
+use App\Enums\Platform;
 use App\Enums\PostStatus;
 use App\Enums\PostTargetStatus;
 use App\Models\Post;
 use App\Models\PostTarget;
+use App\Support\PostListItem;
 use App\Support\PostView;
 
 test('post view exposes per-target publish status and root published_at', function () {
@@ -28,6 +30,80 @@ test('post view exposes per-target publish status and root published_at', functi
         ->and($view['targets'][0]['retry_blocked_reason'])->toBeNull()
         ->and($view['targets'][0]['attempts'])->toBe(3)
         ->and($view['targets'][0]['remote_id'])->toBe('abc');
+});
+
+test('legacy confirmed inbox delivery is presented truthfully without changing stored rows', function () {
+    $post = Post::factory()->create(['status' => PostStatus::Publishing]);
+    $target = PostTarget::factory()->for($post)->create([
+        'platform' => Platform::TikTok,
+        'status' => PostTargetStatus::Publishing,
+        'error_kind' => ErrorKind::MediaProcessing,
+        'error_message' => 'Video sent to TikTok. Open TikTok to finish the native post.',
+        'media_upload_state' => ['media-1' => ['remote_ref' => 'inbox-operation']],
+    ]);
+
+    $view = PostView::make($post->fresh(['targets.account', 'media']));
+    $list = PostListItem::make($post->fresh(['targets.account', 'media']));
+
+    expect($view['status'])->toBe('awaiting_action')
+        ->and($view['targets'][0]['status'])->toBe('awaiting_action')
+        ->and($view['targets'][0]['status_message'])->toContain('not live')
+        ->and($view['targets'][0]['can_retry'])->toBeFalse()
+        ->and($view['targets'][0]['error_kind'])->toBeNull()
+        ->and($view['targets'][0]['remote_id'])->toBeNull()
+        ->and($list['status'])->toBe('awaiting_action')
+        ->and($list['status_label'])->toBe('Action needed')
+        ->and($target->fresh()->status)->toBe(PostTargetStatus::Publishing)
+        ->and($post->fresh()->status)->toBe(PostStatus::Publishing);
+});
+
+test('mixed legacy nonpublic uploads retain a publication time only when another target published', function (string $privacy, bool $hasPublishedTarget) {
+    $post = Post::factory()->create(['status' => PostStatus::Partial, 'published_at' => now()->subDay()]);
+    $youtube = PostTarget::factory()->for($post)->create([
+        'platform' => Platform::YouTube,
+        'status' => PostTargetStatus::Published,
+        'remote_id' => 'private-video',
+        'media_upload_state' => ['media-1' => ['remote_ref' => 'private-video', 'metadata' => ['privacy_status' => $privacy]]],
+    ]);
+    PostTarget::factory()->for($post)->create([
+        'platform' => Platform::X,
+        'status' => PostTargetStatus::Failed,
+    ]);
+    if ($hasPublishedTarget) {
+        PostTarget::factory()->for($post)->create([
+            'platform' => Platform::Instagram,
+            'status' => PostTargetStatus::Published,
+            'remote_id' => 'public-post',
+        ]);
+    }
+
+    $view = PostView::make($post->fresh(['targets.account', 'media']));
+    $list = PostListItem::make($post->fresh(['targets.account', 'media']));
+    $publishedAt = $hasPublishedTarget ? $post->published_at->toIso8601String() : null;
+
+    expect($view['status'])->toBe('partial')
+        ->and($list['status'])->toBe('partial')
+        ->and($view['published_at'])->toBe($publishedAt)
+        ->and($list['published_at'])->toBe($publishedAt)
+        ->and(collect($view['targets'])->firstWhere('platform', 'youtube')['status'])->toBe('completed')
+        ->and($youtube->fresh()->status)->toBe(PostTargetStatus::Published)
+        ->and($post->fresh()->published_at)->not->toBeNull();
+})->with([
+    'private and failed' => ['private', false],
+    'unlisted and failed' => ['unlisted', false],
+    'private plus another public target' => ['private', true],
+    'unlisted plus another public target' => ['unlisted', true],
+]);
+
+test('upload completion alone does not claim an inbox delivery', function () {
+    $post = Post::factory()->create(['status' => PostStatus::Publishing]);
+    $target = PostTarget::factory()->for($post)->create([
+        'platform' => Platform::TikTok,
+        'status' => PostTargetStatus::Publishing,
+        'media_upload_state' => ['media-1' => ['remote_ref' => 'upload-operation', 'metadata' => ['upload_complete' => true]]],
+    ]);
+
+    expect($target->publicationStatus())->toBe(PostTargetStatus::Publishing);
 });
 
 test('post view marks an unconfirmed provider outcome for manual review', function () {

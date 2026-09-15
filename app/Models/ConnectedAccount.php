@@ -9,6 +9,7 @@ use App\Enums\ConnectedAccountStatus;
 use App\Enums\MetricsStatus;
 use App\Enums\Platform;
 use App\Support\InstanceSettings;
+use App\Support\OAuthGrantedScopes;
 use Carbon\CarbonImmutable;
 use Database\Factories\ConnectedAccountFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -183,10 +184,9 @@ class ConnectedAccount extends Model
 
     /**
      * Whether this particular connection is safe to target for publishing.
-     * TikTok and YouTube can be connected read-only before their upload scopes
-     * are enabled, so both the instance flag and the scope actually granted to
-     * this account must be present. Existing read-only connections then get an
-     * explicit reconnect gate instead of failing after a post is dispatched.
+     * Confirmed missing permissions block dispatch. Older connections whose
+     * grants were not recorded remain usable; TikTok and YouTube retain their
+     * explicit upload/Direct Post permission requirement.
      */
     public function canPublish(): bool
     {
@@ -202,12 +202,67 @@ class ConnectedAccount extends Model
             return false;
         }
 
+        return ! $this->publishingPermissionBlocked();
+    }
+
+    /** @return list<string> */
+    public function requiredPublishingScopes(): array
+    {
         $requiredScope = $this->platform->requiredPublishingScope();
-        if ($requiredScope === null) {
-            return true;
+        if ($requiredScope !== null) {
+            return [$requiredScope];
         }
 
-        return in_array($requiredScope, (array) ($this->capabilities['oauth_scopes'] ?? []), true);
+        return match ($this->platform) {
+            Platform::X => ['tweet.read', 'users.read', 'tweet.write'],
+            Platform::Instagram => $this->usesInstagramLogin()
+                ? ['instagram_business_basic', 'instagram_business_content_publish']
+                : ['instagram_basic', 'instagram_content_publish', 'pages_read_engagement'],
+            Platform::Threads => ['threads_basic', 'threads_content_publish'],
+            Platform::Facebook => ['pages_read_engagement', 'pages_manage_posts'],
+            Platform::LinkedIn => [$this->isLinkedInOrganization() ? 'w_organization_social' : 'w_member_social'],
+            default => [],
+        };
+    }
+
+    /**
+     * Permission evidence is separate from account/installation availability.
+     * Legacy Instagram grants may have been copied from requested scopes, so
+     * only newly verified grants can assert readiness for those connections.
+     *
+     * @return 'granted'|'missing'|'unknown'|'not_required'
+     */
+    public function publishingPermissionStatus(): string
+    {
+        $required = $this->requiredPublishingScopes();
+        if ($required === []) {
+            return 'not_required';
+        }
+
+        $capabilities = $this->capabilities ?? [];
+        $verified = ($capabilities['oauth_scopes_verified'] ?? false) === true;
+
+        if (! array_key_exists('oauth_scopes_verified', $capabilities)
+            && $this->platform->requiredPublishingScope() !== null
+            && array_key_exists('oauth_scopes', $capabilities)) {
+            $verified = true;
+        }
+
+        if (! $verified) {
+            return 'unknown';
+        }
+
+        $granted = OAuthGrantedScopes::normalize($capabilities['oauth_scopes'] ?? null);
+
+        return array_diff($required, $granted) === [] ? 'granted' : 'missing';
+    }
+
+    private function publishingPermissionBlocked(): bool
+    {
+        $status = $this->publishingPermissionStatus();
+
+        return $status === 'missing'
+            || ($status === 'unknown' && $this->platform->requiredPublishingScope() !== null);
     }
 
     public function publishingUnavailableReason(): ?string
@@ -229,8 +284,18 @@ class ConnectedAccount extends Model
         }
 
         $requiredScope = $this->platform->requiredPublishingScope();
-        if ($requiredScope !== null && ! in_array($requiredScope, (array) ($this->capabilities['oauth_scopes'] ?? []), true)) {
-            return "Reconnect {$this->handle} to grant {$this->platform->label()} video upload access.";
+        if ($this->publishingPermissionBlocked()) {
+            if ($requiredScope === 'video.publish') {
+                return "Reconnect {$this->handle} to grant TikTok Direct Post access (video.publish). The developer app must have this permission enabled.";
+            }
+
+            if ($requiredScope !== null) {
+                return "Reconnect {$this->handle} to grant {$this->platform->label()} video upload access.";
+            }
+
+            $missing = array_diff($this->requiredPublishingScopes(), OAuthGrantedScopes::normalize($this->capabilities['oauth_scopes'] ?? null));
+
+            return "Reconnect {$this->handle} to grant {$this->platform->label()} publishing permissions (".implode(', ', $missing).').';
         }
 
         return null;
@@ -256,8 +321,7 @@ class ConnectedAccount extends Model
             return 'operator_configuration';
         }
 
-        $requiredScope = $this->platform->requiredPublishingScope();
-        if ($requiredScope !== null && ! in_array($requiredScope, (array) ($this->capabilities['oauth_scopes'] ?? []), true)) {
+        if ($this->publishingPermissionBlocked()) {
             return 'reconnect';
         }
 

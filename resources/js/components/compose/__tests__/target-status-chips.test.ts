@@ -70,6 +70,58 @@ const renderChips = (
 };
 
 describe('target status chips', () => {
+    it('explains an inbox handoff without a public link, spinner, or retry', () => {
+        const container = renderChips(
+            [
+                failedTarget({
+                    platform: 'tiktok',
+                    status: 'awaiting_action',
+                    handle: '@definitelyrunninglate',
+                    remote_id: 'preserved-reference',
+                    error_kind: null,
+                    error_message: null,
+                    can_retry: true,
+                }),
+            ],
+            () => undefined,
+        );
+
+        expect(container.textContent).toContain('In TikTok inbox');
+        expect(container.textContent).toContain(
+            'Finish the post in TikTok. It is not live yet.',
+        );
+        expect(container.textContent).not.toContain('Published');
+        expect(container.querySelector('a')).toBeNull();
+        expect(container.querySelector('button')).toBeNull();
+        expect(container.querySelector('.animate-spin')).toBeNull();
+    });
+
+    it('shows the server private-upload explanation without implying publication', () => {
+        const container = renderChips(
+            [
+                failedTarget({
+                    platform: 'youtube',
+                    status: 'completed',
+                    status_message:
+                        'Uploaded privately to YouTube. This video is not public.',
+                    remote_id: 'private-video-id',
+                    error_kind: null,
+                    error_message: null,
+                }),
+            ],
+            () => undefined,
+        );
+
+        expect(container.textContent).toContain('Upload complete');
+        expect(container.textContent).toContain(
+            'Uploaded privately to YouTube. This video is not public.',
+        );
+        expect(container.textContent).not.toContain('Published');
+        expect(container.querySelector('a')).toBeNull();
+        expect(container.querySelector('button')).toBeNull();
+        expect(container.querySelector('.animate-spin')).toBeNull();
+    });
+
     // The failure copy shown in the tooltip is also rendered into the tooltip's
     // trigger button (always in the DOM), so the attempt-prefix formatting is
     // asserted against the trigger. Base UI's tooltip popup only mounts once

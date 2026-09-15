@@ -138,6 +138,7 @@ class PostController extends Controller
         // so the endpoint contract can't be bypassed for a draft/scheduled post.
         in_array($post->status, [
             PostStatus::Published, PostStatus::Partial, PostStatus::Failed, PostStatus::Missed,
+            PostStatus::AwaitingAction, PostStatus::Completed,
         ], true) ?: abort(422, 'This post cannot be copied to a draft.');
 
         $draft = $duplicator->duplicate($post);
@@ -153,6 +154,7 @@ class PostController extends Controller
 
         $needsRemoteCleanup = in_array($post->status, [
             PostStatus::Publishing, PostStatus::Published, PostStatus::Partial, PostStatus::Failed,
+            PostStatus::AwaitingAction, PostStatus::Completed,
         ], true);
 
         if (! $needsRemoteCleanup) {

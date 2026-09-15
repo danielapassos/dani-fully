@@ -24,9 +24,11 @@ describe('published post view', () => {
         expect(view).toContain('data="stats"');
     });
 
-    it('replaces the editor with the published view only once a target is live', () => {
+    it('replaces the editor with delivery details for public posts and terminal uploads', () => {
         expect(page).toContain('PublishedPostView');
         expect(page).toContain("t.status === 'published'");
+        expect(page).toContain("t.status === 'awaiting_action'");
+        expect(page).toContain("t.status === 'completed'");
     });
 
     it('offers a one-shot manual refresh for posts that have aged out of automatic polling', () => {

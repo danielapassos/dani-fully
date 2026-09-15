@@ -9,6 +9,7 @@ use App\Enums\Platform;
 use App\Http\Controllers\Controller;
 use App\Models\ConnectedAccount;
 use App\Services\ConnectedAccounts\AccountConnectionService;
+use App\Support\OAuthGrantedScopes;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -52,14 +53,14 @@ class LinkedInPageConnectionController extends Controller
             ? CarbonImmutable::parse((string) $stash['tokenExpiresAt'])
             : null;
 
-        /** @var array<int, string> $granted */
-        $granted = (array) ($stash['approvedScopes'] ?? []);
+        $scopeCapabilities = OAuthGrantedScopes::capabilities($stash['approvedScopes'] ?? null);
+        $granted = $scopeCapabilities['oauth_scopes'];
 
         $user = $request->user();
 
         // Persist every selected account in one transaction so a mid-loop failure
         // can't leave the workspace with a partial set of connected accounts.
-        DB::transaction(function () use ($validated, $organizations, $stash, $token, $refresh, $expiresAt, $granted, $user): void {
+        DB::transaction(function () use ($validated, $organizations, $stash, $token, $refresh, $expiresAt, $scopeCapabilities, $granted, $user): void {
             foreach ($validated['selected'] as $selection) {
                 if ($selection['type'] === 'person') {
                     $person = $stash['person'];
@@ -72,7 +73,7 @@ class LinkedInPageConnectionController extends Controller
                         authMethod: 'oauth',
                         accessToken: $token,
                         refreshToken: $refresh,
-                        capabilities: ['linkedin_account_type' => 'person', 'linkedin_engagement' => in_array('r_member_social_feed', $granted, true)],
+                        capabilities: [...$scopeCapabilities, 'linkedin_account_type' => 'person', 'linkedin_engagement' => in_array('r_member_social_feed', $granted, true)],
                         tokenExpiresAt: $expiresAt,
                     );
                 } else {
@@ -86,7 +87,7 @@ class LinkedInPageConnectionController extends Controller
                         authMethod: 'oauth',
                         accessToken: $token,
                         refreshToken: $refresh,
-                        capabilities: ['linkedin_account_type' => 'organization', 'linkedin_engagement' => in_array('r_organization_social', $granted, true)],
+                        capabilities: [...$scopeCapabilities, 'linkedin_account_type' => 'organization', 'linkedin_engagement' => in_array('r_organization_social', $granted, true)],
                         tokenExpiresAt: $expiresAt,
                     );
                 }

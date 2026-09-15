@@ -108,7 +108,7 @@ class PublishDispatcher
 
     private function targetIsRunnable(PostTarget $target): bool
     {
-        return in_array($target->status, self::RUNNABLE, true);
+        return in_array($target->publicationStatus(), self::RUNNABLE, true);
     }
 
     /**

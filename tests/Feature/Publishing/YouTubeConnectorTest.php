@@ -126,10 +126,10 @@ test('youtube completes a resumable upload and waits for public processing', fun
         && $request->hasHeader('Content-Range', 'bytes 0-10/11'));
 });
 
-test('youtube completes a processed private video using the privacy stored at upload time', function () {
+test('youtube records a processed nonpublic video without claiming public publication', function (string $privacy) {
     Http::fake([
         'https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [[
-            'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'private'],
+            'status' => ['uploadStatus' => 'processed', 'privacyStatus' => $privacy],
             'processingDetails' => ['processingStatus' => 'succeeded'],
         ]]]),
     ]);
@@ -137,18 +137,82 @@ test('youtube completes a processed private video using the privacy stored at up
     $video = PostMedia::factory()->video()->create();
     $context = youtubePublishContext([$video], [
         'remote_id' => 'video_42',
+        'content_override' => ['youtube' => [
+            'privacy_status' => 'public', 'category_id' => '22', 'format_intent' => 'video',
+            'made_for_kids' => false, 'contains_synthetic_media' => false,
+            'has_paid_product_placement' => false, 'notify_subscribers' => false,
+        ]],
         'media_upload_state' => [
             $video->id => [
                 'state' => 'processing',
-                'metadata' => ['privacy_status' => 'private'],
+                'metadata' => ['privacy_status' => $privacy],
             ],
         ],
     ]);
     $result = app(YouTubeConnector::class)->publish($context);
 
     expect($result->isSuccessful())->toBeTrue()
-        ->and($result->remoteIds)->toBe(['video_42']);
-});
+        ->and($result->remoteIds)->toBe(['video_42'])
+        ->and($result->outcome)->toBe('completed')
+        ->and($result->statusMessage)->toContain("YouTube as {$privacy}")
+        ->and($result->statusMessage)->toContain('not publicly listed');
+})->with(['private', 'unlisted']);
+
+test('youtube uses explicit post declarations while keeping private configuration for legacy posts', function (bool $hasOverride) {
+    config()->set('services.youtube.privacy_status', 'private');
+    Http::fake([
+        'https://www.googleapis.com/upload/youtube/v3/videos*' => Http::response(['error' => ['message' => 'stop after init request']], 400),
+    ]);
+    $video = PostMedia::factory()->video()->create();
+    $settings = [
+        'privacy_status' => 'public', 'category_id' => '22', 'format_intent' => 'video',
+        'made_for_kids' => false, 'contains_synthetic_media' => true,
+        'has_paid_product_placement' => true, 'notify_subscribers' => true,
+    ];
+
+    app(YouTubeConnector::class)->publish(youtubePublishContext([$video], $hasOverride ? ['content_override' => ['youtube' => $settings]] : []));
+
+    Http::assertSent(fn (Request $request): bool => $request['status']['privacyStatus'] === ($hasOverride ? 'public' : 'private')
+        && $request['status']['containsSyntheticMedia'] === $hasOverride
+        && $request['paidProductPlacementDetails']['hasPaidProductPlacement'] === $hasOverride
+        && str_contains($request->url(), 'notifySubscribers='.($hasOverride ? 'true' : 'false')));
+    expect(config('services.youtube.privacy_status'))->toBe('private');
+})->with([true, false]);
+
+test('youtube rejects malformed post declarations without falling back to instance defaults', function (mixed $override) {
+    Http::fake();
+    $video = PostMedia::factory()->video()->create();
+    $result = app(YouTubeConnector::class)->publish(youtubePublishContext([$video], ['content_override' => ['youtube' => $override]]));
+
+    expect($result->errorKind)->toBe(ErrorKind::Validation);
+    Http::assertNothingSent();
+})->with([
+    'not an object' => ['public'],
+    'incomplete object' => [['privacy_status' => 'public']],
+    'string boolean' => [[
+        'privacy_status' => 'public', 'category_id' => '22', 'format_intent' => 'video',
+        'made_for_kids' => 'false', 'contains_synthetic_media' => false,
+        'has_paid_product_placement' => false, 'notify_subscribers' => false,
+    ]],
+]);
+
+test('youtube requires positive processing completion evidence', function (string $upload, string $processing) {
+    Http::fake([
+        'https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [[
+            'status' => ['uploadStatus' => $upload, 'privacyStatus' => 'public'],
+            'processingDetails' => ['processingStatus' => $processing],
+        ]]]),
+    ]);
+    $video = PostMedia::factory()->video()->create();
+    $result = app(YouTubeConnector::class)->publish(youtubePublishContext([$video], ['remote_id' => 'video_42']));
+
+    expect($result->isSuccessful())->toBeFalse()
+        ->and($result->errorKind)->toBe(ErrorKind::ServerError);
+})->with([
+    'both missing' => ['', ''],
+    'unknown upload status' => ['unexpected', 'succeeded'],
+    'unknown processing status' => ['processed', 'unexpected'],
+]);
 
 test('youtube fails closed when processed privacy differs from the requested privacy', function () {
     Http::fake([

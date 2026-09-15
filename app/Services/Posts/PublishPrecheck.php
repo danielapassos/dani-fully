@@ -8,8 +8,10 @@ use App\Enums\Platform;
 use App\Models\Post;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
+use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Publishing\SegmentMediaResolver;
 use App\Services\Publishing\TargetMediaSelection;
+use App\Services\Publishing\YouTubePostOptions;
 use Illuminate\Support\Collection;
 
 class PublishPrecheck
@@ -75,21 +77,24 @@ class PublishPrecheck
     {
         $label = $platform->label();
 
-        $messages = array_map(static fn (string $issue): string => match ($issue) {
-            'empty' => 'Add text or media before publishing.',
-            'publishing_unavailable' => "Reconnect the {$label} account or enable {$label} publishing before posting.",
-            'media_required' => "{$label} needs at least one image or video.",
-            'video_required' => "{$label} needs exactly one video for this publishing flow.",
-            'section_too_long' => "A section is over {$label}'s length limit.",
-            'too_many_sections' => "Too many thread sections for {$label}.",
-            'too_many_media' => "Too many media items for {$label}.",
-            'mixed_video_and_images' => 'A post can contain one video or images, not both.',
-            'video_too_long' => "The video is longer than {$label} allows.",
-            'video_too_large' => "The video is larger than {$label} allows.",
-            'gif_not_mixable' => "{$label} allows only one GIF and won't mix it with other media.",
-            'unplaced_media' => "Some attached media isn't placed in this post — remove it or add it to a thread section.",
-            default => "{$label} can't publish this post yet.",
-        }, $issues);
+        $messages = array_map(static fn (string $issue): string => str_starts_with($issue, 'tiktok_')
+            ? app(TikTokPostOptions::class)->describe($issue)
+            : match ($issue) {
+                'empty' => 'Add text or media before publishing.',
+                'publishing_unavailable' => "Reconnect the {$label} account or enable {$label} publishing before posting.",
+                'youtube_options_required' => 'Review YouTube visibility, format, audience, synthetic-media, paid-placement, and subscriber notification choices before publishing.',
+                'media_required' => "{$label} needs at least one image or video.",
+                'video_required' => "{$label} needs exactly one video for this publishing flow.",
+                'section_too_long' => "A section is over {$label}'s length limit.",
+                'too_many_sections' => "Too many thread sections for {$label}.",
+                'too_many_media' => "Too many media items for {$label}.",
+                'mixed_video_and_images' => 'A post can contain one video or images, not both.',
+                'video_too_long' => "The video is longer than {$label} allows.",
+                'video_too_large' => "The video is larger than {$label} allows.",
+                'gif_not_mixable' => "{$label} allows only one GIF and won't mix it with other media.",
+                'unplaced_media' => "Some attached media isn't placed in this post — remove it or add it to a thread section.",
+                default => "{$label} can't publish this post yet.",
+            }, $issues);
 
         return implode(' ', array_values(array_unique($messages)));
     }
@@ -140,6 +145,20 @@ class PublishPrecheck
 
         foreach ($this->mediaIssues($target, $platform, $media) as $issue) {
             $issues[] = $issue;
+        }
+
+        if ($platform === Platform::TikTok && config('services.tiktok.direct_post_enabled')
+            && ! collect($target->media_upload_state ?? [])->contains(static fn (mixed $entry): bool => is_array($entry) && ! empty($entry['remote_ref']))) {
+            $options = $target->content_override['tiktok'] ?? [];
+            $video = $media->first(fn (PostMedia $item): bool => $item->isVideo());
+            $issues = array_merge($issues, app(TikTokPostOptions::class)->issues(
+                is_array($options) ? $options : [],
+                durationSeconds: $video?->duration_seconds,
+            ));
+        }
+
+        if ($platform === Platform::YouTube && app(YouTubePostOptions::class)->resolve($target) === null) {
+            $issues[] = 'youtube_options_required';
         }
 
         return array_values(array_unique($issues));

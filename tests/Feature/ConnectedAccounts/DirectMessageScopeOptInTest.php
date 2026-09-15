@@ -3,13 +3,25 @@
 use App\Enums\Platform;
 use App\Enums\WorkspaceRole;
 use App\Http\Controllers\ConnectedAccounts\OAuthConnectionController;
+use App\Jobs\FetchAccountMessages;
 use App\Models\ConnectedAccount;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 
 // ownerActingIn() + fakeOAuthUser() are shared helpers defined in tests/Pest.php.
+
+beforeEach(function () {
+    Bus::fake([FetchAccountMessages::class]);
+    Http::preventStrayRequests();
+    Http::fake([
+        'https://api.x.com/2/users/me*' => Http::response([
+            'data' => ['subscription_type' => 'None', 'verified_type' => 'none'],
+        ]),
+    ]);
+});
 
 test('x scopes include dm scopes when direct messages enabled', function () {
     config()->set('messages.direct_messages_enabled', true);
@@ -54,6 +66,7 @@ test('tiktok and youtube upload scopes require publishing readiness', function (
     expect($scopes)->toContain($scope);
 })->with([
     'TikTok inbox upload' => [Platform::TikTok, 'services.tiktok.inbox_enabled', 'video.upload'],
+    'TikTok Direct Post' => [Platform::TikTok, 'services.tiktok.direct_post_enabled', 'video.publish'],
     'YouTube upload' => [Platform::YouTube, 'services.youtube.publishing_enabled', 'https://www.googleapis.com/auth/youtube.upload'],
 ]);
 

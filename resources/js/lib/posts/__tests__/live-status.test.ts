@@ -5,6 +5,23 @@ import { dayjs } from '@/lib/datetime/dayjs';
 import { postLiveStatus } from '../live-status';
 
 describe('postLiveStatus', () => {
+    it.each([
+        ['awaiting_action', 'Action needed on the connected platform'],
+        ['completed', 'Upload complete'],
+        ['partial', 'Partially completed'],
+    ] as const)(
+        'describes %s without claiming publication',
+        (status, expected) => {
+            expect(
+                postLiveStatus({
+                    status,
+                    scheduled_at: null,
+                    published_at: null,
+                }),
+            ).toBe(expected);
+        },
+    );
+
     it('counts down to a scheduled post going live', () => {
         const scheduled_at = dayjs().add(3, 'hour').toISOString();
         const label = postLiveStatus({

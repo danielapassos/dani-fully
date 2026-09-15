@@ -57,6 +57,7 @@ class ComposerController extends Controller
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
                 'publishing_ready' => $account->canPublish(),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
+                'tiktok_direct_post_enabled' => $account->platform === Platform::TikTok && (bool) config('services.tiktok.direct_post_enabled'),
             ])->values()->all();
 
         $sets = AccountSet::query()
