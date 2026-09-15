@@ -215,16 +215,20 @@ test('members without the billing permission cannot reach any billing action', f
     'portal' => ['post', 'billing.portal'],
 ]);
 
-test('a user with no membership in the current workspace cannot reach billing', function () {
+test('a user with no membership in the current workspace cannot reach billing', function (string $method, string $route) {
     config(['subscriptions.enabled' => true]);
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create(['owner_id' => User::factory()->create()->id]);
     $user->forceFill(['current_workspace_id' => $workspace->id])->save();
 
     $this->actingAs($user)
-        ->get(route('billing.index'))
-        ->assertForbidden();
-});
+        ->{$method}(route($route))
+        ->assertNotFound();
+})->with([
+    'index' => ['get', 'billing.index'],
+    'checkout' => ['post', 'billing.checkout'],
+    'portal' => ['post', 'billing.portal'],
+]);
 
 test('admins may manage billing', function () {
     config(['subscriptions.enabled' => true]);

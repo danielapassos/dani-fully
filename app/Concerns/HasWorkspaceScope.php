@@ -14,8 +14,14 @@ trait HasWorkspaceScope
     public static function bootHasWorkspaceScope(): void
     {
         static::addGlobalScope('workspace', function (Builder $builder): void {
-            if ($workspaceId = Context::get('workspace_id')) {
-                $builder->where($builder->getModel()->getTable().'.workspace_id', $workspaceId);
+            // Explicit null means an HTTP caller has no authorized workspace;
+            // absent context preserves unscoped CLI and dispatcher queries.
+            if (Context::has('workspace_id')) {
+                if ($workspaceId = Context::get('workspace_id')) {
+                    $builder->where($builder->getModel()->getTable().'.workspace_id', $workspaceId);
+                } else {
+                    $builder->whereRaw('1 = 0');
+                }
             }
         });
 

@@ -9,6 +9,8 @@ use App\Models\PostShare;
 use App\Models\PostTarget;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceMembership;
+use App\Services\Publishing\SegmentMediaResolver;
 
 function shareFor(string $token, ?callable $state = null): PostShare
 {
@@ -97,3 +99,35 @@ it('shows not-available for unknown / revoked / expired tokens', function (): vo
     shareFor('expired-token', fn ($f) => $f->expired());
     $this->get('/share/expired-token')->assertInertia(fn ($page) => $page->where('post', null));
 });
+
+it('a valid share keeps its selected media and account for users outside its workspace', function (string $selection): void {
+    $share = shareFor('authorized-share');
+    $post = $share->post;
+    $account = ConnectedAccount::factory()->create(['workspace_id' => $post->workspace_id]);
+    $media = PostMedia::factory()->for($post)->create(['workspace_id' => $post->workspace_id]);
+    $excluded = PostMedia::factory()->for($post)->create(['workspace_id' => $post->workspace_id]);
+    $target = PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'sections' => ['Shared media'],
+        'section_sources' => [0],
+        'placements_explicit' => true,
+    ]);
+    $target->placements()->create([
+        'post_media_id' => $media->id,
+        'segment_ref' => SegmentMediaResolver::HEAD,
+        'position' => 0,
+    ]);
+    $user = User::factory()->create();
+    if ($selection === 'another') {
+        $workspace = Workspace::factory()->create();
+        WorkspaceMembership::factory()->create(['workspace_id' => $workspace->id, 'user_id' => $user->id]);
+        $user->forceFill(['current_workspace_id' => $workspace->id])->save();
+    }
+
+    $this->actingAs($user)->get('/share/authorized-share')
+        ->assertOk()
+        ->assertDontSee($excluded->id)
+        ->assertInertia(fn ($page) => $page
+            ->where('post.targets.0.handle', $account->handle)
+            ->where('post.targets.0.media_by_section.0.0.id', $media->id));
+})->with(['missing', 'another']);

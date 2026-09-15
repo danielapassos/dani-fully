@@ -75,6 +75,10 @@ class WorkspaceController extends Controller
             return back()->withErrors(['workspace' => 'Transfer ownership or delete the workspace before leaving.']);
         }
 
+        if (! $user->workspaceMemberships()->where('workspace_id', '!=', $workspace->id)->exists()) {
+            return back()->withErrors(['workspace' => 'Create or join another workspace before leaving this one.']);
+        }
+
         DB::transaction(function () use ($membership, $user, $workspace): void {
             $membership->delete();
 

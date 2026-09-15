@@ -29,6 +29,7 @@ function seedNotifications(User $user, string $workspaceId, int $count): void
 test('the feed returns only the first page and a cursor when more exist', function () {
     $user = User::factory()->create();
     $ws = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($ws)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $ws->id])->save();
     seedNotifications($user, $ws->id, NotificationPresenter::PER_PAGE + 5);
 
@@ -42,6 +43,7 @@ test('the feed returns only the first page and a cursor when more exist', functi
 test('following the cursor returns the remaining notifications and then stops', function () {
     $user = User::factory()->create();
     $ws = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($ws)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $ws->id])->save();
     $total = NotificationPresenter::PER_PAGE + 5;
     seedNotifications($user, $ws->id, $total);
@@ -67,6 +69,7 @@ test('the feed is scoped to the current workspace', function () {
     $user = User::factory()->create();
     $wsA = Workspace::factory()->create();
     $wsB = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($wsA)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $wsA->id])->save();
     seedNotifications($user, $wsA->id, 2);
     seedNotifications($user, $wsB->id, 3);

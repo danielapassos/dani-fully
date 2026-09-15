@@ -8,6 +8,7 @@ use App\Enums\InstanceRole;
 use App\Enums\Platform;
 use App\Models\InstanceSetting;
 use App\Models\User;
+use App\Models\WorkspaceInvitation;
 use Illuminate\Support\Facades\Cache;
 
 class InstanceSettings
@@ -118,17 +119,20 @@ class InstanceSettings
         return $this->platformEnabledValues('platforms_enabled');
     }
 
-    public function registrationsAllowed(?string $invitationToken = null): bool
+    public function registrationsAllowed(?string $invitationToken = null, ?string $email = null): bool
     {
-        if (! $this->ownerExists()) {
+        if (! $this->ownerExists() || $this->registrationsEnabled()) {
             return true;
         }
 
-        if ($invitationToken !== null && $invitationToken !== '') {
-            return true;
+        if ($invitationToken === null || $invitationToken === '') {
+            return false;
         }
 
-        return $this->registrationsEnabled();
+        $invitation = WorkspaceInvitation::findByToken($invitationToken);
+
+        return $invitation?->isValid() === true
+            && ($email === null || hash_equals(mb_strtolower($invitation->email), mb_strtolower($email)));
     }
 
     public function ownerExists(): bool

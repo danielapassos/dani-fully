@@ -17,8 +17,18 @@ class WorkspaceMiddleware
         /** @var User|null $user */
         $user = $request->user();
 
-        if ($user && $user->current_workspace_id) {
-            Context::add('workspace_id', $user->current_workspace_id);
+        Context::forget('workspace_id');
+
+        if ($user !== null) {
+            $workspaceId = $user->current_workspace_id;
+
+            if (! $user->isMemberOfWorkspace($workspaceId)) {
+                $workspaceId = null;
+                $user->current_workspace_id = null;
+                $user->setRelation('currentWorkspace', null);
+            }
+
+            Context::add('workspace_id', $workspaceId);
         }
 
         return $next($request);

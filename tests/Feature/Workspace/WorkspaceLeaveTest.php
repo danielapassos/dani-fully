@@ -28,3 +28,18 @@ test('sole owner with other members cannot leave', function () {
 
     $this->assertTrue($owner->fresh()->isMemberOfWorkspace($workspace->id));
 });
+
+test('the final workspace cannot be left even by its sole member', function () {
+    $workspace = Workspace::factory()->create();
+    $user = User::factory()->create(['current_workspace_id' => $workspace->id]);
+    $membership = WorkspaceMembership::factory()->owner()->create([
+        'workspace_id' => $workspace->id,
+        'user_id' => $user->id,
+    ]);
+
+    $this->actingAs($user)->delete(route('workspaces.leave', $workspace))
+        ->assertSessionHasErrors('workspace');
+
+    $this->assertModelExists($membership);
+    expect($user->fresh()->current_workspace_id)->toBe($workspace->id);
+});

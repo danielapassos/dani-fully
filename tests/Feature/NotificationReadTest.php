@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceMembership;
 use Illuminate\Support\Str;
 
 function makeNotification(User $user, ?string $workspaceId, ?string $readAt = null): string
@@ -45,6 +46,7 @@ test('mark-all-read clears unread for the current workspace and global notificat
     $user = User::factory()->create();
     $wsA = Workspace::factory()->create();
     $wsB = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($wsA)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $wsA->id])->save();
     makeNotification($user, $wsA->id);
     makeNotification($user, null);
@@ -82,6 +84,7 @@ test('delete-all removes notifications for the current workspace and global noti
     $user = User::factory()->create();
     $wsA = Workspace::factory()->create();
     $wsB = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($wsA)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $wsA->id])->save();
     $aId = makeNotification($user, $wsA->id);
     $globalId = makeNotification($user, null);
@@ -110,6 +113,7 @@ test('a json request can delete one notification without a redirect', function (
 test('a json request can delete all notifications without a redirect', function () {
     $user = User::factory()->create();
     $ws = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($ws)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $ws->id])->save();
     $id = makeNotification($user, $ws->id);
 
@@ -136,6 +140,7 @@ test('a json request can mark one notification read without a redirect', functio
 test('a json request can mark all notifications read without a redirect', function () {
     $user = User::factory()->create();
     $ws = Workspace::factory()->create();
+    WorkspaceMembership::factory()->for($ws)->for($user)->create();
     $user->forceFill(['current_workspace_id' => $ws->id])->save();
     makeNotification($user, $ws->id);
 

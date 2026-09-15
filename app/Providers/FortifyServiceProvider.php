@@ -60,7 +60,9 @@ class FortifyServiceProvider extends ServiceProvider
     {
         Fortify::loginView(function (Request $request) {
             $settings = app(InstanceSettings::class);
-            $canRegister = $settings->registrationsAllowed($request->query('invitation'));
+            $invitationToken = $request->query('invitation');
+            $invitationToken = is_string($invitationToken) ? $invitationToken : null;
+            $canRegister = $settings->registrationsAllowed($invitationToken);
 
             return Inertia::render('auth/login', [
                 'canResetPassword' => Features::enabled(Features::resetPasswords()),
@@ -68,7 +70,7 @@ class FortifyServiceProvider extends ServiceProvider
                 'registrationDisabledMessage' => $canRegister ? null : 'Registration is disabled for this instance.',
                 'status' => $request->session()->get('status'),
                 'providers' => SocialProvider::enabledProvidersWithLabels(),
-                'invitation' => $request->query('invitation'),
+                'invitation' => $invitationToken,
                 ...$this->defaultLoginCredentials(),
             ]);
         });

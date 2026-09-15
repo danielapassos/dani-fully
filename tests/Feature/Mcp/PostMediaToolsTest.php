@@ -12,8 +12,9 @@ use Illuminate\Support\Facades\Storage;
 test('add_post_media downloads a public image into the workspace', function (): void {
     Storage::fake('public');
     $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==');
-    // example.com resolves to public IPs; Http::fake intercepts the HTTP call.
-    Http::fake(['https://example.com/*' => Http::response($png, 200, ['Content-Type' => 'image/png'])]);
+    // A public IP avoids external DNS; every HTTP request is intercepted locally.
+    Http::preventStrayRequests();
+    Http::fake(['https://1.1.1.1/a.png' => Http::response($png, 200, ['Content-Type' => 'image/png'])]);
 
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create();
@@ -21,7 +22,7 @@ test('add_post_media downloads a public image into the workspace', function (): 
     bindTokenToWorkspace($user, $workspace);
 
     $response = ShoutrrrServer::actingAs($user)->tool(AddPostMediaTool::class, [
-        'url' => 'https://example.com/a.png', 'alt_text' => 'a dot',
+        'url' => 'https://1.1.1.1/a.png', 'alt_text' => 'a dot',
     ]);
 
     $response->assertOk();

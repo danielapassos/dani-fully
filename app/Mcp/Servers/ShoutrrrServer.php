@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Methods\CallToolWithScopeAuthorization;
 use App\Mcp\Tools\AddPostMediaTool;
 use App\Mcp\Tools\CreateAccountSetTool;
 use App\Mcp\Tools\CreatePostTool;
@@ -31,12 +32,19 @@ use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
+use Override;
 
 #[Name('Shoutrrr')]
 #[Version('1.0.0')]
 #[Instructions('Read and manage social posts, schedules, and connected accounts for one workspace. The workspace is fixed at connection time. Use list_workspaces to see which workspace this connection operates on; reconnect to switch. Write tools let you create and edit drafts, schedule, manage media and account sets, and share links. Irreversible outward-facing actions (publish_post_now, retry_post_target, delete_post) require explicit human confirmation — call them with confirm=true only after the human approves.')]
 class ShoutrrrServer extends Server
 {
+    #[Override]
+    protected function boot(): void
+    {
+        $this->addMethod('tools/call', CallToolWithScopeAuthorization::class);
+    }
+
     /**
      * @var array<int, class-string<Tool>>
      */
