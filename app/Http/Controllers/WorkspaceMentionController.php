@@ -14,6 +14,8 @@ class WorkspaceMentionController extends Controller
 {
     public function store(Request $request): JsonResponse
     {
+        abort_if($request->user()->current_workspace_id === null, 403);
+
         $allowedPlatforms = array_map(
             static fn (Platform $platform): string => $platform->value,
             Platform::cases(),
@@ -59,6 +61,8 @@ class WorkspaceMentionController extends Controller
 
     public function destroy(Request $request, string $workspaceMention): JsonResponse
     {
+        abort_if($request->user()->current_workspace_id === null, 403);
+
         WorkspaceMention::withoutGlobalScopes()
             ->where('workspace_id', $request->user()->current_workspace_id)
             ->findOrFail($workspaceMention)
