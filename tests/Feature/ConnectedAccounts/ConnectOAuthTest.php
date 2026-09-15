@@ -258,7 +258,7 @@ test('callback records the YouTube upload scope used by the publishing gate', fu
 
     $account = ConnectedAccount::withoutGlobalScopes()->firstWhere('remote_account_id', 'youtube-channel-1');
     expect($account)->not->toBeNull()
-        ->and($account->capabilities['oauth_scopes'])->toContain('https://www.googleapis.com/auth/youtube.upload')
+        ->and($account->capabilities['oauth_scopes'])->toContain('https://www.googleapis.com/auth/youtube.upload')->not->toContain('https://www.googleapis.com/auth/youtube.force-ssl')
         ->and($account->canPublish())->toBeTrue();
 });
 

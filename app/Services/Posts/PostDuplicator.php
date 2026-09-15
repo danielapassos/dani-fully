@@ -184,11 +184,11 @@ class PostDuplicator
     }
 
     /**
-     * Point an override's `media_ids` at the cloned media rows.
+     * Point content and cover references at the cloned media rows.
      *
-     * @param  array{text?: string|null, media_ids?: list<string>, tiktok?: array<string, mixed>}|null  $override
+     * @param  array<string, mixed>|null  $override
      * @param  array<string, string>  $mediaIdMap
-     * @return array{text?: string|null, media_ids?: list<string>, tiktok?: array<string, mixed>}|null
+     * @return array<string, mixed>|null
      */
     private function remapOverride(?array $override, array $mediaIdMap): ?array
     {
@@ -199,14 +199,23 @@ class PostDuplicator
             }
         }
 
-        if ($override === null || ! isset($override['media_ids'])) {
-            return $override;
+        if ($override === null) {
+            return null;
         }
 
-        $override['media_ids'] = array_map(
-            static fn (string $id): string => $mediaIdMap[$id] ?? $id,
-            $override['media_ids'],
-        );
+        if (isset($override['media_ids'])) {
+            $override['media_ids'] = array_map(
+                static fn (string $id): string => $mediaIdMap[$id] ?? $id,
+                $override['media_ids'],
+            );
+        }
+
+        foreach (['instagram' => 'cover_media_id', 'youtube' => 'thumbnail_media_id'] as $platform => $field) {
+            $id = $override[$platform][$field] ?? null;
+            if (is_string($id) && isset($mediaIdMap[$id])) {
+                $override[$platform][$field] = $mediaIdMap[$id];
+            }
+        }
 
         return $override;
     }

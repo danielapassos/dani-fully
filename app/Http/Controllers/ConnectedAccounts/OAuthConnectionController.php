@@ -300,6 +300,7 @@ class OAuthConnectionController extends Controller
 
         if ($platform === Platform::YouTube && config('services.youtube.publishing_enabled')) {
             $scopes[] = 'https://www.googleapis.com/auth/youtube.upload';
+            $scopes[] = 'https://www.googleapis.com/auth/youtube.force-ssl';
         }
 
         if ($platform->supportsDirectMessages() && $this->shouldRequestDirectMessageScopes($platform)) {

@@ -217,3 +217,23 @@ test('a post from another workspace cannot be duplicated', function (): void {
         ->post(route('posts.duplicate', $post))
         ->assertNotFound();
 });
+
+test('copied cover references use copied media without changing the source', function (string $platform, string $field): void {
+    $post = publishedPostWithMediaAndTarget($this->workspace, $this->user);
+    $sourceMedia = $post->media()->sole();
+    $sourceTarget = $post->targets()->sole();
+    $sourceTarget->forceFill([
+        'content_override' => [$platform => [$field => $sourceMedia->id]],
+    ])->save();
+
+    $this->actingAs($this->user)->post(route('posts.duplicate', $post))->assertRedirect();
+
+    $draft = Post::query()->where('status', PostStatus::Draft->value)->sole();
+    $copy = $draft->media()->sole();
+    expect($draft->targets()->sole()->content_override[$platform][$field])->toBe($copy->id)
+        ->and($sourceTarget->fresh()->content_override[$platform][$field])->toBe($sourceMedia->id)
+        ->and(Storage::disk('public')->get($copy->path))->toBe('IMG');
+})->with([
+    'Instagram' => ['instagram', 'cover_media_id'],
+    'YouTube' => ['youtube', 'thumbnail_media_id'],
+]);

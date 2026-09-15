@@ -6,11 +6,12 @@ namespace App\Services\Publishing;
 
 use App\Models\PostTarget;
 use Closure;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 final class YouTubePostOptions
 {
-    public const array FIELDS = ['privacy_status', 'category_id', 'format_intent', 'made_for_kids', 'contains_synthetic_media', 'has_paid_product_placement', 'notify_subscribers', 'title', 'description'];
+    public const array FIELDS = ['privacy_status', 'category_id', 'format_intent', 'made_for_kids', 'contains_synthetic_media', 'has_paid_product_placement', 'notify_subscribers', 'title', 'description', 'thumbnail_media_id'];
 
     public const array BOOLEAN_FIELDS = ['made_for_kids', 'contains_synthetic_media', 'has_paid_product_placement', 'notify_subscribers'];
 
@@ -21,6 +22,7 @@ final class YouTubePostOptions
 
         return [
             $prefix => ['nullable', 'array:'.implode(',', self::FIELDS)],
+            $prefix.'.thumbnail_media_id' => ['nullable', 'uuid'],
             $prefix.'.privacy_status' => ['string', Rule::in(['private', 'unlisted', 'public'])],
             $prefix.'.category_id' => ['string', 'regex:/^\d{1,3}$/D'],
             $prefix.'.format_intent' => ['string', Rule::in(['video', 'short'])],
@@ -38,7 +40,7 @@ final class YouTubePostOptions
         ];
     }
 
-    /** @return array{privacy_status: string, category_id: string, format_intent: string, made_for_kids: bool, contains_synthetic_media: bool, has_paid_product_placement: bool, notify_subscribers: bool, title?: string, description?: string}|null */
+    /** @return array{privacy_status: string, category_id: string, format_intent: string, made_for_kids: bool, contains_synthetic_media: bool, has_paid_product_placement: bool, notify_subscribers: bool, title?: string, description?: string, thumbnail_media_id?: string|null}|null */
     public function resolve(PostTarget $target): ?array
     {
         $override = $target->content_override ?? [];
@@ -67,7 +69,8 @@ final class YouTubePostOptions
             }
         }
         if ((array_key_exists('title', $options) && ! self::validTitle($options['title']))
-            || (array_key_exists('description', $options) && ! self::validDescription($options['description']))) {
+            || (array_key_exists('description', $options) && ! self::validDescription($options['description']))
+            || (isset($options['thumbnail_media_id']) && (! is_string($options['thumbnail_media_id']) || ! Str::isUuid($options['thumbnail_media_id'])))) {
             return null;
         }
 
@@ -86,6 +89,10 @@ final class YouTubePostOptions
         if (array_key_exists('description', $options)) {
             // Laravel converts an explicitly blank request string to null.
             $resolved['description'] = $options['description'] ?? '';
+        }
+
+        if (array_key_exists('thumbnail_media_id', $options)) {
+            $resolved['thumbnail_media_id'] = $options['thumbnail_media_id'];
         }
 
         return $resolved;

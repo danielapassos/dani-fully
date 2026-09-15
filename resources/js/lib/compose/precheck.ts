@@ -23,6 +23,9 @@ import type {
 export type BlockReason =
     | TikTokIssue
     | 'youtube_options_required'
+    | 'youtube_thumbnail_unavailable'
+    | 'youtube_thumbnail_release_scope_required'
+    | 'youtube_thumbnail_requires_video'
     | 'instagram_cover_requires_reel'
     | 'empty'
     | 'publishing_unavailable'
@@ -368,6 +371,12 @@ export function describeReason(
             return 'use exactly one video in an Instagram Reel or feed post, or remove its cover';
         case 'youtube_options_required':
             return 'Complete YouTube publishing settings and fix any title or description errors before publishing.';
+        case 'youtube_thumbnail_unavailable':
+            return 'Choose an existing JPEG or PNG image up to 8 MB from this workspace for the YouTube cover.';
+        case 'youtube_thumbnail_release_scope_required':
+            return 'Reconnect this YouTube account to grant video management access before publishing with a cover. The upload stays private until YouTube accepts the cover.';
+        case 'youtube_thumbnail_requires_video':
+            return 'A custom YouTube cover requires exactly one video. Add a video or remove the cover.';
         case 'story_requires_media':
             return `${label} Stories need an image or video`;
         default:

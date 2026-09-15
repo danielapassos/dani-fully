@@ -80,3 +80,18 @@ it('filters by text query on base_text', function (): void {
                 ->has('posts.data', 1)
                 ->where('posts.data.0.base_text', 'launch announcement')));
 });
+
+it('the completed tab includes uploads and public posts but excludes unfinished posts', function (): void {
+    makePost($this->workspace, $this->user, PostStatus::Published);
+    makePost($this->workspace, $this->user, PostStatus::Completed);
+    makePost($this->workspace, $this->user, PostStatus::AwaitingAction);
+    makePost($this->workspace, $this->user, PostStatus::Publishing);
+
+    $this->actingAs($this->user)
+        ->get(route('posts.index', ['status' => 'published']))
+        ->assertInertia(fn ($page) => $page
+            ->where('counts.published', 2)
+            ->loadDeferredProps(fn ($reload) => $reload
+                ->has('posts.data', 2)
+                ->where('posts.data', fn ($posts): bool => collect($posts)->pluck('status')->sort()->values()->all() === ['completed', 'published'])));
+});

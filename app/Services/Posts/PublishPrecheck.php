@@ -13,6 +13,7 @@ use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\SegmentMediaResolver;
 use App\Services\Publishing\TargetMediaSelection;
 use App\Services\Publishing\YouTubePostOptions;
+use App\Services\Publishing\YouTubeThumbnail;
 use Illuminate\Support\Collection;
 
 class PublishPrecheck
@@ -84,6 +85,9 @@ class PublishPrecheck
                 'empty' => 'Add text or media before publishing.',
                 'publishing_unavailable' => "Reconnect the {$label} account or enable {$label} publishing before posting.",
                 'youtube_options_required' => 'Review YouTube visibility, format, audience, synthetic-media, paid-placement, and subscriber notification choices before publishing.',
+                'youtube_thumbnail_unavailable' => YouTubeThumbnail::UNAVAILABLE_MESSAGE,
+                'youtube_thumbnail_release_scope_required' => YouTubeThumbnail::RELEASE_SCOPE_MESSAGE,
+                'youtube_thumbnail_requires_video' => 'A custom YouTube cover requires one video.',
                 'instagram_cover_unavailable' => 'Choose an available JPEG or PNG cover image from this workspace.',
                 'instagram_cover_requires_reel' => 'A custom Instagram cover requires one Reel video. Remove the cover for photos, carousels, or Stories.',
                 'media_required' => "{$label} needs at least one image or video.",
@@ -164,7 +168,7 @@ class PublishPrecheck
             $issues[] = 'youtube_options_required';
         }
 
-        $issues = array_merge($issues, app(InstagramReelCover::class)->issues($target, $media->values()->all()));
+        $issues = array_merge($issues, app(InstagramReelCover::class)->issues($target, $media->values()->all()), app(YouTubeThumbnail::class)->issues($target, $media->values()->all()));
 
         return array_values(array_unique($issues));
     }

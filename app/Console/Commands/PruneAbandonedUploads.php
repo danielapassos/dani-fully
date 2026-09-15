@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Models\PostMedia;
 use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\YouTubeThumbnail;
 use App\Support\FileStorage;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -60,7 +61,7 @@ class PruneAbandonedUploads extends Command
 
         $prunedRecords = 0;
         foreach ($orphans as $orphan) {
-            if (app(InstagramReelCover::class)->isReferenced($orphan)) {
+            if (app(InstagramReelCover::class)->isReferenced($orphan) || app(YouTubeThumbnail::class)->isReferenced($orphan)) {
                 continue;
             }
             $orphan->delete(); // model's deleting hook removes the underlying file(s)

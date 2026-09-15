@@ -1,5 +1,8 @@
 import { segmentRefs } from '@/lib/compose/tiptap-doc';
-import { normalizeYouTubePostOptions } from '@/lib/compose/youtube';
+import {
+    normalizeYouTubePostOptions,
+    youtubePostOptionsEqual,
+} from '@/lib/compose/youtube';
 import {
     type Account,
     BASE_TAB,
@@ -94,6 +97,7 @@ export type ComposerAction =
           accountId: string;
           options: YouTubePostOptions;
       }
+    | { type: 'setYouTubeThumbnail'; accountId: string; mediaId: string | null }
     | { type: 'disableAutoSplit'; accountIds: string[] }
     | { type: 'setOverrideSegments'; accountId: string; segments: string[] }
     | { type: 'discardOverride'; accountId: string }
@@ -597,12 +601,42 @@ export function composerReducer(
                 saveState: 'dirty',
             };
 
+        case 'setYouTubeThumbnail':
+            if (
+                (state.youtubeByAccount[action.accountId]?.thumbnail_media_id ??
+                    null) === action.mediaId
+            ) {
+                return state;
+            }
+            return {
+                ...state,
+                youtubeByAccount: {
+                    ...state.youtubeByAccount,
+                    [action.accountId]: {
+                        ...state.youtubeByAccount[action.accountId],
+                        thumbnail_media_id: action.mediaId,
+                    },
+                },
+                saveState: 'dirty',
+            };
+
         case 'setYouTubeOptions':
             return {
                 ...state,
                 youtubeByAccount: {
                     ...state.youtubeByAccount,
-                    [action.accountId]: action.options,
+                    [action.accountId]: {
+                        ...action.options,
+                        ...(action.options.thumbnail_media_id === undefined &&
+                        state.youtubeByAccount[action.accountId]
+                            ?.thumbnail_media_id !== undefined
+                            ? {
+                                  thumbnail_media_id:
+                                      state.youtubeByAccount[action.accountId]
+                                          .thumbnail_media_id,
+                              }
+                            : {}),
+                    },
                 },
                 saveState: 'dirty',
             };
@@ -1188,9 +1222,10 @@ export function contentMatchesServer(
             JSON.stringify(Object.keys(serverYouTube).sort()) ||
         localYouTubeKeys.some(
             (key) =>
-                JSON.stringify(
-                    normalizeYouTubePostOptions(state.youtubeByAccount[key]),
-                ) !== JSON.stringify(serverYouTube[key]),
+                !youtubePostOptionsEqual(
+                    state.youtubeByAccount[key],
+                    serverYouTube[key] ?? {},
+                ),
         )
     ) {
         return false;

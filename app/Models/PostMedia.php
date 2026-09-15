@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Concerns\HasWorkspaceScope;
 use App\Services\Media\DerivedMedia;
 use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\YouTubeThumbnail;
 use App\Support\FileStorage;
 use Database\Factories\PostMediaFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -75,6 +76,9 @@ class PostMedia extends Model
     protected static function booted(): void
     {
         static::deleting(function (PostMedia $media): void {
+            if (app(YouTubeThumbnail::class)->isReferenced($media)) {
+                throw ValidationException::withMessages(['media' => 'Remove this image from its YouTube covers before deleting it.']);
+            }
             if (app(InstagramReelCover::class)->isReferenced($media)) {
                 throw ValidationException::withMessages(['media' => 'Remove this image from its Instagram Reel covers before deleting it.']);
             }

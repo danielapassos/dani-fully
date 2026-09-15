@@ -92,7 +92,7 @@ class CreatePostTool extends WorkspaceTool
                 'kind' => $schema->string()->enum(['all', 'set', 'account'])->required(),
                 'id' => $schema->string()->description('Account set id (kind=set) or connected account id (kind=account).'),
             ])->description('Where to post.')->required(),
-            'targets' => $schema->array()->description('Per-account declarations: connected_account_id and content_override.tiktok or content_override.youtube. An Instagram Reel can set content_override.instagram.cover_media_id to a workspace image id; the cover stays separate from video media. Supply the explicit publishing choices for each selected account; missing choices remain incomplete drafts.'),
+            'targets' => $schema->array()->description('Per-account declarations: connected_account_id and content_override.tiktok or content_override.youtube. An Instagram Reel can set content_override.instagram.cover_media_id to a workspace image id; the cover stays separate from video media. YouTube can set content_override.youtube.thumbnail_media_id to a workspace JPEG/PNG image id up to 8 MB; YouTube checks cover eligibility and the upload stays private if its cover fails. Supply the explicit publishing choices for each selected account; missing choices remain incomplete drafts.'),
         ];
     }
 }

@@ -49,7 +49,7 @@ const STATUS_TABS: { value: StatusTab; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'scheduled', label: 'Scheduled' },
     { value: 'draft', label: 'Drafts' },
-    { value: 'published', label: 'Published' },
+    { value: 'published', label: 'Completed' },
     { value: 'missed', label: 'Missed' },
 ];
 

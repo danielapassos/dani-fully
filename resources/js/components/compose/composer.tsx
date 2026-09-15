@@ -1,5 +1,5 @@
 import { Link, useHttp, usePage } from '@inertiajs/react';
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { Fragment, useEffect, useReducer, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import PostGifController from '@/actions/App/Http/Controllers/Gifs/PostGifController';
@@ -41,6 +41,7 @@ import {
 import { buildPlatformPreview } from '@/lib/compose/platform-preview';
 import { precheckDestinations } from '@/lib/compose/precheck';
 import { readVideoMetadata, videoLimitsForTargets } from '@/lib/compose/video';
+import { canChooseYouTubeThumbnail } from '@/lib/compose/youtube';
 import {
     defaultSettings,
     normalizeSettings,
@@ -83,6 +84,7 @@ import { SubmitBar } from './submit-bar';
 import { TargetStatusChips } from './target-status-chips';
 import { TikTokPublishingControls } from './tiktok-publishing-controls';
 import { VideoEditor } from './video-editor';
+import { YouTubeCoverPicker } from './youtube-cover-picker';
 import { YouTubePublishingControls } from './youtube-publishing-controls';
 
 /** What the image editor is currently working on. */
@@ -1403,18 +1405,59 @@ export default function Composer({
                     tabAccounts
                         .filter((account) => account.platform === 'youtube')
                         .map((account) => (
-                            <YouTubePublishingControls
-                                key={account.id}
-                                account={account}
-                                options={state.youtubeByAccount[account.id]}
-                                onChange={(options) =>
-                                    dispatch({
-                                        type: 'setYouTubeOptions',
-                                        accountId: account.id,
-                                        options,
-                                    })
-                                }
-                            />
+                            <Fragment key={account.id}>
+                                <YouTubePublishingControls
+                                    account={account}
+                                    options={state.youtubeByAccount[account.id]}
+                                    onChange={(options) =>
+                                        dispatch({
+                                            type: 'setYouTubeOptions',
+                                            accountId: account.id,
+                                            options,
+                                        })
+                                    }
+                                />
+                                {(canChooseYouTubeThumbnail(state, account) ||
+                                    state.youtubeByAccount[account.id]
+                                        ?.thumbnail_media_id) && (
+                                    <YouTubeCoverPicker
+                                        account={account}
+                                        postId={state.postId}
+                                        formatIntent={
+                                            state.youtubeByAccount[account.id]
+                                                ?.format_intent
+                                        }
+                                        thumbnailMediaId={
+                                            state.youtubeByAccount[account.id]
+                                                ?.thumbnail_media_id
+                                        }
+                                        canChoose={canChooseYouTubeThumbnail(
+                                            state,
+                                            account,
+                                        )}
+                                        onChange={(mediaId) =>
+                                            dispatch({
+                                                type: 'setYouTubeThumbnail',
+                                                accountId: account.id,
+                                                mediaId,
+                                            })
+                                        }
+                                        onUploadingChange={(uploading) =>
+                                            setCoverUploadingByAccount(
+                                                (previous) =>
+                                                    (previous[account.id] ??
+                                                        false) === uploading
+                                                        ? previous
+                                                        : {
+                                                              ...previous,
+                                                              [account.id]:
+                                                                  uploading,
+                                                          },
+                                            )
+                                        }
+                                    />
+                                )}
+                            </Fragment>
                         ))}
 
                 {!readOnly &&

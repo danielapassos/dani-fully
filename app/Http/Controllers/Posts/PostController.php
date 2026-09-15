@@ -65,7 +65,7 @@ class PostController extends Controller
             'all' => (int) $byStatus->sum(),
             'scheduled' => (int) ($byStatus[PostStatus::Scheduled->value] ?? 0),
             'draft' => (int) ($byStatus[PostStatus::Draft->value] ?? 0),
-            'published' => (int) ($byStatus[PostStatus::Published->value] ?? 0),
+            'published' => (int) ($byStatus[PostStatus::Published->value] ?? 0) + (int) ($byStatus[PostStatus::Completed->value] ?? 0),
             'missed' => (int) ($byStatus[PostStatus::Missed->value] ?? 0),
         ];
 
@@ -74,7 +74,8 @@ class PostController extends Controller
                 Post::query()
                     ->with(['author:id,name', 'workspace:id,is_initial', 'targets.account', 'media'])
                     ->where('status', '!=', PostStatus::Deleted->value)
-                    ->when($status !== '' && $status !== 'all', fn ($query) => $query->where('status', $status))
+                    ->when($status === 'published', fn ($query) => $query->whereIn('status', [PostStatus::Published->value, PostStatus::Completed->value]))
+                    ->when(! in_array($status, ['', 'all', 'published'], true), fn ($query) => $query->where('status', $status))
             )
                 // Order by the effective timeline date. Cursor pagination cannot
                 // build its keyset WHERE clause from a raw orderBy (those orders

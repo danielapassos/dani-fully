@@ -712,6 +712,27 @@ describe('format-aware precheck blocks', () => {
 });
 
 describe('describeReason', () => {
+    it('explains unavailable YouTube covers, video requirements, and reconnecting for release permission', () => {
+        const limits = limitsFor({ platform: 'youtube' });
+        expect(
+            describeReason('youtube_thumbnail_unavailable', 'youtube', limits),
+        ).toContain('JPEG or PNG');
+        expect(
+            describeReason(
+                'youtube_thumbnail_requires_video',
+                'youtube',
+                limits,
+            ),
+        ).toContain('exactly one video');
+        const message = describeReason(
+            'youtube_thumbnail_release_scope_required',
+            'youtube',
+            limits,
+        );
+        expect(message).toContain('Reconnect this YouTube account');
+        expect(message).toContain('stays private');
+    });
+
     it('describes a media-first platform needing an attachment', () => {
         const text = describeReason(
             'media_required',

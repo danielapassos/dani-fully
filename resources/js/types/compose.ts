@@ -20,6 +20,7 @@ export type InstagramPostOptions = {
 };
 
 export type YouTubePostOptions = Partial<{
+    thumbnail_media_id: string | null;
     title: string;
     description: string;
     privacy_status: 'private' | 'unlisted' | 'public';
