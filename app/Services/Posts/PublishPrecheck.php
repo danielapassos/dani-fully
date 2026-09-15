@@ -168,7 +168,8 @@ class PublishPrecheck
             $issues[] = 'youtube_options_required';
         }
 
-        $issues = array_merge($issues, app(InstagramReelCover::class)->issues($target, $media->values()->all()), app(YouTubeThumbnail::class)->issues($target, $media->values()->all()));
+        $mediaItems = array_values($media->all());
+        $issues = array_merge($issues, app(InstagramReelCover::class)->issues($target, $mediaItems), app(YouTubeThumbnail::class)->issues($target, $mediaItems));
 
         return array_values(array_unique($issues));
     }

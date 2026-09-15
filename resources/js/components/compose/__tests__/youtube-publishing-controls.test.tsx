@@ -84,11 +84,11 @@ describe('YouTube publishing controls', () => {
         expect(description.disabled).toBe(true);
         expect(inheritDescription.checked).toBe(true);
         expect(changed).not.toHaveBeenCalled();
-        act(() =>
+        act(() => {
             fireEvent.change(title, {
                 target: { value: 'Specific YouTube title' },
-            }),
-        );
+            });
+        });
         expect(changed).toHaveBeenLastCalledWith({
             ...initial,
             title: 'Specific YouTube title',
@@ -100,19 +100,23 @@ describe('YouTube publishing controls', () => {
             title: 'Specific YouTube title',
             description: '',
         });
-        act(() =>
+        act(() => {
             fireEvent.change(description, {
                 target: { value: 'Separate description' },
-            }),
-        );
+            });
+        });
         expect(changed.mock.lastCall![0].description).toBe(
             'Separate description',
         );
-        act(() => fireEvent.change(description, { target: { value: '' } }));
+        act(() => {
+            fireEvent.change(description, { target: { value: '' } });
+        });
         expect(changed.mock.lastCall![0].description).toBe('');
         act(() => inheritDescription.click());
         expect(changed.mock.lastCall![0]).not.toHaveProperty('description');
-        act(() => fireEvent.change(title, { target: { value: '' } }));
+        act(() => {
+            fireEvent.change(title, { target: { value: '' } });
+        });
         expect(changed).toHaveBeenLastCalledWith(initial);
     });
 
