@@ -10,6 +10,11 @@ use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\Str;
+use Laravel\Passport\Bridge\Client;
+use Laravel\Passport\Bridge\Scope;
+use Laravel\Passport\Bridge\User;
+use League\OAuth2\Server\RequestTypes\AuthorizationRequest;
+use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -28,9 +33,27 @@ class SecurityHeaders
         $nonce = Str::random(32);
         Vite::useCspNonce($nonce);
 
+        $previousAuthToken = $request->hasSession() ? $request->session()->get('authToken') : null;
+        $callbackOrigin = null;
+        if ($request->routeIs('passport.authorizations.approve', 'passport.authorizations.deny')
+            && is_string($previousAuthToken)
+            && is_string($request->input('auth_token'))
+            && hash_equals($previousAuthToken, $request->input('auth_token'))) {
+            $callbackOrigin = $this->validatedOAuthCallbackOrigin($request);
+        }
+
         $response = $next($request);
 
-        foreach ($this->headers($nonce) as $name => $value) {
+        if ($request->routeIs('passport.authorizations.authorize')
+            && $response->isOk()
+            && $request->hasSession()
+            && $request->session()->get('authToken') !== $previousAuthToken) {
+            $callbackOrigin = $this->validatedOAuthCallbackOrigin($request);
+        } elseif (! $response->isRedirection()) {
+            $callbackOrigin = null;
+        }
+
+        foreach ($this->headers($nonce, $callbackOrigin) as $name => $value) {
             $response->headers->set($name, $value);
         }
 
@@ -40,7 +63,7 @@ class SecurityHeaders
     /**
      * @return array<string, string>
      */
-    protected function headers(string $nonce): array
+    protected function headers(string $nonce, ?string $callbackOrigin = null): array
     {
         $headers = [
             'X-Frame-Options' => 'DENY',
@@ -54,7 +77,7 @@ class SecurityHeaders
         // Enforce the CSP everywhere EXCEPT local development; the production policy
         // is what matters and is verifiable against a built deploy.
         if (! app()->environment('local')) {
-            $headers['Content-Security-Policy'] = $this->contentSecurityPolicy($nonce);
+            $headers['Content-Security-Policy'] = $this->contentSecurityPolicy($nonce, $callbackOrigin);
         }
 
         if (app()->isProduction()) {
@@ -64,7 +87,7 @@ class SecurityHeaders
         return $headers;
     }
 
-    protected function contentSecurityPolicy(string $nonce): string
+    protected function contentSecurityPolicy(string $nonce, ?string $callbackOrigin = null): string
     {
         // The remote storage origin (empty on local/public-disk deployments) is
         // needed both to XHR-PUT direct-to-storage uploads / GET the video
@@ -79,6 +102,10 @@ class SecurityHeaders
         // fall through to default-src 'self' and are blocked. Only added when the
         // GIF browser is actually configured, keeping the policy tight otherwise.
         $media = trim($media.' '.implode(' ', $this->klipyOrigins()));
+        $formAction = "'self' https: http://localhost:8787";
+        if ($callbackOrigin !== null && $callbackOrigin !== 'http://localhost:8787') {
+            $formAction .= ' '.$callbackOrigin;
+        }
         $directives = [
             "default-src 'self'",
             "script-src 'self' 'nonce-{$nonce}' 'strict-dynamic'",
@@ -97,11 +124,49 @@ class SecurityHeaders
             "frame-ancestors 'none'",
             "base-uri 'self'",
             // Chrome applies form-action to Passport's post-consent redirect.
-            "form-action 'self' https: http://localhost:8787",
+            "form-action {$formAction}",
             "object-src 'none'",
         ];
 
         return implode('; ', $directives);
+    }
+
+    /**
+     * Passport has already validated this session request against the registered
+     * client. Read it before consent consumes it, using Passport's class allowlist.
+     * Only that request's exact loopback origin belongs in the form policy.
+     */
+    private function validatedOAuthCallbackOrigin(Request $request): ?string
+    {
+        $serialized = $request->hasSession() ? $request->session()->get('authRequest') : null;
+        if (! is_string($serialized)) {
+            return null;
+        }
+
+        $authorization = unserialize($serialized, ['allowed_classes' => [
+            AuthorizationRequest::class, Client::class, Scope::class, User::class,
+        ]]);
+        if (! $authorization instanceof AuthorizationRequestInterface
+            || $authorization->getGrantTypeId() !== 'authorization_code') {
+            return null;
+        }
+
+        $uri = $authorization->getRedirectUri();
+        if ($uri === null) {
+            $registered = $authorization->getClient()->getRedirectUri();
+            $uri = is_array($registered) && count($registered) === 1 ? $registered[0] : $registered;
+        }
+        if (! is_string($uri)) {
+            return null;
+        }
+        $parts = parse_url($uri);
+        if ($parts === false || ($parts['scheme'] ?? '') !== 'http'
+            || ! in_array(strtolower($parts['host'] ?? ''), ['127.0.0.1', 'localhost'], true)
+            || isset($parts['user']) || isset($parts['pass'])) {
+            return null;
+        }
+
+        return 'http://'.strtolower($parts['host']).(isset($parts['port']) ? ':'.$parts['port'] : '');
     }
 
     /**
