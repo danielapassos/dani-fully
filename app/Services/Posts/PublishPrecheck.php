@@ -12,6 +12,7 @@ use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\SegmentMediaResolver;
 use App\Services\Publishing\TargetMediaSelection;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Publishing\YouTubePostOptions;
 use App\Services\Publishing\YouTubeThumbnail;
 use Illuminate\Support\Collection;
@@ -154,7 +155,8 @@ class PublishPrecheck
             $issues[] = $issue;
         }
 
-        if ($platform === Platform::TikTok && config('services.tiktok.direct_post_enabled')
+        if ($platform === Platform::TikTok && (config('services.tiktok.direct_post_enabled')
+            || app(TikTokPublishingRoute::class)->forTarget($target) === 'metricool')
             && ! collect($target->media_upload_state ?? [])->contains(static fn (mixed $entry): bool => is_array($entry) && ! empty($entry['remote_ref']))) {
             $options = $target->content_override['tiktok'] ?? [];
             $video = $media->first(fn (PostMedia $item): bool => $item->isVideo());

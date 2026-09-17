@@ -12,6 +12,7 @@ use App\Models\AccountSet;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\WorkspaceMention;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Support\InstanceSettings;
 use App\Support\MetricsPresenter;
 use App\Support\PostView;
@@ -57,7 +58,8 @@ class ComposerController extends Controller
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
                 'publishing_ready' => $account->canPublish(),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
-                'tiktok_direct_post_enabled' => $account->platform === Platform::TikTok && (bool) config('services.tiktok.direct_post_enabled'),
+                'tiktok_direct_post_enabled' => $account->platform === Platform::TikTok
+                    && (config('services.tiktok.direct_post_enabled') || app(TikTokPublishingRoute::class)->usesMetricool($account)),
             ])->values()->all();
 
         $sets = AccountSet::query()

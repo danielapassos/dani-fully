@@ -17,6 +17,7 @@ use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Posts\DraftService;
 use App\Services\Posts\PostStaleWriteException;
 use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Publishing\YouTubePostOptions;
 use App\Support\CursorPage;
 use App\Support\PostListItem;
@@ -177,20 +178,22 @@ class PostsController extends Controller
 
         $hadBeenPublished = in_array($model->status, [PostStatus::Published, PostStatus::Partial, PostStatus::Failed, PostStatus::AwaitingAction, PostStatus::Completed], true);
 
-        $model->loadMissing('targets');
+        return app(TikTokPublishingRoute::class)->withDeletionLock($model, function () use ($model, $hadBeenPublished): JsonResponse {
+            abort_if($model->targets->contains(fn (PostTarget $target): bool => app(TikTokPublishingRoute::class)->requiresProviderDeletion($target)), 422, TikTokPublishingRoute::DELETION_MESSAGE);
 
-        if (! $hadBeenPublished) {
-            $model->delete();
+            if (! $hadBeenPublished) {
+                $model->delete();
 
-            return response()->json(['deleted' => true, 'remote' => false]);
-        }
+                return response()->json(['deleted' => true, 'remote' => false]);
+            }
 
-        $model->targets
-            ->filter(fn (PostTarget $t): bool => $t->remote_id !== null)
-            ->each(fn (PostTarget $t) => DeletePostTarget::dispatch($t));
+            $model->targets
+                ->filter(fn (PostTarget $t): bool => $t->remote_id !== null)
+                ->each(fn (PostTarget $t) => DeletePostTarget::dispatch($t));
 
-        $model->forceFill(['status' => PostStatus::Deleted->value, 'deleted_at' => now()])->save();
+            $model->forceFill(['status' => PostStatus::Deleted->value, 'deleted_at' => now()])->save();
 
-        return response()->json(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for completed uploads where possible.']);
+            return response()->json(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for completed uploads where possible.']);
+        });
     }
 }

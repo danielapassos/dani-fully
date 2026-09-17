@@ -17,6 +17,7 @@ use App\Models\PostTarget;
 use App\Services\Posts\DraftService;
 use App\Services\Posts\PostDuplicator;
 use App\Services\Posts\PostStaleWriteException;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Support\PostListItem;
 use App\Support\PostView;
 use Illuminate\Http\JsonResponse;
@@ -151,47 +152,49 @@ class PostController extends Controller
     {
         $request->user()->can('delete', $post) ?: abort(403);
 
-        $post->loadMissing('targets');
+        return app(TikTokPublishingRoute::class)->withDeletionLock($post, function () use ($post): RedirectResponse {
+            abort_if($post->targets->contains(fn (PostTarget $target): bool => app(TikTokPublishingRoute::class)->requiresProviderDeletion($target)), 422, TikTokPublishingRoute::DELETION_MESSAGE);
 
-        $needsRemoteCleanup = in_array($post->status, [
-            PostStatus::Publishing, PostStatus::Published, PostStatus::Partial, PostStatus::Failed,
-            PostStatus::AwaitingAction, PostStatus::Completed,
-        ], true);
+            $needsRemoteCleanup = in_array($post->status, [
+                PostStatus::Publishing, PostStatus::Published, PostStatus::Partial, PostStatus::Failed,
+                PostStatus::AwaitingAction, PostStatus::Completed,
+            ], true);
 
-        if (! $needsRemoteCleanup) {
-            $post->delete();
+            if (! $needsRemoteCleanup) {
+                $post->delete();
 
-            return redirect()->route('posts.index')->with('success', 'Post deleted.');
-        }
+                return redirect()->route('posts.index')->with('success', 'Post deleted.');
+            }
 
-        $targetsToDelete = DB::transaction(function () use ($post) {
-            $targetsToDelete = $post->targets
-                ->filter(fn (PostTarget $target): bool => $this->hasRemotePosts($target))
-                ->values();
+            $targetsToDelete = DB::transaction(function () use ($post) {
+                $targetsToDelete = $post->targets
+                    ->filter(fn (PostTarget $target): bool => $this->hasRemotePosts($target))
+                    ->values();
 
-            $targetsToDelete->each(fn (PostTarget $target) => $target->forceFill([
-                'status' => PostTargetStatus::Deleting->value,
-                'next_attempt_at' => null,
-            ])->save());
-
-            $post->targets
-                ->reject(fn (PostTarget $target): bool => $this->hasRemotePosts($target))
-                ->each(fn (PostTarget $target) => $target->forceFill([
-                    'status' => PostTargetStatus::Deleted->value,
+                $targetsToDelete->each(fn (PostTarget $target) => $target->forceFill([
+                    'status' => PostTargetStatus::Deleting->value,
                     'next_attempt_at' => null,
                 ])->save());
 
-            $post->forceFill([
-                'status' => PostStatus::Deleted->value,
-                'deleted_at' => now(),
-            ])->save();
+                $post->targets
+                    ->reject(fn (PostTarget $target): bool => $this->hasRemotePosts($target))
+                    ->each(fn (PostTarget $target) => $target->forceFill([
+                        'status' => PostTargetStatus::Deleted->value,
+                        'next_attempt_at' => null,
+                    ])->save());
 
-            return $targetsToDelete;
+                $post->forceFill([
+                    'status' => PostStatus::Deleted->value,
+                    'deleted_at' => now(),
+                ])->save();
+
+                return $targetsToDelete;
+            });
+
+            $targetsToDelete->each(fn (PostTarget $target) => DeletePostTarget::dispatch($target));
+
+            return redirect()->route('posts.index')->with('success', 'Post deleted from connected accounts where possible.');
         });
-
-        $targetsToDelete->each(fn (PostTarget $target) => DeletePostTarget::dispatch($target));
-
-        return redirect()->route('posts.index')->with('success', 'Post deleted from connected accounts where possible.');
     }
 
     private function hasRemotePosts(PostTarget $target): bool

@@ -10,6 +10,8 @@ use App\Enums\UsageCategory;
 use App\Exceptions\TikTokCreatorInfoException;
 use App\Exceptions\TokenRefreshException;
 use App\Models\ConnectedAccount;
+use App\Services\Publishing\Metricool\MetricoolClient;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Publishing\TokenManager;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
@@ -27,6 +29,10 @@ class TikTokCreatorInfo
     {
         if ($account->platform !== Platform::TikTok || $account->disabled_at !== null) {
             throw new TikTokCreatorInfoException('Choose an enabled TikTok account before publishing.');
+        }
+
+        if ($token === null && app(TikTokPublishingRoute::class)->usesMetricool($account)) {
+            return app(MetricoolClient::class)->creatorInfo($account);
         }
 
         try {

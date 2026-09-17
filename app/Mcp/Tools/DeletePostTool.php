@@ -9,6 +9,7 @@ use App\Jobs\DeletePostTarget;
 use App\Mcp\Tools\Concerns\WorkspaceTool;
 use App\Models\Post;
 use App\Models\PostTarget;
+use App\Services\Publishing\TikTokPublishingRoute;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
 use Laravel\Mcp\Request;
@@ -47,21 +48,25 @@ class DeletePostTool extends WorkspaceTool
             return $unconfirmed;
         }
 
-        $post->loadMissing('targets');
+        return app(TikTokPublishingRoute::class)->withDeletionLock($post, function () use ($post, $hadBeenPublished): Response {
+            if ($post->targets->contains(fn (PostTarget $target): bool => app(TikTokPublishingRoute::class)->requiresProviderDeletion($target))) {
+                return Response::error(TikTokPublishingRoute::DELETION_MESSAGE);
+            }
 
-        if (! $hadBeenPublished) {
-            $post->delete();
+            if (! $hadBeenPublished) {
+                $post->delete();
 
-            return Response::text(json_encode(['deleted' => true, 'remote' => false], JSON_THROW_ON_ERROR));
-        }
+                return Response::text(json_encode(['deleted' => true, 'remote' => false], JSON_THROW_ON_ERROR));
+            }
 
-        $post->targets
-            ->filter(fn (PostTarget $t): bool => $t->remote_id !== null)
-            ->each(fn (PostTarget $t) => DeletePostTarget::dispatch($t));
+            $post->targets
+                ->filter(fn (PostTarget $t): bool => $t->remote_id !== null)
+                ->each(fn (PostTarget $t) => DeletePostTarget::dispatch($t));
 
-        $post->forceFill(['status' => PostStatus::Deleted->value, 'deleted_at' => now()])->save();
+            $post->forceFill(['status' => PostStatus::Deleted->value, 'deleted_at' => now()])->save();
 
-        return Response::text(json_encode(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for completed uploads where possible.'], JSON_THROW_ON_ERROR));
+            return Response::text(json_encode(['deleted' => true, 'remote' => true, 'message' => 'Remote deletion queued for completed uploads where possible.'], JSON_THROW_ON_ERROR));
+        });
     }
 
     /**

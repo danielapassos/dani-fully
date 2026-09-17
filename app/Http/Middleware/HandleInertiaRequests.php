@@ -12,6 +12,7 @@ use App\Models\PostTargetReply;
 use App\Models\User;
 use App\Models\WorkspaceMembership;
 use App\Services\Gifs\KlipyClient;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Support\CommunityStats;
 use App\Support\FeedbackConfig;
 use App\Support\InstanceSettings;
@@ -179,7 +180,8 @@ class HandleInertiaRequests extends Middleware
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
                 'publishing_ready' => $account->canPublish(),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
-                'tiktok_direct_post_enabled' => $account->platform->value === 'tiktok' && (bool) config('services.tiktok.direct_post_enabled'),
+                'tiktok_direct_post_enabled' => $account->platform->value === 'tiktok'
+                    && (config('services.tiktok.direct_post_enabled') || app(TikTokPublishingRoute::class)->usesMetricool($account)),
             ])->values()->all();
     }
 
