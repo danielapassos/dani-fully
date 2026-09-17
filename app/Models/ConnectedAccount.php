@@ -8,6 +8,7 @@ use App\Concerns\HasWorkspaceScope;
 use App\Enums\ConnectedAccountStatus;
 use App\Enums\MetricsStatus;
 use App\Enums\Platform;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Support\InstanceSettings;
 use App\Support\OAuthGrantedScopes;
 use Carbon\CarbonImmutable;
@@ -190,7 +191,9 @@ class ConnectedAccount extends Model
      */
     public function canPublish(): bool
     {
-        if ($this->isDisabled() || $this->status !== ConnectedAccountStatus::Active) {
+        $route = app(TikTokPublishingRoute::class);
+        $metricool = $route->usesMetricool($this);
+        if ($this->isDisabled() || (! $metricool && $this->status !== ConnectedAccountStatus::Active)) {
             return false;
         }
 
@@ -202,12 +205,20 @@ class ConnectedAccount extends Model
             return false;
         }
 
+        if ($metricool) {
+            return $route->ready($this);
+        }
+
         return ! $this->publishingPermissionBlocked();
     }
 
     /** @return list<string> */
     public function requiredPublishingScopes(): array
     {
+        if (app(TikTokPublishingRoute::class)->usesMetricool($this)) {
+            return [];
+        }
+
         $requiredScope = $this->platform->requiredPublishingScope();
         if ($requiredScope !== null) {
             return [$requiredScope];
@@ -271,6 +282,15 @@ class ConnectedAccount extends Model
             return 'This account is disabled. Re-enable it before posting.';
         }
 
+        $route = app(TikTokPublishingRoute::class);
+        if ($route->usesMetricool($this)) {
+            if (! app(InstanceSettings::class)->platformAvailable($this->platform)) {
+                return 'TikTok is disabled on this installation. Enable it before posting.';
+            }
+
+            return $route->unavailableReason($this);
+        }
+
         if ($this->status !== ConnectedAccountStatus::Active) {
             return "Reconnect {$this->handle} before posting.";
         }
@@ -311,6 +331,13 @@ class ConnectedAccount extends Model
     {
         if ($this->isDisabled()) {
             return 'enable_account';
+        }
+
+        $route = app(TikTokPublishingRoute::class);
+        if ($route->usesMetricool($this)) {
+            return ! app(InstanceSettings::class)->platformAvailable($this->platform) || ! $route->ready($this)
+                ? 'operator_configuration'
+                : null;
         }
 
         if ($this->status !== ConnectedAccountStatus::Active) {

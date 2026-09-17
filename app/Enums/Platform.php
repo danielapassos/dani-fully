@@ -448,7 +448,9 @@ enum Platform: string
     public function publishingEnabled(): bool
     {
         return match ($this) {
-            self::TikTok => (bool) config('services.tiktok.direct_post_enabled') || (bool) config('services.tiktok.inbox_enabled'),
+            self::TikTok => config('services.tiktok.publishing_provider', 'native') === 'metricool'
+                || (bool) config('services.tiktok.direct_post_enabled')
+                || (bool) config('services.tiktok.inbox_enabled'),
             self::YouTube => (bool) config('services.youtube.publishing_enabled'),
             default => true,
         };

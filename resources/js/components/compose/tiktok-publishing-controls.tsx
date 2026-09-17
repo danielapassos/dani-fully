@@ -49,7 +49,7 @@ export function TikTokPublishingControls({
         const fail = () => {
             if (cancelled) return;
             setError(
-                'TikTok could not load current publishing settings. Refresh, or reconnect the account with direct publishing permission.',
+                'TikTok could not load current publishing settings. Refresh settings or check this account’s publishing connection.',
             );
             setLoading(false);
         };

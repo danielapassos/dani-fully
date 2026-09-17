@@ -7,10 +7,12 @@ namespace App\Jobs;
 use App\Enums\PostTargetStatus;
 use App\Models\PostTarget;
 use App\Services\Publishing\PublishConnectorRegistry;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Publishing\TokenManager;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Str;
+use RuntimeException;
 use Throwable;
 
 class DeletePostTarget implements ShouldQueue
@@ -33,11 +35,18 @@ class DeletePostTarget implements ShouldQueue
 
     public function handle(PublishConnectorRegistry $registry, TokenManager $tokens): void
     {
-        $target = $this->target->fresh() ?? $this->target;
+        $target = $this->target->fresh();
+        if ($target === null) {
+            return;
+        }
         $this->target = $target;
 
         if ($target->status === PostTargetStatus::Deleted) {
             return;
+        }
+
+        if (app(TikTokPublishingRoute::class)->requiresProviderDeletion($target)) {
+            throw new RuntimeException(TikTokPublishingRoute::DELETION_MESSAGE);
         }
 
         $target->forceFill(['status' => PostTargetStatus::Deleting->value])->save();
@@ -50,7 +59,15 @@ class DeletePostTarget implements ShouldQueue
 
     public function failed(Throwable $e): void
     {
-        $target = $this->target->fresh() ?? $this->target;
+        $target = $this->target->fresh();
+        if ($target === null) {
+            return;
+        }
+        if (app(TikTokPublishingRoute::class)->requiresProviderDeletion($target)) {
+            $target->forceFill(['error_message' => TikTokPublishingRoute::DELETION_MESSAGE])->save();
+
+            return;
+        }
 
         $target->forceFill([
             'status' => PostTargetStatus::Failed->value,

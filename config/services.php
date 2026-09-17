@@ -79,11 +79,19 @@ return [
     ],
 
     'tiktok' => [
+        'publishing_provider' => env('TIKTOK_PUBLISHING_PROVIDER', 'native'),
         'client_id' => env('TIKTOK_CLIENT_KEY'),
         'client_secret' => env('TIKTOK_CLIENT_SECRET'),
         'redirect' => env('TIKTOK_REDIRECT_URI'),
         'inbox_enabled' => filter_var(env('TIKTOK_INBOX_ENABLED', false), FILTER_VALIDATE_BOOL),
         'direct_post_enabled' => filter_var(env('TIKTOK_DIRECT_POST_ENABLED', false), FILTER_VALIDATE_BOOL),
+    ],
+
+    'metricool' => [
+        'token' => env('METRICOOL_API_TOKEN'),
+        'user_id' => env('METRICOOL_USER_ID'),
+        'workspace_id' => env('METRICOOL_WORKSPACE_ID'),
+        'accounts' => json_decode((string) env('METRICOOL_TIKTOK_ACCOUNTS', '{}'), true) ?? [],
     ],
 
     'youtube' => [

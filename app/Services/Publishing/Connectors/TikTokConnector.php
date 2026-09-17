@@ -17,6 +17,7 @@ use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Media\PublicMediaUrl;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
 use App\Services\Publishing\Contracts\PublishConnector;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
 use Aws\Exception\AwsException;
@@ -49,7 +50,15 @@ class TikTokConnector implements PublishConnector
 
     public function publish(PublishContext $context): PublishResult
     {
-        if (! config('services.tiktok.inbox_enabled') && ! config('services.tiktok.direct_post_enabled')) {
+        if (app(TikTokPublishingRoute::class)->pin($context->target) === 'metricool') {
+            return app(MetricoolTikTokConnector::class)->publish($context);
+        }
+
+        $existingTransfer = collect($context->target->media_upload_state ?? [])->contains(
+            static fn (mixed $entry): bool => is_array($entry)
+                && (! empty($entry['remote_ref']) || data_get($entry, 'metadata.init_outcome_unknown') === true),
+        );
+        if (! config('services.tiktok.inbox_enabled') && ! config('services.tiktok.direct_post_enabled') && ! $existingTransfer) {
             return PublishResult::failure(
                 ErrorKind::Unsupported,
                 'TikTok publishing is disabled until the developer app and posting permission are ready.',

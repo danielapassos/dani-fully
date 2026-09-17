@@ -18,6 +18,7 @@ use App\Services\Posts\PostDuplicator;
 use App\Services\Posts\PublishPrecheck;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Inertia\Testing\AssertableInertia;
 
 function tikTokControlOptions(array $overrides = []): array
 {
@@ -98,6 +99,57 @@ test('creator info is unavailable to guests and while Direct Post is disabled', 
     test()->getJson(route('accounts.tiktok.creator-info', $account))->assertUnauthorized();
     config()->set('services.tiktok.direct_post_enabled', false);
     test()->actingAs($user)->getJson(route('accounts.tiktok.creator-info', $account))->assertNotFound();
+    Http::assertNothingSent();
+});
+
+test('Metricool publishing exposes creator controls while the native app is disabled', function () {
+    [$user, , $account] = tikTokControlMember();
+    config()->set('services.tiktok.direct_post_enabled', false);
+    config()->set('services.tiktok.publishing_provider', 'metricool');
+    $this->mock(TikTokCreatorInfo::class)->shouldReceive('query')->once()
+        ->withArgs(fn (ConnectedAccount $requested): bool => $requested->is($account))
+        ->andReturn(tikTokControlCreator());
+
+    test()->actingAs($user)->getJson(route('accounts.tiktok.creator-info', $account))
+        ->assertSuccessful()
+        ->assertJsonPath('creator.privacy_level_options.0', 'PUBLIC_TO_EVERYONE')
+        ->assertHeader('Cache-Control', 'no-store, private');
+});
+
+test('Metricool configuration keeps publishing choices visible and enforces them before dispatch', function () {
+    [$user, $workspace, $account] = tikTokControlMember();
+    config()->set('services.tiktok.direct_post_enabled', false);
+    config()->set('services.tiktok.publishing_provider', 'metricool');
+    config()->set('services.metricool', [
+        'workspace_id' => $workspace->id,
+        'token' => 'private-provider-token',
+        'user_id' => '123',
+        'accounts' => [$account->id => '456'],
+    ]);
+    $account->forceFill(['capabilities' => [], 'status' => 'needs_attention'])->save();
+    $post = Post::factory()->create(['workspace_id' => $workspace->id]);
+    PostMedia::factory()->video()->for($post)->create(['workspace_id' => $workspace->id, 'duration_seconds' => 12]);
+    $target = PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::TikTok,
+        'sections' => ['caption'],
+    ]);
+
+    test()->actingAs($user)->get("/posts/{$post->id}")
+        ->assertSuccessful()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('accounts.0.tiktok_direct_post_enabled', true)
+            ->where('accounts.0.publishing_ready', true)
+            ->where('shell.accounts.0.tiktok_direct_post_enabled', true)
+            ->where('shell.accounts.0.publishing_ready', true))
+        ->assertDontSee('private-provider-token');
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+    expect($blocked[0]['issues'])->toContain('tiktok_privacy_required', 'tiktok_music_consent_required')
+        ->not->toContain('publishing_unavailable');
+
+    $target->forceFill(['content_override' => ['tiktok' => tikTokControlOptions()]])->save();
+    expect(app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media'])))->toBe([]);
     Http::assertNothingSent();
 });
 

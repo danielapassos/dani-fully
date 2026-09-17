@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Services\ConnectedAccounts\TikTok\TikTokCreatorInfo;
+use App\Services\Publishing\TikTokPublishingRoute;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -19,7 +20,8 @@ class TikTokCreatorInfoController extends Controller
     {
         abort_unless($request->user()->can('create', Post::class), 403);
         abort_unless($account->workspace_id === $request->user()->current_workspace_id, 404);
-        abort_unless($account->platform === Platform::TikTok && config('services.tiktok.direct_post_enabled'), 404);
+        abort_unless($account->platform === Platform::TikTok && (config('services.tiktok.direct_post_enabled')
+            || app(TikTokPublishingRoute::class)->usesMetricool($account)), 404);
 
         try {
             return response()->json(['creator' => $creatorInfo->query($account)])->header('Cache-Control', 'private, no-store');
