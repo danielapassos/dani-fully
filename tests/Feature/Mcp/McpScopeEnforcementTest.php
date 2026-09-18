@@ -4,6 +4,8 @@ use App\Enums\PostStatus;
 use App\Enums\PostTargetStatus;
 use App\Mcp\Servers\ShoutrrrServer;
 use App\Mcp\Tools\AddPostMediaTool;
+use App\Mcp\Tools\BeginVideoUploadTool;
+use App\Mcp\Tools\CompleteVideoUploadTool;
 use App\Mcp\Tools\CreateAccountSetTool;
 use App\Mcp\Tools\CreatePostTool;
 use App\Mcp\Tools\CreateShareLinkTool;
@@ -41,6 +43,8 @@ dataset('MCP mutating tools', [
     'schedule post' => SchedulePostTool::class,
     'queue post' => QueuePostTool::class,
     'add media' => AddPostMediaTool::class,
+    'begin video upload' => BeginVideoUploadTool::class,
+    'complete video upload' => CompleteVideoUploadTool::class,
     'remove media' => RemovePostMediaTool::class,
     'create account set' => CreateAccountSetTool::class,
     'update account set' => UpdateAccountSetTool::class,

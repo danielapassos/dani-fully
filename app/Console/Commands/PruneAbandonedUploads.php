@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Models\PostMedia;
+use App\Services\Posts\VideoUploadService;
 use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\YouTubeThumbnail;
 use App\Support\FileStorage;
@@ -20,6 +21,7 @@ class PruneAbandonedUploads extends Command
 
     public function handle(): int
     {
+        app(VideoUploadService::class)->pruneExpired();
         $disk = FileStorage::disk();
         $cutoff = Carbon::now()->subHours(6)->getTimestamp();
         $deleted = 0;

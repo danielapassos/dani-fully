@@ -6,6 +6,8 @@ namespace App\Mcp\Servers;
 
 use App\Mcp\Methods\CallToolWithScopeAuthorization;
 use App\Mcp\Tools\AddPostMediaTool;
+use App\Mcp\Tools\BeginVideoUploadTool;
+use App\Mcp\Tools\CompleteVideoUploadTool;
 use App\Mcp\Tools\CreateAccountSetTool;
 use App\Mcp\Tools\CreatePostTool;
 use App\Mcp\Tools\CreateShareLinkTool;
@@ -61,6 +63,8 @@ class ShoutrrrServer extends Server
         SchedulePostTool::class,
         QueuePostTool::class,
         AddPostMediaTool::class,
+        BeginVideoUploadTool::class,
+        CompleteVideoUploadTool::class,
         RemovePostMediaTool::class,
         CreateAccountSetTool::class,
         UpdateAccountSetTool::class,
