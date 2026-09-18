@@ -35,3 +35,23 @@ test('openapi spec declares a bearer security scheme', function (): void {
 
     expect($hasBearerScheme)->toBeTrue();
 });
+
+test('openapi documents the signed MP4 upload request and completion metadata', function (): void {
+    $spec = $this->getJson('/api/v1/openapi.json')->assertOk()->json();
+    $begin = $spec['paths']['/media/video-uploads']['post'];
+    $complete = $spec['paths']['/media/video-uploads/{uploadId}/complete']['post'];
+    $resolve = static function (array $schema) use ($spec): array {
+        if (isset($schema['$ref'])) {
+            return $spec['components']['schemas'][basename($schema['$ref'])];
+        }
+
+        return $schema;
+    };
+    $request = $resolve($begin['requestBody']['content']['application/json']['schema']);
+    $signedUpload = $resolve($begin['responses']['201']['content']['application/json']['schema']);
+    $media = $resolve($complete['responses']['200']['content']['application/json']['schema']);
+
+    expect(array_keys($request['properties']))->toContain('content_type', 'size_bytes', 'width', 'height', 'duration_seconds', 'sha256')
+        ->and(array_keys($signedUpload['properties']))->toContain('upload_id', 'url', 'headers', 'expires_at', 'max_size_bytes')
+        ->and(array_keys($media['properties']))->toContain('id', 'mime', 'width', 'height', 'size_bytes', 'observed_sha256');
+});

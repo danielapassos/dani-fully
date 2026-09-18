@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\PostActionsController;
 use App\Http\Controllers\Api\V1\PostingScheduleController;
 use App\Http\Controllers\Api\V1\PostsController;
 use App\Http\Controllers\Api\V1\SharesController;
+use App\Http\Controllers\Api\V1\VideoUploadsController;
 use App\Http\Middleware\RecordApiUsage;
 use App\Http\Middleware\RequireWriteScope;
 use App\Http\Middleware\ResolveApiWorkspace;
@@ -45,6 +46,8 @@ Route::middleware(['auth:api', ResolveApiWorkspace::class, 'throttle:api', Recor
             Route::delete('posts/{id}/shares/{shareId}', [SharesController::class, 'destroy']);
 
             Route::post('media', [MediaController::class, 'store']);
+            Route::post('media/video-uploads', [VideoUploadsController::class, 'store']);
+            Route::post('media/video-uploads/{uploadId}/complete', [VideoUploadsController::class, 'complete'])->whereUuid('uploadId');
             Route::delete('media/{mediaId}', [MediaController::class, 'destroy']);
 
             Route::post('account-sets', [AccountSetsController::class, 'store']);
