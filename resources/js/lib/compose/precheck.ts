@@ -27,6 +27,7 @@ export type BlockReason =
     | 'youtube_thumbnail_release_scope_required'
     | 'youtube_thumbnail_requires_video'
     | 'instagram_cover_requires_reel'
+    | 'instagram_trial_requires_reel'
     | 'empty'
     | 'publishing_unavailable'
     | 'media_required'
@@ -286,6 +287,15 @@ export function precheckDestinations({
             reasons.push('instagram_cover_requires_reel');
         }
         if (
+            account.platform === 'instagram' &&
+            instagramByAccount?.[account.id]?.trial_params &&
+            (formatByAccount[account.id] === 'story' ||
+                targetMedia.length !== 1 ||
+                targetMedia[0].kind !== 'video')
+        ) {
+            reasons.push('instagram_trial_requires_reel');
+        }
+        if (
             account.platform === 'youtube' &&
             youtubeByAccount !== undefined &&
             !youtubeOptionsComplete(youtubeByAccount[account.id])
@@ -369,6 +379,8 @@ export function describeReason(
             return `${label} Reels need a video`;
         case 'instagram_cover_requires_reel':
             return 'use exactly one video in an Instagram Reel or feed post, or remove its cover';
+        case 'instagram_trial_requires_reel':
+            return 'use exactly one video in an Instagram Reel or feed post, or turn off Trial Reel';
         case 'youtube_options_required':
             return 'Complete YouTube publishing settings and fix any title or description errors before publishing.';
         case 'youtube_thumbnail_unavailable':

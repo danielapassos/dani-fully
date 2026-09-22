@@ -164,6 +164,69 @@ function mediaItem(over: Partial<MediaView> & { id: string }): MediaView {
 }
 
 describe('precheckDestinations', () => {
+    it('blocks invalid Trial Reels until the creator changes media or explicitly disables trial', () => {
+        const input = {
+            accounts: [accountFor({ platform: 'instagram' })],
+            segments: ['Caption'],
+            mentions: [],
+            autoSplitByAccount: {},
+            overrideByAccount: {},
+            media: [
+                mediaItem({ id: 'video', kind: 'video', mime: 'video/mp4' }),
+            ],
+            limits: [
+                limitsFor({
+                    platform: 'instagram',
+                    maxMedia: 10,
+                    threadMax: 1,
+                }),
+            ],
+            formatByAccount: {},
+            placements: { __head__: ['video'] },
+            instagramByAccount: {
+                'acc-1': {
+                    cover_media_id: null,
+                    trial_params: { graduation_strategy: 'MANUAL' as const },
+                },
+            },
+        };
+        expect(precheckDestinations(input)).toEqual([]);
+        expect(
+            precheckDestinations({
+                ...input,
+                formatByAccount: { 'acc-1': 'reels' },
+            }),
+        ).toEqual([]);
+        expect(
+            precheckDestinations({
+                ...input,
+                formatByAccount: { 'acc-1': 'story' },
+            })[0].reasons,
+        ).toContain('instagram_trial_requires_reel');
+        expect(
+            precheckDestinations({
+                ...input,
+                placementsByAccount: { 'acc-1': {} },
+            })[0].reasons,
+        ).toContain('instagram_trial_requires_reel');
+        expect(
+            precheckDestinations({
+                ...input,
+                media: [...input.media, mediaItem({ id: 'image' })],
+                placements: { __head__: ['video', 'image'] },
+            })[0].reasons,
+        ).toContain('instagram_trial_requires_reel');
+        expect(
+            precheckDestinations({
+                ...input,
+                formatByAccount: { 'acc-1': 'story' },
+                instagramByAccount: {
+                    'acc-1': { cover_media_id: null, trial_params: null },
+                },
+            }),
+        ).toEqual([]);
+    });
+
     it('blocks a selected Instagram cover after changing to Story or excluding the video', () => {
         const input = {
             accounts: [accountFor({ platform: 'instagram' })],

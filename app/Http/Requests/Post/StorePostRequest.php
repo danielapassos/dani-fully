@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Post;
 
+use App\Enums\PostFormat;
 use App\Http\Requests\Post\Concerns\DerivesMentionHandleRules;
 use App\Models\Post;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\InstagramTrialReel;
 use App\Services\Publishing\YouTubePostOptions;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -43,6 +45,7 @@ class StorePostRequest extends FormRequest
             'auto_repost' => ['sometimes', 'nullable', 'boolean'],
             'targets' => ['array'],
             'targets.*.connected_account_id' => ['required', 'string'],
+            'targets.*.format' => ['nullable', Rule::enum(PostFormat::class)],
             'targets.*.content_override' => ['nullable', 'array'],
             'targets.*.content_override.segments' => ['array'],
             'targets.*.content_override.segments.*' => ['nullable', 'string'],
@@ -51,6 +54,7 @@ class StorePostRequest extends FormRequest
             ...TikTokPostOptions::draftRules(),
             ...YouTubePostOptions::draftRules(),
             ...InstagramReelCover::draftRules(),
+            ...InstagramTrialReel::draftRules(),
             'segment_breaks' => ['array'],
             'segment_breaks.*' => ['string'],
             'placements' => ['array'],

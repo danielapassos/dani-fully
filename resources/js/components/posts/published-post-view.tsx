@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 
 import PostMetricsRefreshController from '@/actions/App/Http/Controllers/Posts/PostMetricsRefreshController';
 import { PlatformGlyph } from '@/components/common/platform-glyph';
+import { InstagramTrialSummary } from '@/components/compose/instagram-trial-controls';
 import { TargetStatusChips } from '@/components/compose/target-status-chips';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -278,6 +279,11 @@ function PublishedCard({
             </div>
 
             <div className="p-4">
+                {target.platform === 'instagram' && (
+                    <InstagramTrialSummary
+                        options={target.content_override?.instagram}
+                    />
+                )}
                 {target.status !== 'published' && (
                     <div className="mb-4 border-b border-border pb-4">
                         <TargetStatusChips targets={[target]} />

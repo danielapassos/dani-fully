@@ -17,6 +17,7 @@ use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Posts\DraftService;
 use App\Services\Posts\PostStaleWriteException;
 use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\InstagramTrialReel;
 use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Publishing\YouTubePostOptions;
 use App\Support\CursorPage;
@@ -79,6 +80,7 @@ class PostsController extends Controller
             'auto_repost' => ['sometimes', 'nullable', 'boolean'],
             'targets' => ['array'],
             'targets.*.connected_account_id' => ['required', 'string'],
+            'targets.*.format' => ['nullable', Rule::enum(PostFormat::class)],
             'targets.*.content_override' => ['nullable', 'array'],
             'targets.*.content_override.segments' => ['array'],
             'targets.*.content_override.segments.*' => ['nullable', 'string'],
@@ -87,6 +89,7 @@ class PostsController extends Controller
             ...TikTokPostOptions::draftRules(),
             ...YouTubePostOptions::draftRules(),
             ...InstagramReelCover::draftRules(),
+            ...InstagramTrialReel::draftRules(),
         ]);
 
         /** @var User $user */
@@ -144,6 +147,7 @@ class PostsController extends Controller
             ...TikTokPostOptions::draftRules(),
             ...YouTubePostOptions::draftRules(),
             ...InstagramReelCover::draftRules(),
+            ...InstagramTrialReel::draftRules(),
             'targets.*.segment_breaks' => ['nullable', 'array'],
             'targets.*.segment_breaks.*' => ['string'],
             'targets.*.placements' => ['nullable', 'array'],

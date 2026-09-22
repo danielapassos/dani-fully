@@ -75,6 +75,119 @@ function postWithCover(options?: InstagramPostOptions): PostView {
 }
 
 describe('Instagram cover state', () => {
+    it('hydrates and serializes trial settings independently for each destination', () => {
+        const trial: InstagramPostOptions = {
+            cover_media_id: 'cover',
+            trial_params: { graduation_strategy: 'MANUAL' },
+        };
+        const post = postWithCover(trial);
+        let state = composerReducer(initialComposerState(), {
+            type: 'hydrate',
+            post,
+        });
+        expect(state.instagramByAccount[account.id]).toEqual(trial);
+        expect(contentMatchesServer(state, post)).toBe(true);
+        state = composerReducer(state, {
+            type: 'setInstagramTrial',
+            accountId: 'second-instagram',
+            strategy: 'SS_PERFORMANCE',
+        });
+        expect(buildPutBody(state, [account.id]).targets).toHaveLength(1);
+        const targets = buildPutBody(state, [
+            account.id,
+            'second-instagram',
+        ]).targets;
+        expect(targets[0].content_override).toEqual({ instagram: trial });
+        expect(targets[1].content_override?.instagram).toEqual({
+            cover_media_id: null,
+            trial_params: { graduation_strategy: 'SS_PERFORMANCE' },
+        });
+        expect(contentMatchesServer(state, post)).toBe(true);
+        expect(state.media).toEqual([video]);
+    });
+
+    it('preserves trial settings when changing or removing a cover and preserves covers when toggling trial', () => {
+        let state = composerReducer(initialComposerState(), {
+            type: 'hydrate',
+            post: postWithCover({ cover_media_id: 'original-cover' }),
+        });
+        state = composerReducer(state, {
+            type: 'setInstagramTrial',
+            accountId: account.id,
+            strategy: 'MANUAL',
+        });
+        expect(state.instagramByAccount[account.id].cover_media_id).toBe(
+            'original-cover',
+        );
+        for (const mediaId of ['new-cover', null]) {
+            state = composerReducer(state, {
+                type: 'setInstagramCover',
+                accountId: account.id,
+                mediaId,
+            });
+            expect(state.instagramByAccount[account.id]).toEqual({
+                cover_media_id: mediaId,
+                trial_params: { graduation_strategy: 'MANUAL' },
+            });
+        }
+        state = composerReducer(state, {
+            type: 'setInstagramCover',
+            accountId: account.id,
+            mediaId: 'keep-cover',
+        });
+        state = composerReducer(state, {
+            type: 'setInstagramTrial',
+            accountId: account.id,
+            strategy: null,
+        });
+        expect(
+            buildPutBody(state, [account.id]).targets[0].content_override
+                ?.instagram,
+        ).toEqual({
+            cover_media_id: 'keep-cover',
+            trial_params: null,
+        });
+        expect(
+            contentMatchesServer(
+                state,
+                postWithCover({ cover_media_id: 'keep-cover' }),
+            ),
+        ).toBe(true);
+    });
+
+    it('treats a changed trial strategy as a real edit conflict and preserves it after incompatible media changes', () => {
+        const post = postWithCover({
+            cover_media_id: null,
+            trial_params: { graduation_strategy: 'MANUAL' },
+        });
+        let state = composerReducer(initialComposerState(), {
+            type: 'hydrate',
+            post,
+        });
+        state = composerReducer(state, {
+            type: 'setInstagramTrial',
+            accountId: account.id,
+            strategy: 'SS_PERFORMANCE',
+        });
+        expect(contentMatchesServer(state, post)).toBe(false);
+        state = composerReducer(state, { type: 'saveFailedStale', post });
+        expect(state.saveState).toBe('conflict');
+        state = composerReducer(state, { type: 'resolveConflictKeepMine' });
+        state = composerReducer(state, {
+            type: 'setFormat',
+            accountId: account.id,
+            format: 'story',
+        });
+        state = composerReducer(state, {
+            type: 'removeMedia',
+            mediaId: video.id,
+        });
+        expect(state.instagramByAccount[account.id].trial_params).toEqual({
+            graduation_strategy: 'SS_PERFORMANCE',
+        });
+        expect(canChooseInstagramCover(state, account)).toBe(false);
+    });
+
     it('does not choose a cover or treat a cover reference as post content', () => {
         const initial = initialComposerState();
         expect(initial.instagramByAccount).toEqual({});

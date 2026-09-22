@@ -6,7 +6,9 @@ namespace App\Services\Posts;
 
 use App\Dto\Post\DraftData;
 use App\Enums\Platform;
+use App\Enums\PostFormat;
 use App\Enums\PostStatus;
+use App\Enums\PostTargetStatus;
 use App\Models\AccountSet;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
@@ -16,6 +18,7 @@ use App\Models\PostTarget;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\InstagramTrialReel;
 use App\Services\Publishing\YouTubeThumbnail;
 use App\Support\InstanceSettings;
 use App\Support\LinkedInOrg;
@@ -174,7 +177,7 @@ class DraftService
      * @param  list<string>  $accountIds
      * @param  list<string>  $segments
      * @param  array<string, bool>  $autoSplitByAccount
-     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null}}|null>  $overrideByAccount
+     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null>  $overrideByAccount
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
      * @param  array<string, string>  $formatByAccount
      */
@@ -206,6 +209,18 @@ class DraftService
             $override = array_key_exists($accountId, $overrideByAccount)
                 ? $overrideByAccount[$accountId]
                 : $currentOverride;
+            $currentFormat = $current instanceof PostTarget ? $current->format->value : null;
+            $format = $formatByAccount[$accountId]
+                ?? ($data?->hasFormatFor($accountId) ? $data->formatFor($accountId) : null)
+                ?? $currentFormat ?? 'feed';
+
+            if (($override['instagram']['trial_params'] ?? null) !== null) {
+                $trial = new PostTarget(['platform' => $account->platform, 'format' => $format, 'content_override' => $override]);
+                app(InstagramTrialReel::class)->params($trial);
+                if ($account->platform !== Platform::Instagram || $format === PostFormat::Story->value) {
+                    throw ValidationException::withMessages(['targets' => app(InstagramTrialReel::class)->describe('instagram_trial_requires_reel')]);
+                }
+            }
 
             if ($account->platform === Platform::TikTok && ! is_array($override['tiktok'] ?? null)
                 && is_array($currentOverride['tiktok'] ?? null)) {
@@ -235,9 +250,27 @@ class DraftService
             }
 
             if ($account->platform === Platform::Instagram) {
-                if (! is_array($override['instagram'] ?? null) && is_array($currentOverride['instagram'] ?? null)) {
+                if (is_array($currentOverride['instagram'] ?? null)) {
                     $override ??= [];
-                    $override['instagram'] = $currentOverride['instagram'];
+                    $override['instagram'] = array_replace($currentOverride['instagram'], is_array($override['instagram'] ?? null) ? $override['instagram'] : []);
+                }
+                if (($override['instagram']['trial_params'] ?? null) !== null && $format === PostFormat::Story->value) {
+                    throw ValidationException::withMessages(['targets' => app(InstagramTrialReel::class)->describe('instagram_trial_requires_reel')]);
+                }
+                if ($current instanceof PostTarget && $this->instagramUploadHasStarted($current)) {
+                    $metadata = $current->media_upload_state['container']['metadata'] ?? [];
+                    $frozenTrial = array_key_exists('instagram_trial_params', $metadata)
+                        ? $metadata['instagram_trial_params']
+                        : ($currentOverride['instagram']['trial_params'] ?? null);
+                    if (($override['instagram']['trial_params'] ?? null) !== $frozenTrial) {
+                        throw ValidationException::withMessages(['targets' => 'The Instagram upload has already started. Copy it to a new draft to change its Trial Reel settings.']);
+                    }
+                    if ($frozenTrial !== null && ($format !== $currentFormat
+                        || ($override['media_ids'] ?? null) !== ($currentOverride['media_ids'] ?? null)
+                        || ($data?->hasSegmentBreaksFor($accountId) && $data->segmentBreaksFor($accountId) !== ($current->segment_breaks ?? []))
+                        || ($data?->hasPlacementsFor($accountId) && $data->placementsFor($accountId) !== $this->existingPlacements($current)))) {
+                        throw ValidationException::withMessages(['targets' => 'The Trial Reel upload has already started. Copy it to a new draft to change its format or media.']);
+                    }
                 }
                 if ($current instanceof PostTarget
                     && ($current->remote_id !== null || ! empty($current->media_upload_state['container']['remote_ref']))
@@ -249,9 +282,6 @@ class DraftService
                 unset($override['instagram']);
                 $override = $override === [] ? null : $override;
             }
-
-            $currentFormat = $current instanceof PostTarget ? $current->format->value : null;
-            $format = $formatByAccount[$accountId] ?? $currentFormat ?? 'feed';
 
             $effectiveSegments = isset($override['segments']) && is_array($override['segments'])
                 ? array_values(array_map(static fn (mixed $segment): string => (string) $segment, $override['segments']))
@@ -420,6 +450,7 @@ class DraftService
                     throw ValidationException::withMessages(['post' => 'The YouTube upload has already started. Copy it to a new draft to change its video, cover, or destinations.']);
                 }
             }
+            $instagramTargets = $post->targets()->where('platform', Platform::Instagram->value)->lockForUpdate()->get();
 
             if ($data->expectedUpdatedAt !== null
                 && $post->updated_at->toIso8601String() !== Date::parse($data->expectedUpdatedAt)->toIso8601String()) {
@@ -442,6 +473,15 @@ class DraftService
                 $post->workspace_id,
                 array_values(array_unique([...$accountIds, ...$preservedTargetIds])),
             );
+            foreach ($instagramTargets as $target) {
+                $trial = $target->media_upload_state['container']['metadata']['instagram_trial_params']
+                    ?? $target->content_override['instagram']['trial_params'] ?? null;
+                if ($this->instagramUploadHasStarted($target)
+                    && (! in_array($target->connected_account_id, $accountIds, true)
+                        || ($trial !== null && $data->mediaIdsProvided && collect($data->mediaIds)->sort()->values()->all() !== $post->media()->pluck('id')->sort()->values()->all()))) {
+                    throw ValidationException::withMessages(['post' => 'The Instagram upload has already started. Copy it to a new draft to change its destinations or Trial Reel video.']);
+                }
+            }
 
             // Only carry an explicitly-sent override/auto-split into the merge;
             // otherwise syncTargets preserves the survivor's existing value.
@@ -489,6 +529,13 @@ class DraftService
 
             return $post->fresh(['targets', 'media']);
         });
+    }
+
+    private function instagramUploadHasStarted(PostTarget $target): bool
+    {
+        return $target->status === PostTargetStatus::Publishing || $target->remote_id !== null
+            || ($target->remote_ids ?? []) !== [] || ! empty($target->media_upload_state['container']['remote_ref'])
+            || array_key_exists('instagram_trial_params', $target->media_upload_state['container']['metadata'] ?? []);
     }
 
     private function youTubeUploadHasStarted(PostTarget $target): bool
@@ -656,7 +703,10 @@ class DraftService
         foreach ($sourcePosts as $source) {
             $startedYouTube = $source->targets()->where('platform', Platform::YouTube->value)->lockForUpdate()->get()
                 ->contains(fn (PostTarget $target): bool => $this->youTubeUploadHasStarted($target));
-            if (! $source->status->isEditable() || $startedYouTube) {
+            $startedTrial = $source->targets()->where('platform', Platform::Instagram->value)->lockForUpdate()->get()
+                ->contains(fn (PostTarget $target): bool => $this->instagramUploadHasStarted($target)
+                    && ($target->media_upload_state['container']['metadata']['instagram_trial_params'] ?? $target->content_override['instagram']['trial_params'] ?? null) !== null);
+            if (! $source->status->isEditable() || $startedYouTube || $startedTrial) {
                 throw ValidationException::withMessages(['media_ids' => 'This media belongs to a post whose upload has started or can no longer be edited. Copy that post to a new draft instead of moving its media.']);
             }
         }

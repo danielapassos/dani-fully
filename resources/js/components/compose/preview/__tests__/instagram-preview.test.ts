@@ -171,6 +171,23 @@ describe('InstagramPreview story', () => {
 });
 
 describe('InstagramPreview reels', () => {
+    it('shows trial configuration in the preview without a publication claim', () => {
+        const el = mount({
+            ...makePreview(
+                'instagram',
+                [videoMedia('trial')],
+                'Caption',
+                'reels',
+            ),
+            instagramOptions: {
+                cover_media_id: null,
+                trial_params: { graduation_strategy: 'MANUAL' },
+            },
+        });
+        expect(el.textContent).toContain('Trial Reel configured');
+        expect(el.textContent).toContain('Share with followers manually');
+        expect(el.textContent).not.toContain('Published');
+    });
     it('plays the first video and keeps the caption', () => {
         const el = renderFormat(
             [imageMedia('m0'), videoMedia('v1')],

@@ -53,6 +53,28 @@ const mentions: MentionPlaceholder[] = [
 ];
 
 describe('buildPlatformPreview', () => {
+    it('carries trial configuration only into the intended Instagram preview', () => {
+        const input = {
+            account: account('instagram'),
+            segments: ['Caption'],
+            mentions: [],
+            media: [],
+            excludedMediaIds: new Set<string>(),
+            limit: 2200,
+            autoSplit: false,
+            instagramOptions: {
+                cover_media_id: 'cover',
+                trial_params: { graduation_strategy: 'MANUAL' as const },
+            },
+        };
+        expect(buildPlatformPreview(input).instagramOptions).toEqual(
+            input.instagramOptions,
+        );
+        expect(
+            buildPlatformPreview({ ...input, account: account('youtube') })
+                .instagramOptions,
+        ).toBeUndefined();
+    });
     it('builds a Bluesky thread preview using Bluesky mention handles', () => {
         const preview = buildPlatformPreview({
             account: account('bluesky'),

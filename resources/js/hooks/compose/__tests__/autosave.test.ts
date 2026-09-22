@@ -160,6 +160,61 @@ describe('autosave debounce reset on placement-only changes', () => {
         vi.useRealTimers();
     });
 
+    it('debounces trial-only edits and saves the latest strategy together with the existing cover', async () => {
+        const accountIds = ['instagram-account'];
+        const onSaved = vi.fn();
+        const initial = draftState({
+            postId: 'post-1',
+            baselineUpdatedAt: post.updated_at,
+            instagramByAccount: {
+                [accountIds[0]]: { cover_media_id: 'keep-cover' },
+            },
+        });
+        const manual = composerReducer(initial, {
+            type: 'setInstagramTrial',
+            accountId: accountIds[0],
+            strategy: 'MANUAL',
+        });
+        act(() =>
+            root?.render(
+                createElement(Harness, { state: manual, onSaved, accountIds }),
+            ),
+        );
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(250);
+        });
+        const automatic = composerReducer(manual, {
+            type: 'setInstagramTrial',
+            accountId: accountIds[0],
+            strategy: 'SS_PERFORMANCE',
+        });
+        act(() =>
+            root?.render(
+                createElement(Harness, {
+                    state: automatic,
+                    onSaved,
+                    accountIds,
+                }),
+            ),
+        );
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(250);
+        });
+        expect(httpPut).not.toHaveBeenCalled();
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(250);
+        });
+        expect(httpPut).toHaveBeenCalledOnce();
+        expect(
+            transform.mock.calls.at(-1)?.[0]().targets[0].content_override,
+        ).toEqual({
+            instagram: {
+                cover_media_id: 'keep-cover',
+                trial_params: { graduation_strategy: 'SS_PERFORMANCE' },
+            },
+        });
+    });
+
     it.each([
         {
             platform: 'instagram',

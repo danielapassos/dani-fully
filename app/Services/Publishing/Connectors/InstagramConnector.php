@@ -19,6 +19,7 @@ use App\Services\Media\PublicMediaUrl;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
 use App\Services\Publishing\Contracts\PublishConnector;
 use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\InstagramTrialReel;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
 use Illuminate\Http\Client\ConnectionException;
@@ -77,6 +78,19 @@ class InstagramConnector implements PublishConnector
         $state = new MediaUploadState($context->target->media_upload_state);
         if ($this->publishOutcomeUnknown($state)) {
             return $this->publishNeedsReview();
+        }
+
+        $trials = app(InstagramTrialReel::class);
+        $trialIssues = $trials->issues($context->target, $context->effectiveMedia());
+        if ($trialIssues !== []) {
+            return PublishResult::failure(ErrorKind::Validation, $trials->describe($trialIssues[0]));
+        }
+
+        $trialParams = $trials->params($context->target);
+        $metadata = $state->metadata(self::CONTAINER_KEY);
+        if ((array_key_exists('instagram_trial_params', $metadata) || $state->remoteRef(self::CONTAINER_KEY) !== null)
+            && ($metadata['instagram_trial_params'] ?? null) !== $trialParams) {
+            return PublishResult::failure(ErrorKind::Validation, 'The Trial Reel settings changed after Instagram upload started. Create a new draft to change how this Reel is shared.');
         }
 
         $finalPublishPending = false;
@@ -168,6 +182,13 @@ class InstagramConnector implements PublishConnector
             throw new InstagramCoverUnavailable;
         }
 
+        // Freeze the audience choice before the request, including when its response
+        // is lost. An old container without this snapshot is a regular Reel.
+        $metadata = $state->metadata(self::CONTAINER_KEY);
+        $metadata['instagram_trial_params'] = app(InstagramTrialReel::class)->params($context->target);
+        $state->setMetadata(self::CONTAINER_KEY, $metadata);
+        $this->persistState($context, $state);
+
         $containerId = match (true) {
             $format === PostFormat::Story => $this->createStoryContainer($context, $media[0], $igUserId, $token),
             $format === PostFormat::Reels => $this->createReelContainer($context, $this->firstVideo($media), $igUserId, $caption, $token),
@@ -176,6 +197,7 @@ class InstagramConnector implements PublishConnector
         };
 
         $state->markUploaded(self::CONTAINER_KEY, $containerId);
+        $state->setMetadata(self::CONTAINER_KEY, $metadata);
         $this->persistState($context, $state);
 
         return $containerId;
@@ -191,7 +213,7 @@ class InstagramConnector implements PublishConnector
         if ($media->isVideo()) {
             $body['media_type'] = 'REELS';
             $body['video_url'] = $this->publicMediaUrl->for($media, Platform::Instagram);
-            $body = [...$body, ...$this->coverBody($context)];
+            $body = [...$body, ...$this->coverBody($context), ...$this->trialBody($context)];
         } else {
             $body['image_url'] = $this->publicMediaUrl->for($media, Platform::Instagram);
         }
@@ -237,6 +259,7 @@ class InstagramConnector implements PublishConnector
             'caption' => $caption,
             'access_token' => $token,
             ...$this->coverBody($context),
+            ...$this->trialBody($context),
         ]);
         $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_UPLOAD, $context->account, $response);
 
@@ -245,6 +268,14 @@ class InstagramConnector implements PublishConnector
         }
 
         return (string) $response->json('id');
+    }
+
+    /** @return array{trial_params?: string} */
+    private function trialBody(PublishContext $context): array
+    {
+        $params = app(InstagramTrialReel::class)->params($context->target);
+
+        return $params === null ? [] : ['trial_params' => json_encode($params, JSON_THROW_ON_ERROR)];
     }
 
     /** @return array{cover_url?: string} */
