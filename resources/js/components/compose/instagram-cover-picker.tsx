@@ -38,7 +38,9 @@ export function InstagramCoverPicker({ options, onChange, ...props }: Props) {
             {...props}
             config={config}
             selectedId={options?.cover_media_id ?? null}
-            onChange={(mediaId) => onChange({ cover_media_id: mediaId })}
+            onChange={(mediaId) =>
+                onChange({ ...options, cover_media_id: mediaId })
+            }
         />
     );
 }

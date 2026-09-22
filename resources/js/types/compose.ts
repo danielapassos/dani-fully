@@ -15,8 +15,13 @@ export type PlatformName =
 
 export type PostFormat = 'feed' | 'reels' | 'story';
 
+export type InstagramTrialParams = {
+    graduation_strategy: 'MANUAL' | 'SS_PERFORMANCE';
+};
+
 export type InstagramPostOptions = {
     cover_media_id: string | null;
+    trial_params?: InstagramTrialParams | null;
 };
 
 export type YouTubePostOptions = Partial<{

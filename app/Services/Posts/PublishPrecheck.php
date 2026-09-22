@@ -10,6 +10,7 @@ use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Publishing\InstagramReelCover;
+use App\Services\Publishing\InstagramTrialReel;
 use App\Services\Publishing\SegmentMediaResolver;
 use App\Services\Publishing\TargetMediaSelection;
 use App\Services\Publishing\TikTokPublishingRoute;
@@ -91,6 +92,7 @@ class PublishPrecheck
                 'youtube_thumbnail_requires_video' => 'A custom YouTube cover requires one video.',
                 'instagram_cover_unavailable' => 'Choose an available JPEG or PNG cover image from this workspace.',
                 'instagram_cover_requires_reel' => 'A custom Instagram cover requires one Reel video. Remove the cover for photos, carousels, or Stories.',
+                'instagram_trial_invalid', 'instagram_trial_requires_reel' => app(InstagramTrialReel::class)->describe($issue),
                 'media_required' => "{$label} needs at least one image or video.",
                 'video_required' => "{$label} needs exactly one video for this publishing flow.",
                 'section_too_long' => "A section is over {$label}'s length limit.",
@@ -171,7 +173,7 @@ class PublishPrecheck
         }
 
         $mediaItems = array_values($media->all());
-        $issues = array_merge($issues, app(InstagramReelCover::class)->issues($target, $mediaItems), app(YouTubeThumbnail::class)->issues($target, $mediaItems));
+        $issues = array_merge($issues, app(InstagramReelCover::class)->issues($target, $mediaItems), app(InstagramTrialReel::class)->issues($target, $mediaItems), app(YouTubeThumbnail::class)->issues($target, $mediaItems));
 
         return array_values(array_unique($issues));
     }

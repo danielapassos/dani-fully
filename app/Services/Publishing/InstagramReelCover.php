@@ -18,7 +18,7 @@ final class InstagramReelCover
     public static function draftRules(): array
     {
         return [
-            'targets.*.content_override.instagram' => ['nullable', 'array:cover_media_id'],
+            'targets.*.content_override.instagram' => ['nullable', 'array:cover_media_id,trial_params'],
             'targets.*.content_override.instagram.cover_media_id' => ['nullable', 'uuid'],
         ];
     }

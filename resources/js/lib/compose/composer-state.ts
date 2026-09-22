@@ -1,3 +1,8 @@
+import {
+    hasInstagramPostOptions,
+    instagramPostOptionsEqual,
+    normalizeInstagramPostOptions,
+} from '@/lib/compose/instagram-trial';
 import { segmentRefs } from '@/lib/compose/tiptap-doc';
 import {
     normalizeYouTubePostOptions,
@@ -8,6 +13,7 @@ import {
     BASE_TAB,
     type Destination,
     type InstagramPostOptions,
+    type InstagramTrialParams,
     type MediaView,
     type MentionPlaceholder,
     type Placement,
@@ -86,6 +92,11 @@ export type ComposerAction =
           type: 'setInstagramCover';
           accountId: string;
           mediaId: string | null;
+      }
+    | {
+          type: 'setInstagramTrial';
+          accountId: string;
+          strategy: InstagramTrialParams['graduation_strategy'] | null;
       }
     | {
           type: 'setTikTokOptions';
@@ -426,10 +437,10 @@ function hydrate(post: PostView): ComposerState {
         formatByAccount[target.connected_account_id] = target.format;
         const overrideSegments = target.content_override?.segments;
         if (target.content_override?.instagram) {
-            instagramByAccount[target.connected_account_id] = {
-                cover_media_id:
-                    target.content_override.instagram.cover_media_id ?? null,
-            };
+            instagramByAccount[target.connected_account_id] =
+                normalizeInstagramPostOptions(
+                    target.content_override.instagram,
+                );
         }
         if (target.content_override?.youtube) {
             youtubeByAccount[target.connected_account_id] =
@@ -596,7 +607,34 @@ export function composerReducer(
                 ...state,
                 instagramByAccount: {
                     ...state.instagramByAccount,
-                    [action.accountId]: { cover_media_id: action.mediaId },
+                    [action.accountId]: {
+                        ...state.instagramByAccount[action.accountId],
+                        cover_media_id: action.mediaId,
+                    },
+                },
+                saveState: 'dirty',
+            };
+
+        case 'setInstagramTrial':
+            if (
+                (state.instagramByAccount[action.accountId]?.trial_params
+                    ?.graduation_strategy ?? null) === action.strategy
+            ) {
+                return state;
+            }
+            return {
+                ...state,
+                instagramByAccount: {
+                    ...state.instagramByAccount,
+                    [action.accountId]: {
+                        ...state.instagramByAccount[action.accountId],
+                        cover_media_id:
+                            state.instagramByAccount[action.accountId]
+                                ?.cover_media_id ?? null,
+                        trial_params: action.strategy
+                            ? { graduation_strategy: action.strategy }
+                            : null,
+                    },
                 },
                 saveState: 'dirty',
             };
@@ -1175,20 +1213,18 @@ export function contentMatchesServer(
                 : post.targets.map((target) => target.connected_account_id),
     );
     const serverInstagram = Object.fromEntries(
-        post.targets
-            .filter(
-                (target) => target.content_override?.instagram?.cover_media_id,
-            )
-            .map((target) => [
-                target.connected_account_id,
-                target.content_override?.instagram?.cover_media_id,
-            ]),
+        post.targets.flatMap<[string, InstagramPostOptions]>((target) => {
+            const options = target.content_override?.instagram;
+            return options && hasInstagramPostOptions(options)
+                ? [[target.connected_account_id, options]]
+                : [];
+        }),
     );
     const localInstagramKeys = Object.keys(state.instagramByAccount)
         .filter(
             (id) =>
                 comparedAccountIds.has(id) &&
-                state.instagramByAccount[id].cover_media_id != null,
+                hasInstagramPostOptions(state.instagramByAccount[id]),
         )
         .sort();
     if (
@@ -1196,8 +1232,10 @@ export function contentMatchesServer(
             JSON.stringify(Object.keys(serverInstagram).sort()) ||
         localInstagramKeys.some(
             (key) =>
-                state.instagramByAccount[key].cover_media_id !==
-                serverInstagram[key],
+                !instagramPostOptionsEqual(
+                    state.instagramByAccount[key],
+                    serverInstagram[key],
+                ),
         )
     ) {
         return false;

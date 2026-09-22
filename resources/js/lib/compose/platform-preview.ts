@@ -8,6 +8,7 @@ import { measure, packSections } from '@/lib/compose/section-split';
 import { segmentRefs } from '@/lib/compose/tiptap-doc';
 import type {
     Account,
+    InstagramPostOptions,
     MediaView,
     MentionPlaceholder,
     PlatformName,
@@ -36,6 +37,7 @@ export type PlatformPreview = {
      * platform is always `feed`.
      */
     format: PostFormat;
+    instagramOptions?: InstagramPostOptions;
     items: PlatformPreviewItem[];
     /** Discord snowflake id → display label, for rendering `<@id>` as a pill. */
     discordLabels: Record<string, string>;
@@ -51,6 +53,7 @@ type BuildPlatformPreviewInput = {
     autoSplit: boolean;
     /** Publishing surface; only Instagram/Facebook use anything but `feed`. */
     format?: PostFormat;
+    instagramOptions?: InstagramPostOptions;
     /**
      * Per-segment media: `segmentRef -> ordered media ids` for the previewed
      * account's scope, plus the thread's break ids. When given, each media
@@ -155,6 +158,7 @@ export function buildPlatformPreview({
     limit,
     autoSplit,
     format = 'feed',
+    instagramOptions,
     placements,
     segmentBreaks,
 }: BuildPlatformPreviewInput): PlatformPreview {
@@ -203,6 +207,9 @@ export function buildPlatformPreview({
         limit,
         autoSplit,
         format,
+        ...(account.platform === 'instagram' && instagramOptions
+            ? { instagramOptions }
+            : {}),
         discordLabels: discordMentionLabels(mentions),
         items: built.map((section, index) => ({
             id: `${account.platform}-preview-${index + 1}`,

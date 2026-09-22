@@ -75,6 +75,7 @@ import DestinationSelector, {
 import EditorBody, { type EditorBodyHandle } from './editor-body';
 import { ImageEditor } from './image-editor';
 import { InstagramCoverPicker } from './instagram-cover-picker';
+import { InstagramTrialControls } from './instagram-trial-controls';
 import { PlatformPreviewPanel } from './platform-preview-panel';
 import PlatformTabs from './platform-tabs';
 import SaveIndicator from './save-indicator';
@@ -1020,6 +1021,7 @@ export default function Composer({
               limit: limitForAccount(previewAccount),
               autoSplit: state.autoSplitByAccount[previewAccount.id] ?? true,
               format: state.formatByAccount[previewAccount.id] ?? 'feed',
+              instagramOptions: state.instagramByAccount[previewAccount.id],
               // Show each media under the thread post it's placed on, using the
               // previewed account's scope (diverged copy, else canonical).
               placements:
@@ -1358,6 +1360,28 @@ export default function Composer({
                         ))}
                     </div>
                 )}
+
+                {!readOnly &&
+                    tabAccounts
+                        .filter((account) => account.platform === 'instagram')
+                        .map((account) => (
+                            <InstagramTrialControls
+                                key={account.id}
+                                account={account}
+                                options={state.instagramByAccount[account.id]}
+                                canChoose={canChooseInstagramCover(
+                                    state,
+                                    account,
+                                )}
+                                onChange={(strategy) =>
+                                    dispatch({
+                                        type: 'setInstagramTrial',
+                                        accountId: account.id,
+                                        strategy,
+                                    })
+                                }
+                            />
+                        ))}
 
                 {!readOnly &&
                     tabAccounts

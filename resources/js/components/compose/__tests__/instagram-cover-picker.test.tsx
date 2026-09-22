@@ -67,6 +67,30 @@ beforeEach(() => {
 });
 
 describe('Instagram cover picker', () => {
+    it('retains trial settings when selecting a cover', async () => {
+        render(
+            <InstagramCoverPicker
+                {...defaults}
+                options={{
+                    cover_media_id: null,
+                    trial_params: { graduation_strategy: 'MANUAL' },
+                }}
+            />,
+        );
+        await act(async () => {
+            fireEvent.click(
+                screen.getByRole('button', { name: 'Choose existing cover' }),
+            );
+        });
+        fireEvent.click(
+            screen.getByRole('button', { name: 'Use Mountain cover' }),
+        );
+        expect(defaults.onChange).toHaveBeenCalledExactlyOnceWith({
+            cover_media_id: 'cover',
+            trial_params: { graduation_strategy: 'MANUAL' },
+        });
+    });
+
     it('requires a saved draft and never chooses content automatically', () => {
         render(<InstagramCoverPicker {...defaults} postId={null} />);
         expect(

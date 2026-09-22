@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 
+import { InstagramTrialSummary } from '@/components/compose/instagram-trial-controls';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
     Bookmark,
@@ -255,6 +256,7 @@ function InstagramFeedPost({ preview }: { preview: PlatformPreview }) {
 export function InstagramPreview({ preview }: { preview: PlatformPreview }) {
     return (
         <div className="p-4">
+            <InstagramTrialSummary options={preview.instagramOptions} />
             {preview.format === 'story' ? (
                 <StoryFrame preview={preview} platform="instagram" />
             ) : preview.format === 'reels' ? (
