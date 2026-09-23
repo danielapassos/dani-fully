@@ -124,6 +124,7 @@ type SubmitGuard = {
     disabled?: boolean;
     uploading: boolean;
     attentionBlocked?: boolean;
+    publishingBlocked?: boolean;
     processing: boolean;
     trayMode: ScheduleTray['mode'];
     queueDisabled?: boolean;
@@ -142,6 +143,7 @@ export function shouldAllowSubmit({
     disabled,
     uploading,
     attentionBlocked,
+    publishingBlocked,
     processing,
     trayMode,
     queueDisabled,
@@ -150,6 +152,7 @@ export function shouldAllowSubmit({
         disabled ||
         uploading ||
         attentionBlocked ||
+        publishingBlocked ||
         processing ||
         (trayMode === 'queue' && Boolean(queueDisabled))
     );
@@ -177,10 +180,14 @@ export function SubmitBar({
     const [noSlot, setNoSlot] = useState(false);
     const [pastTime, setPastTime] = useState(false);
     const attentionBlocked = attentionHandles.length > 0;
+    const unavailableAccounts = blockedAccounts.filter((block) =>
+        block.reasons.includes('publishing_unavailable'),
+    );
+    const publishingBlocked = unavailableAccounts.length > 0;
     // Server-reported blocks (belt-and-suspenders for edge cases the client
     // pre-check missed). Keyed identically to client AccountBlock.
     const [serverBlocked, setServerBlocked] = useState<AccountBlock[]>([]);
-    // Only reveal the block list after a submit attempt, so it doesn't nag before.
+    // Reveal editable content issues after a submit attempt; setup blockers are immediate.
     const [showBlocked, setShowBlocked] = useState(false);
 
     // Prefer live client blocks; fall back to the last server response.
@@ -206,6 +213,7 @@ export function SubmitBar({
                 disabled,
                 uploading,
                 attentionBlocked,
+                publishingBlocked,
                 processing: http.processing,
                 trayMode: tray.mode,
                 queueDisabled,
@@ -310,6 +318,7 @@ export function SubmitBar({
                     disabled,
                     uploading,
                     attentionBlocked,
+                    publishingBlocked,
                     processing: http.processing,
                     trayMode: tray.mode,
                     queueDisabled,
@@ -331,10 +340,18 @@ export function SubmitBar({
         disabled,
         uploading,
         attentionBlocked,
+        publishingBlocked,
         processing: http.processing,
         trayMode: tray.mode,
         queueDisabled,
     });
+
+    const visibleBlocks = showBlocked
+        ? blocks
+        : unavailableAccounts.map((block) => ({
+              ...block,
+              reasons: ['publishing_unavailable'] as AccountBlock['reasons'],
+          }));
 
     const submitButton = (
         <TrayButton
@@ -399,9 +416,9 @@ export function SubmitBar({
                     That time has already passed — pick a time in the future.
                 </p>
             )}
-            {showBlocked && blocks.length > 0 && (
+            {visibleBlocks.length > 0 && (
                 <ul className="space-y-0.5 text-[12px] text-destructive">
-                    {blocks.map((block) => (
+                    {visibleBlocks.map((block) => (
                         <li key={block.accountId}>
                             <span className="font-medium">{block.handle}</span>
                             {' — '}

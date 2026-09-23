@@ -1,4 +1,4 @@
-import { act, createElement, useState } from 'react';
+import { act, createElement, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,7 +10,11 @@ import type {
 } from '@/types/compose';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock('@inertiajs/react', () => ({ useHttp: () => ({ get: mocks.get }) }));
+vi.mock('@inertiajs/react', () => ({
+    useHttp: () => ({ get: mocks.get }),
+    Link: ({ href, children }: { href: string; children: ReactNode }) =>
+        createElement('a', { href }, children),
+}));
 vi.mock(
     '@/actions/App/Http/Controllers/ConnectedAccounts/TikTokCreatorInfoController',
     () => ({
@@ -66,11 +70,11 @@ afterEach(() => {
     container = null;
 });
 
-function renderControls(): HTMLDivElement {
+function renderControls(selectedAccount: Account = account): HTMLDivElement {
     function Harness() {
         const [options, setOptions] = useState<TikTokPostOptions>();
         return createElement(TikTokPublishingControls, {
-            account,
+            account: selectedAccount,
             options,
             durationSeconds: 12,
             onChange: setOptions,
@@ -164,4 +168,106 @@ describe('TikTok publishing controls', () => {
         expect(view.querySelector('select')).toBeNull();
         expect(view.querySelector('input[type="checkbox"]')).toBeNull();
     });
+});
+
+it('shows the exact setup blocker without fetching or offering a futile refresh', () => {
+    const reason =
+        'TikTok Accounts API app approval is required before public publishing.';
+    const view = renderControls({
+        ...account,
+        publishing_ready: false,
+        publishing_unavailable_reason: reason,
+    });
+    expect(view.querySelector('[role="alert"]')?.textContent).toBe(reason);
+    expect(view.textContent).not.toContain('Refresh settings');
+    expect(view.textContent).not.toContain('could not load');
+    expect(view.querySelector('a')?.getAttribute('href')).toBe('/accounts');
+    expect(view.querySelector('select')).toBeNull();
+    expect(mocks.get).not.toHaveBeenCalled();
+});
+
+it('starts loading when account setup becomes ready without changing saved options', () => {
+    const onChange = vi.fn();
+    const onCreatorInfo = vi.fn();
+    const options: TikTokPostOptions = {
+        privacy_level: 'PUBLIC_TO_EVERYONE',
+        disable_comment: false,
+        disable_duet: true,
+        disable_stitch: true,
+        commercial_content: false,
+        brand_organic_toggle: false,
+        brand_content_toggle: false,
+        is_aigc: false,
+        music_usage_confirmed: true,
+        branded_content_policy_confirmed: false,
+    };
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const props = { options, durationSeconds: 12, onChange, onCreatorInfo };
+    act(() =>
+        root?.render(
+            createElement(TikTokPublishingControls, {
+                ...props,
+                account: { ...account, publishing_ready: false },
+            }),
+        ),
+    );
+    expect(mocks.get).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    act(() =>
+        root?.render(
+            createElement(TikTokPublishingControls, {
+                ...props,
+                account: { ...account, publishing_ready: true },
+            }),
+        ),
+    );
+    expect(mocks.get).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('select')?.value).toBe('PUBLIC_TO_EVERYONE');
+    expect(onChange).not.toHaveBeenCalled();
+});
+
+it('ignores an in-flight creator response when the selected destination becomes blocked', () => {
+    let respond: ((data: { creator: TikTokCreatorInfo }) => void) | undefined;
+    mocks.get.mockImplementation(
+        (_url: string, callbacks: { onSuccess: typeof respond }) => {
+            respond = callbacks.onSuccess;
+            return Promise.resolve();
+        },
+    );
+    const onCreatorInfo = vi.fn();
+    const onChange = vi.fn();
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+    const props = {
+        options: undefined,
+        durationSeconds: 12,
+        onChange,
+        onCreatorInfo,
+    };
+    act(() =>
+        root?.render(
+            createElement(TikTokPublishingControls, { ...props, account }),
+        ),
+    );
+    act(() =>
+        root?.render(
+            createElement(TikTokPublishingControls, {
+                ...props,
+                account: {
+                    ...account,
+                    id: 'blocked-destination',
+                    publishing_ready: false,
+                    publishing_unavailable_reason: 'App approval required.',
+                },
+            }),
+        ),
+    );
+    act(() => respond?.({ creator }));
+    expect(container.textContent).toContain('App approval required.');
+    expect(container.querySelector('select')).toBeNull();
+    expect(onCreatorInfo).not.toHaveBeenCalledWith(creator);
+    expect(mocks.get).toHaveBeenCalledTimes(1);
 });
