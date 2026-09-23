@@ -7,6 +7,7 @@ namespace App\Mcp\Tools;
 use App\Enums\Platform;
 use App\Mcp\Tools\Concerns\WorkspaceTool;
 use App\Models\ConnectedAccount;
+use App\Services\Publishing\TikTokInboxHandoff;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
 use Laravel\Mcp\Request;
@@ -35,6 +36,7 @@ class ListConnectedAccountsTool extends WorkspaceTool
                 'status' => $account->status->value,
                 'status_label' => $account->status->label(),
                 'publishing_ready' => $account->canPublish(),
+                'tiktok_inbox_enabled' => app(TikTokInboxHandoff::class)->enabledFor($account),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
                 'publishing_recovery_kind' => $account->publishingRecoveryKind(),
                 'publishing_provider' => $account->platform === Platform::TikTok ? config('services.tiktok.publishing_provider', 'native') : 'native',

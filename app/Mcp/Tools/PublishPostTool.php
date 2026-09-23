@@ -9,6 +9,7 @@ use App\Mcp\Tools\Concerns\WorkspaceTool;
 use App\Models\Post;
 use App\Services\Billing\WorkspaceSubscriptionGate;
 use App\Services\Publishing\PublishDispatcher;
+use App\Services\Publishing\TikTokInboxHandoff;
 use App\Support\PostView;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -16,10 +17,10 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Publish a post to its connected accounts immediately. Irreversible and outward-facing. Requires confirm=true. Publishing is asynchronous — poll get_post for per-target results.')]
+#[Description('Submit a post to its connected accounts now using their selected publishing settings. Requires confirm=true. TikTok inbox targets upload only the video for manual completion; the caption is not transferred and must be pasted in TikTok. Other targets may publish publicly. Submission is asynchronous: poll get_post for each target result and manual_completion instructions. Queued or awaiting_action is not proof of a live post.')]
 class PublishPostTool extends WorkspaceTool
 {
-    public function handle(Request $request, PublishDispatcher $dispatcher, WorkspaceSubscriptionGate $subscriptions): Response
+    public function handle(Request $request, PublishDispatcher $dispatcher, WorkspaceSubscriptionGate $subscriptions, TikTokInboxHandoff $handoff): Response
     {
         if ($this->bindWorkspace($request) === null) {
             return Response::error('This connection is not bound to a workspace. Reconnect and select a workspace.');
@@ -39,7 +40,7 @@ class PublishPostTool extends WorkspaceTool
             return $denied;
         }
 
-        if ($unconfirmed = $this->requireConfirmation($request, 'This will publicly publish the post to its connected accounts now.')) {
+        if ($unconfirmed = $this->requireConfirmation($request, $handoff->confirmation($post))) {
             return $unconfirmed;
         }
 
@@ -56,12 +57,13 @@ class PublishPostTool extends WorkspaceTool
             return Response::error("Some accounts can't be published yet: ".json_encode($blocked, JSON_THROW_ON_ERROR));
         }
 
+        $message = $handoff->submissionMessage($post);
         $post->forceFill(['status' => PostStatus::Publishing->value])->save();
         $dispatcher->dispatchForPost($post);
 
         return Response::text(json_encode([
             'status' => 'queued',
-            'message' => 'Publishing started. Poll get_post for per-target status.',
+            'message' => $message.' Poll get_post for per-target status.',
             'post' => PostView::make($post->fresh(['targets.account', 'media'])),
         ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
     }
@@ -72,8 +74,8 @@ class PublishPostTool extends WorkspaceTool
     public function schema(JsonSchema $schema): array
     {
         return [
-            'post_id' => $schema->string()->description('Id of the post to publish.')->required(),
-            'confirm' => $schema->boolean()->description('Must be true to actually publish.'),
+            'post_id' => $schema->string()->description('Id of the post to submit using its selected publishing settings.')->required(),
+            'confirm' => $schema->boolean()->description('Must be true to submit. TikTok inbox uploads still require manual posting and caption entry in TikTok.'),
         ];
     }
 }

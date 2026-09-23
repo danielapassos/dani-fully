@@ -16,7 +16,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Schedule a post into the next open slot of the workspace posting schedule.')]
+#[Description('Schedule a post into the next open slot of the workspace posting schedule. TikTok inbox targets schedule a video upload for manual completion, not a public TikTok post; the saved caption must be pasted manually. Read each target manual_completion instructions.')]
 class QueuePostTool extends WorkspaceTool
 {
     public function handle(Request $request, NextSlotResolver $resolver): Response

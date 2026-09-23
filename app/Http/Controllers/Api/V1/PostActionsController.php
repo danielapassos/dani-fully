@@ -13,6 +13,7 @@ use App\Models\Workspace;
 use App\Services\Posts\NextSlotResolver;
 use App\Services\Publishing\ManualPostTargetRetry;
 use App\Services\Publishing\PublishDispatcher;
+use App\Services\Publishing\TikTokInboxHandoff;
 use App\Support\PostView;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -64,7 +65,7 @@ class PostActionsController extends Controller
         return response()->json(['post' => PostView::make($model->fresh(['targets.account', 'media']))]);
     }
 
-    public function publish(string $id, PublishDispatcher $dispatcher): JsonResponse
+    public function publish(string $id, PublishDispatcher $dispatcher, TikTokInboxHandoff $handoff): JsonResponse
     {
         $model = $this->findPostOrFail($id);
         $this->authorize('update', $model);
@@ -81,12 +82,13 @@ class PostActionsController extends Controller
             ], 422);
         }
 
+        $message = $handoff->submissionMessage($model);
         $model->forceFill(['status' => PostStatus::Publishing->value])->save();
         $dispatcher->dispatchForPost($model);
 
         return response()->json([
             'status' => 'queued',
-            'message' => 'Publishing started. Poll GET /posts/{id} for per-target status.',
+            'message' => $message.' Poll GET /posts/{id} for per-target status.',
             'post' => PostView::make($model->fresh(['targets.account', 'media'])),
         ], 202);
     }

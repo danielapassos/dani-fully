@@ -13,6 +13,7 @@ use App\Services\Posts\PublishPrecheck;
 use App\Services\Publishing\ManualRetryEligibility;
 use App\Services\Publishing\PostStatusRollup;
 use App\Services\Publishing\TargetMediaSelection;
+use App\Services\Publishing\TikTokInboxHandoff;
 
 final class PostView
 {
@@ -25,6 +26,7 @@ final class PostView
 
         $mediaSelection = app(TargetMediaSelection::class);
         $retryEligibility = app(ManualRetryEligibility::class);
+        $inboxHandoff = app(TikTokInboxHandoff::class);
         $status = app(PostStatusRollup::class)->displayStatus($post);
         $nonPublicOnly = $post->targets->contains(fn (PostTarget $target): bool => in_array($target->publicationStatus(), [PostTargetStatus::AwaitingAction, PostTargetStatus::Completed], true))
             && ! $post->targets->contains(fn (PostTarget $target): bool => $target->publicationStatus() === PostTargetStatus::Published);
@@ -48,7 +50,7 @@ final class PostView
             'destination' => self::destination($post),
             'targets' => $post->targets
                 ->sortByDesc(fn (PostTarget $target): bool => $target->connected_account_id === $defaultAccountId)
-                ->map(function (PostTarget $target) use ($issuesByAccount, $mediaSelection, $post, $retryEligibility): array {
+                ->map(function (PostTarget $target) use ($issuesByAccount, $mediaSelection, $post, $retryEligibility, $inboxHandoff): array {
                     $selection = $mediaSelection->resolve($target, $target->placements);
                     $retry = $retryEligibility->evaluate($target, $post);
                     $status = $target->publicationStatus();
@@ -75,6 +77,7 @@ final class PostView
                         'format' => $target->format->value,
                         'status' => $status->value,
                         'status_message' => $target->publicationMessage($status),
+                        'manual_completion' => $inboxHandoff->forTarget($target),
                         'error_kind' => $projected ? null : $target->error_kind?->value,
                         'error_message' => $projected ? null : $target->error_message,
                         'can_retry' => $retry['allowed'],
