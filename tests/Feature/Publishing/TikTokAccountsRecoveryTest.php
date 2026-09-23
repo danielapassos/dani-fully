@@ -267,9 +267,9 @@ test('native audit failure remains an operator gate when the installation provid
     'TikTok has not approved this developer app for public Direct Post.',
 ]);
 
-test('unknown target recovery returns a failure without dispatching', function () {
+test('unknown target recovery returns a failure without dispatching', function (string $targetId) {
     Bus::fake();
-    $this->artisan('tiktok:recover-accounts', ['target' => 'missing-target'])
+    $this->artisan('tiktok:recover-accounts', ['target' => $targetId])
         ->expectsOutputToContain('does not exist')->assertFailed();
     Bus::assertNothingDispatched();
-});
+})->with(['missing-target', '019c6e27-e55b-73d1-87d8-4e01f1f75043']);

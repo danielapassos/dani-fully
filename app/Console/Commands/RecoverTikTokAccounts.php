@@ -8,6 +8,7 @@ use App\Exceptions\PostTargetRetryRejected;
 use App\Models\PostTarget;
 use App\Services\Publishing\TikTokAccountsRecovery;
 use Illuminate\Console\Command;
+use Illuminate\Support\Str;
 use Throwable;
 
 class RecoverTikTokAccounts extends Command
@@ -18,7 +19,8 @@ class RecoverTikTokAccounts extends Command
 
     public function handle(TikTokAccountsRecovery $recovery): int
     {
-        $target = PostTarget::query()->find((string) $this->argument('target'));
+        $targetId = (string) $this->argument('target');
+        $target = Str::isUuid($targetId) ? PostTarget::query()->find($targetId) : null;
         if ($target === null) {
             $this->error('The requested post target does not exist. Nothing was changed.');
 
