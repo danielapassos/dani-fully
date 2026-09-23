@@ -9,6 +9,7 @@ use App\Http\Controllers\ConnectedAccounts\DiscordConnectionController;
 use App\Http\Controllers\ConnectedAccounts\LinkedInPageConnectionController;
 use App\Http\Controllers\ConnectedAccounts\MetaConnectionController;
 use App\Http\Controllers\ConnectedAccounts\OAuthConnectionController;
+use App\Http\Controllers\ConnectedAccounts\TikTokAccountsConnectionController;
 use App\Http\Controllers\ConnectedAccounts\TikTokCreatorInfoController;
 use App\Http\Controllers\OAuth\BlueskyClientMetadataController;
 use App\Models\ConnectedAccount;
@@ -73,6 +74,18 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('accounts/connect/linkedin/pages', [LinkedInPageConnectionController::class, 'store'])
         ->middleware('throttle:10,1')
         ->name('accounts.linkedin.store');
+
+    Route::get('accounts/{account}/connect/tiktok-accounts', [TikTokAccountsConnectionController::class, 'redirect'])
+        ->middleware('throttle:10,1')
+        ->name('accounts.tiktok-accounts.connect');
+
+    Route::get('accounts/callback/tiktok-accounts', [TikTokAccountsConnectionController::class, 'callback'])
+        ->middleware('throttle:10,1')
+        ->name('accounts.tiktok-accounts.callback');
+
+    Route::delete('accounts/{account}/tiktok-accounts', [TikTokAccountsConnectionController::class, 'destroy'])
+        ->middleware('throttle:10,1')
+        ->name('accounts.tiktok-accounts.destroy');
 
     Route::get('accounts/connect/{platform}', [OAuthConnectionController::class, 'redirect'])
         ->middleware('throttle:10,1')

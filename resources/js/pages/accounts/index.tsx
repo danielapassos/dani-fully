@@ -29,6 +29,12 @@ export const ACCOUNT_GRID_CLASS = 'grid grid-cols-1 gap-4 lg:grid-cols-2';
  * authorization server instead of falling back to the bsky.social default.
  */
 export function reconnectOAuthUrl(account: Account): string {
+    if (account.tiktok_accounts_api) {
+        return (
+            account.publishing_authorization_url ??
+            ConnectedAccountController.index.url()
+        );
+    }
     if (account.connection_flow === 'meta') {
         return MetaConnectionController.redirect.url();
     }

@@ -6,6 +6,7 @@ namespace App\Services\ConnectedAccounts;
 
 use App\Dto\ConnectedAccount\ConnectedAccountData;
 use App\Enums\ConnectedAccountStatus;
+use App\Enums\Platform;
 use App\Events\ConnectedAccountConnected;
 use App\Models\ConnectedAccount;
 use App\Models\ConnectedAccountSecret;
@@ -55,7 +56,7 @@ class AccountConnectionService
                     'access_token' => $data->accessToken,
                     'refresh_token' => $data->refreshToken,
                     'app_password' => $data->appPassword,
-                    'session' => $data->session,
+                    'session' => $this->sessionFor($account, $data),
                 ],
             );
 
@@ -78,6 +79,8 @@ class AccountConnectionService
     public function reconnect(ConnectedAccount $account, ConnectedAccountData $data, User $connectedBy): ConnectedAccount
     {
         DB::transaction(function () use ($account, $data, $connectedBy): void {
+            $locked = ConnectedAccount::withoutGlobalScopes()->lockForUpdate()->findOrFail($account->id);
+            $session = $this->sessionFor($locked, $data);
             $account->forceFill([
                 'remote_account_id' => $data->remoteAccountId,
                 'handle' => $data->handle,
@@ -100,7 +103,7 @@ class AccountConnectionService
                     'access_token' => $data->accessToken,
                     'refresh_token' => $data->refreshToken,
                     'app_password' => $data->appPassword,
-                    'session' => $data->session,
+                    'session' => $session,
                 ],
             );
         });
@@ -109,5 +112,19 @@ class AccountConnectionService
         Inertia::clearHistory();
 
         return $account;
+    }
+
+    /** @return array<string, mixed>|null */
+    private function sessionFor(ConnectedAccount $account, ConnectedAccountData $data): ?array
+    {
+        if ($data->platform !== Platform::TikTok || $account->remote_account_id !== $data->remoteAccountId) {
+            return $data->session;
+        }
+        $existing = $account->secret()->lockForUpdate()->first()?->session['tiktok_accounts'] ?? null;
+        if (! is_array($existing)) {
+            return $data->session;
+        }
+
+        return array_replace($data->session ?? [], ['tiktok_accounts' => $existing]);
     }
 }

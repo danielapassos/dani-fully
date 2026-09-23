@@ -249,10 +249,14 @@ export function AccountCard({
     refreshingXAccountTier?: boolean;
 }) {
     const brand = PLATFORM_BRAND[account.platform] ?? PLATFORM_FALLBACK;
-    const needsAttention = account.status !== 'active';
+    const needsAttention = account.tiktok_accounts_api
+        ? account.publishing_recovery_kind === 'reconnect'
+        : account.status !== 'active';
     const disabled = account.disabled;
     const publishingBlocked =
-        !disabled && !needsAttention && !account.publishing_ready;
+        !disabled &&
+        (!needsAttention || account.tiktok_accounts_api) &&
+        !account.publishing_ready;
     const emphasizeReconnect = shouldEmphasizeReconnect(account);
     const name = account.display_name ?? account.handle;
     const repostCapable = REPOST_CAPABLE_PLATFORMS.includes(account.platform);
@@ -337,7 +341,9 @@ export function AccountCard({
                             }
                         >
                             {needsAttention
-                                ? account.status_label
+                                ? account.tiktok_accounts_api
+                                    ? 'Authorization needed'
+                                    : account.status_label
                                 : 'Connected'}
                         </span>
                     </span>
@@ -491,10 +497,18 @@ export function AccountCard({
                                 }
                                 size="sm"
                                 className="h-8 shrink-0"
+                                disabled={
+                                    account.tiktok_accounts_api &&
+                                    !account.publishing_authorization_url
+                                }
                                 onClick={() => onReconnectOAuth(account)}
                             >
                                 <RefreshCw className="size-4" />
-                                Reconnect
+                                {account.tiktok_accounts_api
+                                    ? account.publishing_authorization_url
+                                        ? 'Authorize publishing'
+                                        : 'App setup required'
+                                    : 'Reconnect'}
                             </Button>
                         ))}
                     {!account.is_default && (

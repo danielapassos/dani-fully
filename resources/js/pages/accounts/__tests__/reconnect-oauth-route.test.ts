@@ -94,3 +94,28 @@ describe('reconnectOAuthUrl', () => {
         );
     });
 });
+
+it('uses only the Accounts API authorization route for a configured TikTok account', () => {
+    expect(
+        reconnectOAuthUrl(
+            account({
+                platform: 'tiktok',
+                tiktok_accounts_api: true,
+                publishing_authorization_url:
+                    'https://example.test/accounts/tiktok-id/connect/tiktok-accounts',
+            }),
+        ),
+    ).toBe('https://example.test/accounts/tiktok-id/connect/tiktok-accounts');
+});
+
+it('keeps unapproved Accounts API setup in Shoutrrr instead of starting native login', () => {
+    expect(
+        reconnectOAuthUrl(
+            account({
+                platform: 'tiktok',
+                tiktok_accounts_api: true,
+                publishing_authorization_url: null,
+            }),
+        ),
+    ).toBe('/accounts');
+});

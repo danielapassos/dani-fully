@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\Platform;
 use App\Http\Controllers\Controller;
 use App\Models\ConnectedAccount;
 use App\Support\CursorPage;
@@ -19,6 +20,7 @@ class ConnectedAccountsController extends Controller
         ]);
 
         $paginator = ConnectedAccount::query()
+            ->with('secret:connected_account_id,session')
             ->orderBy('id', 'desc')
             ->cursorPaginate($validated['per_page'] ?? 25)
             ->through(fn (ConnectedAccount $account): array => [
@@ -29,6 +31,10 @@ class ConnectedAccountsController extends Controller
                 'display_name' => $account->display_name,
                 'status' => $account->status->value,
                 'status_label' => $account->status->label(),
+                'publishing_ready' => $account->canPublish(),
+                'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
+                'publishing_recovery_kind' => $account->publishingRecoveryKind(),
+                'publishing_provider' => $account->platform === Platform::TikTok ? config('services.tiktok.publishing_provider', 'native') : 'native',
                 'token_expires_at' => $account->token_expires_at?->toIso8601String(),
             ]);
 

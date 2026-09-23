@@ -22,6 +22,8 @@ export type Account = {
     disabled: boolean;
     pds_url: string | null;
     auto_repost_enabled: boolean;
+    tiktok_accounts_api?: boolean;
+    publishing_authorization_url?: string | null;
     publishing_ready: boolean;
     publishing_unavailable_reason: string | null;
     publishing_recovery_kind:

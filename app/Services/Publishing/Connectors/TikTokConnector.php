@@ -17,6 +17,7 @@ use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Media\PublicMediaUrl;
 use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
 use App\Services\Publishing\Contracts\PublishConnector;
+use App\Services\Publishing\TikTokAccountsRecovery;
 use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
@@ -50,7 +51,11 @@ class TikTokConnector implements PublishConnector
 
     public function publish(PublishContext $context): PublishResult
     {
-        if (app(TikTokPublishingRoute::class)->pin($context->target) === 'metricool') {
+        $provider = app(TikTokPublishingRoute::class)->pin($context->target);
+        if ($provider === 'accounts_api') {
+            return app(TikTokAccountsConnector::class)->publish($context);
+        }
+        if ($provider === 'metricool') {
             return app(MetricoolTikTokConnector::class)->publish($context);
         }
 
@@ -273,6 +278,17 @@ class TikTokConnector implements PublishConnector
             }
 
             $this->setInitOutcomeUnknown($state, $media, false);
+            if ($response->status() === 403 && $response->json('error.code') === TikTokAccountsRecovery::REJECTION_CODE) {
+                $state->setMetadata($media->id, [
+                    ...$state->metadata($media->id),
+                    'init_rejection' => [
+                        ...TikTokAccountsRecovery::snapshot($context, $media),
+                        'code' => TikTokAccountsRecovery::REJECTION_CODE,
+                        'http_status' => $response->status(),
+                        'log_id' => $response->json('error.log_id'),
+                    ],
+                ]);
+            }
             $this->persistState($context, $state);
 
             return $this->initializationFailure($response, $failure);

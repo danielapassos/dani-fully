@@ -13,6 +13,8 @@ use App\Services\ConnectedAccounts\AccountConnectionService;
 use App\Services\ConnectedAccounts\BlueskyConnector;
 use App\Services\ConnectedAccounts\DiscordConnector;
 use App\Services\ConnectedAccounts\XAccountCapabilities;
+use App\Services\Publishing\TikTokAccounts\TikTokAccountsReadiness;
+use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Publishing\TokenManager;
 use App\Support\InstanceSettings;
 use Illuminate\Http\RedirectResponse;
@@ -72,6 +74,10 @@ class ConnectedAccountController extends Controller
                 'disabled' => $account->isDisabled(),
                 'pds_url' => $this->customPdsUrl($account),
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
+                'tiktok_accounts_api' => app(TikTokPublishingRoute::class)->usesAccountsApi($account),
+                'publishing_authorization_url' => app(TikTokPublishingRoute::class)->usesAccountsApi($account)
+                    && app(TikTokAccountsReadiness::class)->configurationReason() === null
+                        ? route('accounts.tiktok-accounts.connect', $account) : null,
                 'publishing_ready' => $account->canPublish(),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
                 'publishing_recovery_kind' => $account->publishingRecoveryKind(),
@@ -113,6 +119,10 @@ class ConnectedAccountController extends Controller
         if (! app(InstanceSettings::class)->platformAvailable($account->platform)) {
             return redirect()->route('accounts.index')
                 ->with('error', "{$account->platform->label()} is disabled on this instance.");
+        }
+
+        if (app(TikTokPublishingRoute::class)->usesAccountsApi($account)) {
+            return redirect()->route('accounts.tiktok-accounts.connect', $account);
         }
 
         // OAuth accounts reconnect by re-running the provider flow (which upserts

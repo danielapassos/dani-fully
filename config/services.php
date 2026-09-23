@@ -87,6 +87,15 @@ return [
         'direct_post_enabled' => filter_var(env('TIKTOK_DIRECT_POST_ENABLED', false), FILTER_VALIDATE_BOOL),
     ],
 
+    'tiktok_accounts' => [
+        'authorization_url' => env('TIKTOK_ACCOUNTS_AUTHORIZATION_URL'),
+        'client_id' => env('TIKTOK_ACCOUNTS_CLIENT_ID'),
+        'client_secret' => env('TIKTOK_ACCOUNTS_CLIENT_SECRET'),
+        'redirect' => env('TIKTOK_ACCOUNTS_REDIRECT_URI'),
+        'approved' => filter_var(env('TIKTOK_ACCOUNTS_APPROVED', false), FILTER_VALIDATE_BOOL),
+        'verified_url_prefix' => env('TIKTOK_ACCOUNTS_VERIFIED_URL_PREFIX'),
+    ],
+
     'metricool' => [
         'token' => env('METRICOOL_API_TOKEN'),
         'user_id' => env('METRICOOL_USER_ID'),

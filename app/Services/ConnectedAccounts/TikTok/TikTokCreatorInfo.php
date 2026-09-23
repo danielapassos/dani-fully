@@ -11,6 +11,7 @@ use App\Exceptions\TikTokCreatorInfoException;
 use App\Exceptions\TokenRefreshException;
 use App\Models\ConnectedAccount;
 use App\Services\Publishing\Metricool\MetricoolClient;
+use App\Services\Publishing\TikTokAccounts\TikTokAccountsClient;
 use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Publishing\TokenManager;
 use App\Services\Usage\Concerns\TracksUsage;
@@ -33,6 +34,10 @@ class TikTokCreatorInfo
 
         if ($token === null && app(TikTokPublishingRoute::class)->usesMetricool($account)) {
             return app(MetricoolClient::class)->creatorInfo($account);
+        }
+
+        if ($token === null && app(TikTokPublishingRoute::class)->usesAccountsApi($account)) {
+            return app(TikTokAccountsClient::class)->creatorInfo($account);
         }
 
         try {
