@@ -124,7 +124,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
             return;
         }
         $this->target = $target;
-        $acceptedMetricool = app(TikTokPublishingRoute::class)->hasAcceptedOperation($target);
+        $acceptedOperation = app(TikTokPublishingRoute::class)->hasAcceptedOperation($target);
 
         if ($this->reconcileRecordedOutcome($target, $rollup)) {
             return;
@@ -143,7 +143,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
             return;
         }
 
-        if (! $acceptedMetricool && ! $settings->platformAvailable($target->platform)) {
+        if (! $acceptedOperation && ! $settings->platformAvailable($target->platform)) {
             $target->forceFill([
                 'status' => PostTargetStatus::Skipped->value,
                 'error_kind' => null,
@@ -157,9 +157,11 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         }
 
         $account = $target->account()->firstOrFail();
-        $metricool = app(TikTokPublishingRoute::class)->forTarget($target) === 'metricool';
+        $provider = app(TikTokPublishingRoute::class)->forTarget($target);
+        $metricool = $provider === 'metricool';
+        $separateCredentials = in_array($provider, ['metricool', 'accounts_api'], true);
 
-        if (! $acceptedMetricool && $account->isDisabled()) {
+        if (! $acceptedOperation && $account->isDisabled()) {
             $target->forceFill([
                 'status' => PostTargetStatus::Skipped->value,
                 'error_kind' => null,
@@ -175,15 +177,17 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         // Re-check provider flags and upload scopes at execution time. They can
         // change after the request was queued, and the connector must not be the
         // first place an unavailable publishing capability is discovered.
-        $publishable = $metricool
-            ? app(TikTokPublishingRoute::class)->ready($account)
+        $publishable = $target->platform === Platform::TikTok
+            ? app(TikTokPublishingRoute::class)->ready($account, $provider)
             : $account->canPublish();
-        if (($metricool || $account->status === ConnectedAccountStatus::Active) && ! $publishable
-            && ! $acceptedMetricool && ! $this->canPollExistingTikTokTransfer($target, $account)) {
+        if (($separateCredentials || $account->status === ConnectedAccountStatus::Active) && ! $publishable
+            && ! $acceptedOperation && ! $this->canPollExistingTikTokTransfer($target, $account)) {
             $target->forceFill([
                 'status' => PostTargetStatus::Skipped->value,
                 'error_kind' => null,
-                'error_message' => $account->publishingUnavailableReason() ?? 'This account is not ready to publish.',
+                'error_message' => ($target->platform === Platform::TikTok
+                    ? app(TikTokPublishingRoute::class)->unavailableReason($account, $provider)
+                    : $account->publishingUnavailableReason()) ?? 'This account is not ready to publish.',
                 'next_attempt_at' => null,
             ])->save();
 
@@ -219,7 +223,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
         $workspace = $target->post()->firstOrFail()->workspace()->firstOrFail();
 
-        if (! $acceptedMetricool && ! $subscriptions->canPublish($workspace)) {
+        if (! $acceptedOperation && ! $subscriptions->canPublish($workspace)) {
             $result = PublishResult::failure(
                 ErrorKind::BillingRequired,
                 'An active Shoutrrr subscription is required to publish posts.',
@@ -231,7 +235,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
                     ? 'Monthly X API budget exceeded. Upgrade or wait for the next billing period.'
                     : 'Monthly X publishing quota exceeded. Upgrade or wait for the next billing period.',
             );
-        } elseif (! $metricool && $account->status === ConnectedAccountStatus::NeedsAttention) {
+        } elseif (! $separateCredentials && $account->status === ConnectedAccountStatus::NeedsAttention) {
             $result = PublishResult::failure(
                 ErrorKind::AuthExpired,
                 "{$account->platform->label()} account needs attention. Reconnect it before publishing.",
@@ -239,7 +243,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         } else {
             try {
                 app(TikTokPublishingRoute::class)->pin($target);
-                $credentials = $metricool ? [] : $tokens->fresh($account);
+                $credentials = $separateCredentials ? [] : $tokens->fresh($account);
                 $connector = $registry->for($target->platform);
                 $result = $connector->publish($this->context($target, $credentials));
 
@@ -249,13 +253,17 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
                 // fresh credential exchange and retry the publish once (media that
                 // did upload resumes from stored state) before declaring the
                 // account needs attention.
-                if (! $metricool && $result->errorKind === ErrorKind::AuthExpired) {
+                if (! $separateCredentials && $result->errorKind === ErrorKind::AuthExpired) {
                     $credentials = $tokens->fresh($account, force: true);
                     $result = $connector->publish($this->context($target, $credentials));
                 }
             } catch (TokenRefreshException $e) {
                 $result = PublishResult::failure(ErrorKind::AuthExpired, $e->getMessage());
             }
+        }
+
+        if ($provider === 'accounts_api' && $result->errorKind === ErrorKind::AuthExpired) {
+            $result = PublishResult::failure(ErrorKind::Unsupported, $result->errorMessage ?? 'Authorize this account through the TikTok Accounts API connection.', $result->httpStatus);
         }
 
         if ($metricool && $result->errorKind === ErrorKind::AuthExpired) {

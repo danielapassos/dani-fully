@@ -59,7 +59,7 @@ class ComposerController extends Controller
                 'publishing_ready' => $account->canPublish(),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
                 'tiktok_direct_post_enabled' => $account->platform === Platform::TikTok
-                    && (config('services.tiktok.direct_post_enabled') || app(TikTokPublishingRoute::class)->usesMetricool($account)),
+                    && (config('services.tiktok.direct_post_enabled') || app(TikTokPublishingRoute::class)->usesSeparateCredentials($account)),
             ])->values()->all();
 
         $sets = AccountSet::query()

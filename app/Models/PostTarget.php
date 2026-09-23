@@ -180,6 +180,7 @@ class PostTarget extends Model
     {
         return $this->publicationStatus()->isRetryable()
             && $this->error_kind !== ErrorKind::Unknown
+            && ! $this->hasNativeTikTokAuditFailure()
             && $this->account?->canPublish() === true;
     }
 
@@ -191,6 +192,10 @@ class PostTarget extends Model
     {
         if ($this->status->isRetryable() && $this->error_kind === ErrorKind::Unknown) {
             return 'The provider outcome is unconfirmed and may already be live. Check the connected platform before taking any further action.';
+        }
+
+        if ($this->status->isRetryable() && $this->hasNativeTikTokAuditFailure()) {
+            return 'App approval required; signing in again will not fix this. The saved native submission must be reconciled before retrying through another publishing route.';
         }
 
         if ($this->status->isRetryable() && $this->error_kind !== ErrorKind::Unknown) {
@@ -216,7 +221,24 @@ class PostTarget extends Model
             return null;
         }
 
+        if ($this->hasNativeTikTokAuditFailure()) {
+            return 'operator_configuration';
+        }
+
         return $this->account?->publishingRecoveryKind();
+    }
+
+    private function hasNativeTikTokAuditFailure(): bool
+    {
+        if ($this->platform !== Platform::TikTok || ($this->media_upload_state['_tiktok_provider'] ?? null) === 'accounts_api') {
+            return false;
+        }
+
+        $message = $this->error_message ?? '';
+
+        return str_contains($message, 'unaudited_client_can_only_post_to_private_accounts')
+            || str_contains($message, 'TikTok has not approved this app for public Direct Post')
+            || str_contains($message, 'TikTok has not approved this developer app for public Direct Post');
     }
 
     /**

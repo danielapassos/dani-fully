@@ -158,7 +158,7 @@ class PublishPrecheck
         }
 
         if ($platform === Platform::TikTok && (config('services.tiktok.direct_post_enabled')
-            || app(TikTokPublishingRoute::class)->forTarget($target) === 'metricool')
+            || in_array(app(TikTokPublishingRoute::class)->forTarget($target), ['metricool', 'accounts_api'], true))
             && ! collect($target->media_upload_state ?? [])->contains(static fn (mixed $entry): bool => is_array($entry) && ! empty($entry['remote_ref']))) {
             $options = $target->content_override['tiktok'] ?? [];
             $video = $media->first(fn (PostMedia $item): bool => $item->isVideo());

@@ -8,6 +8,7 @@ use App\Concerns\HasWorkspaceScope;
 use App\Enums\ConnectedAccountStatus;
 use App\Enums\MetricsStatus;
 use App\Enums\Platform;
+use App\Services\Publishing\TikTokAccounts\TikTokAccountsReadiness;
 use App\Services\Publishing\TikTokPublishingRoute;
 use App\Support\InstanceSettings;
 use App\Support\OAuthGrantedScopes;
@@ -192,8 +193,8 @@ class ConnectedAccount extends Model
     public function canPublish(): bool
     {
         $route = app(TikTokPublishingRoute::class);
-        $metricool = $route->usesMetricool($this);
-        if ($this->isDisabled() || (! $metricool && $this->status !== ConnectedAccountStatus::Active)) {
+        $separateCredentials = $route->usesSeparateCredentials($this);
+        if ($this->isDisabled() || (! $separateCredentials && $this->status !== ConnectedAccountStatus::Active)) {
             return false;
         }
 
@@ -205,7 +206,7 @@ class ConnectedAccount extends Model
             return false;
         }
 
-        if ($metricool) {
+        if ($separateCredentials) {
             return $route->ready($this);
         }
 
@@ -215,7 +216,7 @@ class ConnectedAccount extends Model
     /** @return list<string> */
     public function requiredPublishingScopes(): array
     {
-        if (app(TikTokPublishingRoute::class)->usesMetricool($this)) {
+        if (app(TikTokPublishingRoute::class)->usesSeparateCredentials($this)) {
             return [];
         }
 
@@ -283,7 +284,7 @@ class ConnectedAccount extends Model
         }
 
         $route = app(TikTokPublishingRoute::class);
-        if ($route->usesMetricool($this)) {
+        if ($route->usesSeparateCredentials($this)) {
             if (! app(InstanceSettings::class)->platformAvailable($this->platform)) {
                 return 'TikTok is disabled on this installation. Enable it before posting.';
             }
@@ -334,7 +335,10 @@ class ConnectedAccount extends Model
         }
 
         $route = app(TikTokPublishingRoute::class);
-        if ($route->usesMetricool($this)) {
+        if ($route->usesAccountsApi($this) && app(InstanceSettings::class)->platformAvailable($this->platform)) {
+            return app(TikTokAccountsReadiness::class)->recoveryKind($this);
+        }
+        if ($route->usesSeparateCredentials($this)) {
             return ! app(InstanceSettings::class)->platformAvailable($this->platform) || ! $route->ready($this)
                 ? 'operator_configuration'
                 : null;

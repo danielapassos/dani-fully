@@ -21,7 +21,7 @@ class TikTokCreatorInfoController extends Controller
         abort_unless($request->user()->can('create', Post::class), 403);
         abort_unless($account->workspace_id === $request->user()->current_workspace_id, 404);
         abort_unless($account->platform === Platform::TikTok && (config('services.tiktok.direct_post_enabled')
-            || app(TikTokPublishingRoute::class)->usesMetricool($account)), 404);
+            || app(TikTokPublishingRoute::class)->usesSeparateCredentials($account)), 404);
 
         try {
             return response()->json(['creator' => $creatorInfo->query($account)])->header('Cache-Control', 'private, no-store');
