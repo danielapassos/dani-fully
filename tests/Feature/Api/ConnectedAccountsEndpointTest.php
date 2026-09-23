@@ -4,6 +4,21 @@ use App\Enums\Platform;
 use App\Models\ConnectedAccount;
 use App\Models\ConnectedAccountSecret;
 
+test('API exposes inbox mode only for the native inbox configuration', function (string $provider, bool $direct, bool $expected): void {
+    [, $workspace, $token] = issuedKey();
+    config()->set('services.tiktok.publishing_provider', $provider);
+    config()->set('services.tiktok.inbox_enabled', true);
+    config()->set('services.tiktok.direct_post_enabled', $direct);
+    ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::TikTok]);
+
+    $this->withToken($token)->getJson('/api/v1/connected-accounts')->assertOk()
+        ->assertJsonPath('data.0.tiktok_inbox_enabled', $expected);
+})->with([
+    'inbox' => ['native', false, true],
+    'direct' => ['native', true, false],
+    'other provider' => ['accounts_api', false, false],
+]);
+
 test('lists connected accounts for the bound workspace only', function () {
     [, $workspace, $token] = issuedKey();
     $mine = ConnectedAccount::factory()->for($workspace)->create();

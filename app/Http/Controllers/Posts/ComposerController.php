@@ -12,6 +12,7 @@ use App\Models\AccountSet;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\WorkspaceMention;
+use App\Services\Publishing\TikTokInboxHandoff;
 use App\Services\Publishing\TikTokPublishingRoute;
 use App\Support\InstanceSettings;
 use App\Support\MetricsPresenter;
@@ -57,6 +58,7 @@ class ComposerController extends Controller
                 'x_premium' => $account->hasXPremium(),
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
                 'publishing_ready' => $account->canPublish(),
+                'tiktok_inbox_enabled' => app(TikTokInboxHandoff::class)->enabledFor($account),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
                 'tiktok_direct_post_enabled' => $account->platform === Platform::TikTok
                     && (config('services.tiktok.direct_post_enabled') || app(TikTokPublishingRoute::class)->usesSeparateCredentials($account)),

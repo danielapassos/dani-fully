@@ -22,7 +22,12 @@ import {
 import { cn } from '@/lib/utils';
 import { index as billingRoute } from '@/routes/billing';
 import { publish, queue } from '@/routes/posts';
-import type { PlatformLimits, PlatformName, PostView } from '@/types/compose';
+import type {
+    Account,
+    PlatformLimits,
+    PlatformName,
+    PostView,
+} from '@/types/compose';
 
 type Props = {
     tray: ScheduleTray;
@@ -32,6 +37,8 @@ type Props = {
     uploading?: boolean;
     /** Selected destination accounts that cannot publish until reconnected. */
     attentionHandles?: string[];
+    /** Only the accounts selected as destinations for this post. */
+    accounts?: Account[];
     /**
      * Flush the autosave and resolve once the draft (incl. media) is persisted.
      * Awaited before publishing so the publish never races the save that
@@ -164,6 +171,7 @@ export function SubmitBar({
     disabled,
     uploading = false,
     attentionHandles = [],
+    accounts = [],
     onSaveDraft,
     onEnsurePost,
     queueDisabled,
@@ -193,12 +201,26 @@ export function SubmitBar({
     // Prefer live client blocks; fall back to the last server response.
     const blocks = blockedAccounts.length > 0 ? blockedAccounts : serverBlocked;
 
-    const submitLabel =
-        tray.mode === 'now'
-            ? 'Publish now'
+    const inboxAccounts = accounts.filter(
+        (account) =>
+            account.platform === 'tiktok' && account.tiktok_inbox_enabled,
+    );
+    const hasInboxDelivery = inboxAccounts.length > 0;
+    const inboxOnly =
+        hasInboxDelivery && inboxAccounts.length === accounts.length;
+    const submitLabel = inboxOnly
+        ? tray.mode === 'now'
+            ? 'Send to TikTok inbox'
             : tray.mode === 'queue'
-              ? 'Add to queue'
-              : 'Schedule';
+              ? 'Queue inbox delivery'
+              : 'Schedule inbox delivery'
+        : tray.mode === 'now'
+          ? hasInboxDelivery
+              ? 'Publish & send to TikTok'
+              : 'Publish now'
+          : tray.mode === 'queue'
+            ? 'Add to queue'
+            : 'Schedule';
 
     async function handleSubmit() {
         if (hasBlockingIssues(blockedAccounts)) {
@@ -370,6 +392,15 @@ export function SubmitBar({
 
     return (
         <div className="flex flex-col items-stretch gap-1.5 sm:items-end sm:justify-self-end">
+            {hasInboxDelivery && (
+                <p className="max-w-sm text-[12px] leading-5 text-muted-foreground">
+                    TikTok receives the video only. Open its Inbox upload
+                    notification, paste your saved caption, and check mentions,
+                    cover and privacy before posting.
+                    {tray.mode !== 'now' &&
+                        ' The selected time schedules inbox delivery; you finish posting in TikTok.'}
+                </p>
+            )}
             <div className="flex items-center gap-1.5">
                 <TrayButton
                     onClick={() => void onSaveDraft()}

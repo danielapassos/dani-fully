@@ -8,6 +8,19 @@ use App\Models\ConnectedAccountSecret;
 use App\Models\User;
 use App\Models\Workspace;
 
+test('MCP account list distinguishes an inbox upload from direct publishing', function (): void {
+    $user = User::factory()->create();
+    $workspace = Workspace::factory()->create();
+    bindTokenToWorkspace($user, $workspace);
+    config()->set('services.tiktok.publishing_provider', 'native');
+    config()->set('services.tiktok.inbox_enabled', true);
+    config()->set('services.tiktok.direct_post_enabled', false);
+    ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::TikTok]);
+
+    ShoutrrrServer::actingAs($user)->tool(ListConnectedAccountsTool::class, [])
+        ->assertOk()->assertSee('"tiktok_inbox_enabled": true');
+});
+
 test('list_connected_accounts returns accounts in the bound workspace', function (): void {
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create();

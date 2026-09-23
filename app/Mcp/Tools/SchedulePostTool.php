@@ -14,7 +14,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Schedule a post for a specific future time (ISO-8601). Omit scheduled_at or pass null to un-schedule back to draft.')]
+#[Description('Schedule a post for a specific future time (ISO-8601). TikTok inbox targets schedule a video upload for manual completion, not a public TikTok post; the saved caption must be pasted manually. Read each target manual_completion instructions. Omit scheduled_at or pass null to un-schedule back to draft.')]
 class SchedulePostTool extends WorkspaceTool
 {
     public function handle(Request $request): Response

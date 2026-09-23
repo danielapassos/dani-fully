@@ -1712,6 +1712,7 @@ export default function Composer({
                         />
                         <SubmitBar
                             tray={state.scheduleTray}
+                            accounts={tabAccounts}
                             postId={state.postId}
                             disabled={
                                 accounts.length === 0 ||

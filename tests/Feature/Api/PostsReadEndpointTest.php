@@ -1,6 +1,35 @@
 <?php
 
+use App\Enums\Platform;
+use App\Enums\PostTargetStatus;
+use App\Models\ConnectedAccount;
 use App\Models\Post;
+use App\Models\PostTarget;
+use Illuminate\Support\Facades\Http;
+
+test('API read returns a delivered inbox caption after the active provider changes', function (): void {
+    Http::preventStrayRequests();
+    [$user, $workspace, $token] = issuedKey();
+    config()->set('services.tiktok.publishing_provider', 'accounts_api');
+    $post = Post::factory()->for($workspace)->create(['author_id' => $user->id, 'status' => 'awaiting_action']);
+    $account = ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::TikTok]);
+    $target = PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::TikTok,
+        'status' => PostTargetStatus::AwaitingAction,
+        'sections' => ["Approved caption\n@brand\n\n#tabi"],
+        'media_upload_state' => ['_tiktok_provider' => 'native', 'video-id' => ['remote_ref' => 'upload-session', 'metadata' => ['publish_mode' => 'inbox']]],
+    ]);
+    $before = $target->refresh()->getRawOriginal();
+
+    $this->withToken($token)->getJson("/api/v1/posts/{$post->id}")->assertOk()
+        ->assertJsonPath('post.targets.0.status', 'awaiting_action')
+        ->assertJsonPath('post.targets.0.manual_completion.kind', 'tiktok_inbox')
+        ->assertJsonPath('post.targets.0.manual_completion.caption', "Approved caption\n@brand\n\n#tabi")
+        ->assertJsonPath('post.targets.0.manual_completion.instructions', fn (string $instructions): bool => str_starts_with($instructions, 'Open the upload notification'));
+    expect($target->fresh()->getRawOriginal())->toBe($before);
+    Http::assertNothingSent();
+});
 
 test('lists posts in the bound workspace', function () {
     [$user, $workspace, $token] = issuedKey();

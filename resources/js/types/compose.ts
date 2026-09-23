@@ -117,6 +117,8 @@ export type Account = {
     /** Actionable explanation shown beside a connection that cannot publish. */
     publishing_unavailable_reason?: string | null;
     tiktok_direct_post_enabled?: boolean;
+    /** Native video-only inbox delivery, requiring completion in TikTok. */
+    tiktok_inbox_enabled?: boolean;
 };
 
 export type AccountSet = {
@@ -225,6 +227,11 @@ export type TargetView = {
     issues: string[];
     status: TargetStatus;
     status_message?: string | null;
+    manual_completion?: {
+        kind: 'tiktok_inbox';
+        caption: string;
+        instructions: string;
+    } | null;
     error_kind: string | null;
     error_message: string | null;
     /** Server-authoritative manual retry gate. Optional for older/partial payloads. */

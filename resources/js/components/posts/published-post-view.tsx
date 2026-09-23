@@ -6,6 +6,7 @@ import PostMetricsRefreshController from '@/actions/App/Http/Controllers/Posts/P
 import { PlatformGlyph } from '@/components/common/platform-glyph';
 import { InstagramTrialSummary } from '@/components/compose/instagram-trial-controls';
 import { TargetStatusChips } from '@/components/compose/target-status-chips';
+import { TikTokInboxCompletion } from '@/components/posts/tiktok-inbox-completion';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -249,6 +250,11 @@ function PublishedCard({
     const cardMediaBySection = resolveTargetMediaBySection(target, media);
     const sections = target.sections.length > 0 ? target.sections : [''];
     const isThread = sections.length > 1;
+    const inboxHandoff =
+        target.status === 'awaiting_action' &&
+        target.manual_completion?.kind === 'tiktok_inbox'
+            ? target.manual_completion
+            : null;
 
     return (
         <article className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm ring-1 ring-foreground/5">
@@ -288,6 +294,12 @@ function PublishedCard({
                     <div className="mb-4 border-b border-border pb-4">
                         <TargetStatusChips targets={[target]} />
                     </div>
+                )}
+                {inboxHandoff && (
+                    <TikTokInboxCompletion
+                        key={target.id}
+                        handoff={inboxHandoff}
+                    />
                 )}
                 {sections.map((section, index) => {
                     const isLast = index === sections.length - 1;
@@ -329,13 +341,15 @@ function PublishedCard({
                                         {when}
                                     </span>
                                 </div>
-                                <p className="mt-0.5 text-[14px] leading-6 wrap-anywhere whitespace-pre-wrap text-foreground">
-                                    <LinkedText
-                                        text={section}
-                                        platform={target.platform}
-                                        discordLabels={discordLabels}
-                                    />
-                                </p>
+                                {!inboxHandoff && (
+                                    <p className="mt-0.5 text-[14px] leading-6 wrap-anywhere whitespace-pre-wrap text-foreground">
+                                        <LinkedText
+                                            text={section}
+                                            platform={target.platform}
+                                            discordLabels={discordLabels}
+                                        />
+                                    </p>
+                                )}
                                 {(cardMediaBySection[index]?.length ?? 0) >
                                     0 && (
                                     <MediaGrid
@@ -603,7 +617,7 @@ function PublishedBody({
                         <ToggleGroupItem
                             key={target.id}
                             value={target.id}
-                            aria-label={platformLabel(target.platform)}
+                            aria-label={`${platformLabel(target.platform)} ${target.handle ?? target.display_name ?? ''}`.trim()}
                             className="gap-1.5 px-3 text-xs"
                         >
                             <PlatformGlyph
@@ -611,6 +625,11 @@ function PublishedBody({
                                 size={13}
                             />
                             {platformLabel(target.platform)}
+                            {(target.handle || target.display_name) && (
+                                <span className="text-muted-foreground">
+                                    {target.handle ?? target.display_name}
+                                </span>
+                            )}
                         </ToggleGroupItem>
                     ))}
                 </ToggleGroup>

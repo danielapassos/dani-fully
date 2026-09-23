@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -90,5 +90,85 @@ describe('terminal upload details', () => {
         render(<StatusChip status="awaiting_action" platform="tiktok" />);
 
         expect(screen.getByText('In TikTok inbox')).toBeInTheDocument();
+    });
+
+    it('shows the account-specific handoff caption only for a delivered inbox target', () => {
+        const post = uploadedPost('awaiting_action');
+        post.base_text = 'Other destination caption';
+        const caption = 'ASMR tabi shoes unboxing @woodchucksato\n\n#TabiShoes';
+        post.targets[0].sections = [caption];
+        post.targets[0].manual_completion = {
+            kind: 'tiktok_inbox',
+            caption,
+            instructions:
+                'Open the upload notification in your TikTok Inbox to finish posting. This is not live.',
+        };
+        const { rerender } = render(
+            <PublishedPostView post={post} showMetrics />,
+        );
+        expect(
+            screen.getByRole('button', { name: 'Copy caption' }),
+        ).toBeInTheDocument();
+        expect(screen.getByLabelText('Caption to paste in TikTok')).toHaveValue(
+            caption,
+        );
+        expect(
+            screen.queryByText('Other destination caption'),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole('link', { name: /View on/ }),
+        ).not.toBeInTheDocument();
+
+        rerender(
+            <PublishedPostView
+                post={{
+                    ...post,
+                    status: 'published',
+                    targets: [{ ...post.targets[0], status: 'published' }],
+                }}
+                showMetrics={false}
+            />,
+        );
+        expect(
+            screen.queryByRole('button', { name: 'Copy caption' }),
+        ).not.toBeInTheDocument();
+    });
+
+    it('lets the user choose distinct TikTok accounts and copy the right caption', () => {
+        const post = uploadedPost('awaiting_action');
+        const primary = post.targets[0];
+        primary.manual_completion = {
+            kind: 'tiktok_inbox',
+            caption: 'Caption for DRL',
+            instructions: 'Finish in the TikTok Inbox.',
+        };
+        post.targets.push({
+            ...primary,
+            id: 'target-2',
+            connected_account_id: 'account-2',
+            handle: '@mommygorl',
+            manual_completion: {
+                ...primary.manual_completion,
+                caption: 'Caption for mommygorl',
+            },
+        });
+        render(<PublishedPostView post={post} showMetrics={false} />);
+        expect(screen.getByLabelText('Caption to paste in TikTok')).toHaveValue(
+            'Caption for DRL',
+        );
+        fireEvent.click(
+            screen.getByRole('button', { name: 'TikTok @mommygorl' }),
+        );
+        expect(screen.getByLabelText('Caption to paste in TikTok')).toHaveValue(
+            'Caption for mommygorl',
+        );
+        fireEvent.click(
+            screen.getByRole('button', {
+                name: 'TikTok @definitelyrunninglate',
+            }),
+        );
+        expect(screen.getByLabelText('Caption to paste in TikTok')).toHaveValue(
+            'Caption for DRL',
+        );
     });
 });

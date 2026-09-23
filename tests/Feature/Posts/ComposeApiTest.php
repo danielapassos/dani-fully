@@ -15,6 +15,27 @@ use App\Support\InstanceSettings;
 use Illuminate\Support\Collection;
 use Inertia\Testing\AssertableInertia;
 
+test('composer and shared shell expose explicit TikTok inbox mode while the post carries the saved caption', function (): void {
+    [$user, $workspace, $accounts] = actingMember(1);
+    config()->set('services.tiktok.publishing_provider', 'native');
+    config()->set('services.tiktok.inbox_enabled', true);
+    config()->set('services.tiktok.direct_post_enabled', false);
+    $account = $accounts->first();
+    $account->forceFill(['platform' => Platform::TikTok])->save();
+    $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
+    PostTarget::factory()->for($post)->create([
+        'connected_account_id' => $account->id,
+        'platform' => Platform::TikTok,
+        'sections' => ["Saved caption\n@brand"],
+    ]);
+
+    $this->get("/posts/{$post->id}")->assertOk()->assertInertia(fn (AssertableInertia $page) => $page
+        ->where('accounts.0.tiktok_inbox_enabled', true)
+        ->where('shell.accounts.0.tiktok_inbox_enabled', true)
+        ->where('accounts.0.tiktok_direct_post_enabled', false)
+        ->where('post.targets.0.manual_completion.caption', "Saved caption\n@brand"));
+});
+
 function actingMember(int $accounts = 2): array
 {
     $user = User::factory()->create();
