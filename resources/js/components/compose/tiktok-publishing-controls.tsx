@@ -1,4 +1,4 @@
-import { useHttp } from '@inertiajs/react';
+import { Link, useHttp } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 
 import TikTokCreatorInfoController from '@/actions/App/Http/Controllers/ConnectedAccounts/TikTokCreatorInfoController';
@@ -9,6 +9,7 @@ import {
     TIKTOK_PRIVACY_LABELS,
     tiktokIssues,
 } from '@/lib/compose/tiktok';
+import { index as accountsRoute } from '@/routes/accounts';
 import type {
     Account,
     TikTokCreatorInfo,
@@ -39,6 +40,10 @@ export function TikTokPublishingControls({
     const [revision, setRevision] = useState(0);
     const [loading, setLoading] = useState(true);
     const current = options ?? TIKTOK_DEFAULT_OPTIONS;
+    const publishingBlocked = account.publishing_ready === false;
+    const unavailableReason =
+        account.publishing_unavailable_reason ??
+        'This TikTok account is not ready to publish. Check its publishing setup in Accounts.';
 
     useEffect(() => {
         let cancelled = false;
@@ -46,6 +51,12 @@ export function TikTokPublishingControls({
         setError(null);
         setCreator(null);
         onCreatorInfo(null);
+        if (publishingBlocked) {
+            setLoading(false);
+            return () => {
+                cancelled = true;
+            };
+        }
         const fail = () => {
             if (cancelled) return;
             setError(
@@ -89,8 +100,8 @@ export function TikTokPublishingControls({
         return () => {
             cancelled = true;
         };
-        // oxlint-disable-next-line react-hooks/exhaustive-deps -- Reload only on account selection or explicit refresh, not options autosaves or callback identity changes.
-    }, [account.id, revision]);
+        // oxlint-disable-next-line react-hooks/exhaustive-deps -- Reload on account/readiness changes or explicit refresh, not options autosaves or callback identity changes.
+    }, [account.id, publishingBlocked, revision]);
 
     function change(patch: Partial<TikTokPostOptions>) {
         onChange({ ...current, ...patch });
@@ -111,32 +122,42 @@ export function TikTokPublishingControls({
                 <div>
                     <h3 className="text-sm font-medium">Post to TikTok</h3>
                     <p className="text-sm text-muted-foreground">
-                        {creator
+                        {creator && !publishingBlocked
                             ? `${creator.creator_nickname} · @${creator.creator_username}`
                             : account.handle}
                     </p>
                 </div>
-                <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={loading}
-                    onClick={() => setRevision((value) => value + 1)}
-                >
-                    Refresh settings
-                </Button>
+                {!publishingBlocked && (
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={loading}
+                        onClick={() => setRevision((value) => value + 1)}
+                    >
+                        Refresh settings
+                    </Button>
+                )}
             </div>
-            {loading && (
+            {loading && !publishingBlocked && (
                 <p role="status" className="text-sm text-muted-foreground">
                     Loading current TikTok settings…
                 </p>
             )}
-            {error && (
+            {(publishingBlocked || error) && (
                 <p role="alert" className="text-sm text-destructive">
-                    {error}
+                    {publishingBlocked ? unavailableReason : error}
                 </p>
             )}
-            {creator && (
+            {publishingBlocked && (
+                <Link
+                    href={accountsRoute().url}
+                    className="text-sm underline underline-offset-2"
+                >
+                    View account setup
+                </Link>
+            )}
+            {creator && !publishingBlocked && (
                 <>
                     <label className="grid gap-1.5 text-sm">
                         Who can watch this video?
