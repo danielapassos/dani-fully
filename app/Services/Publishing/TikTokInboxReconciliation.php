@@ -245,6 +245,7 @@ class TikTokInboxReconciliation
                 $state[$reference['media_key']]['metadata']['provider_status'] = $record['provider_status'];
             }
             $attributes = ['media_upload_state' => $state];
+            $verifiedPublishedAt = null;
             // Later inconclusive checks never erase previously verified public evidence.
             if ($status !== null && ($fresh->status !== PostTargetStatus::Published || $status === PostTargetStatus::Published)) {
                 $message = match ($status) {
@@ -257,11 +258,23 @@ class TikTokInboxReconciliation
                 if ($status === PostTargetStatus::Published) {
                     $ids = array_column($record['public_posts'], 'id');
                     $created = array_filter(array_column($record['public_posts'], 'created_at'), fn ($value): bool => is_int($value) && $value > 0 && $value <= now()->timestamp);
-                    $attributes = [...$attributes, 'remote_id' => $ids[0], 'remote_ids' => $ids, 'posted_at' => $fresh->posted_at ?? ($created !== [] ? CarbonImmutable::createFromTimestamp(min($created)) : now())];
+                    $verifiedPublishedAt = $created !== [] ? CarbonImmutable::createFromTimestamp(min($created)) : null;
+                    $attributes = [...$attributes, 'remote_id' => $ids[0], 'remote_ids' => $ids, 'posted_at' => $fresh->posted_at ?? $verifiedPublishedAt ?? now()];
                 }
             }
             $fresh->forceFill($attributes)->save();
             $this->rollup->recompute($post);
+            if ($verifiedPublishedAt !== null && $post->published_at !== null) {
+                foreach ($post->targets()->get() as $publishedTarget) {
+                    $postedAt = $publishedTarget->is($fresh) ? $verifiedPublishedAt : $publishedTarget->posted_at;
+                    if ($publishedTarget->publicationStatus() === PostTargetStatus::Published && $postedAt !== null && $postedAt->timestamp > 0 && $postedAt->lte(now()) && $postedAt->lt($post->published_at)) {
+                        $post->published_at = $postedAt;
+                    }
+                }
+                if ($post->isDirty('published_at')) {
+                    $post->save();
+                }
+            }
         });
     }
 }
