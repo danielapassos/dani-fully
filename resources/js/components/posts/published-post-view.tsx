@@ -7,6 +7,7 @@ import { PlatformGlyph } from '@/components/common/platform-glyph';
 import { InstagramTrialSummary } from '@/components/compose/instagram-trial-controls';
 import { TargetStatusChips } from '@/components/compose/target-status-chips';
 import { TikTokInboxCompletion } from '@/components/posts/tiktok-inbox-completion';
+import { TikTokInboxTracking } from '@/components/posts/tiktok-inbox-tracking';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -202,9 +203,16 @@ function metricsBar(
     }
     if (stat.status === 'rate_limited' || stat.status === 'failed') {
         return (
-            <ActionBarNote>
-                Couldn’t refresh numbers — trying again soon.
-            </ActionBarNote>
+            <>
+                {stat.captured_at !== null && (
+                    <ActionBar platform={target.platform} stat={stat} />
+                )}
+                <ActionBarNote>
+                    Couldn’t refresh numbers.
+                    {stat.captured_at !== null &&
+                        ` Showing the last successful capture from ${dayjs(stat.captured_at).fromNow()}.`}
+                </ActionBarNote>
+            </>
         );
     }
     if (stat.captured_at === null) {
@@ -215,10 +223,21 @@ function metricsBar(
         );
     }
 
-    return <ActionBar platform={target.platform} stat={stat} />;
+    return (
+        <>
+            <ActionBar platform={target.platform} stat={stat} />
+            {stat.stale && (
+                <ActionBarNote>
+                    Last captured {dayjs(stat.captured_at).fromNow()}. These
+                    counts are awaiting a fresh measurement.
+                </ActionBarNote>
+            )}
+        </>
+    );
 }
 
 function PublishedCard({
+    postId,
     target,
     media,
     publishedAt,
@@ -227,6 +246,7 @@ function PublishedCard({
     loading,
     discordLabels,
 }: {
+    postId: string;
     target: TargetView;
     media: MediaView[];
     publishedAt: string | null;
@@ -271,7 +291,7 @@ function PublishedCard({
                     {platformLabel(target.platform)}
                     {isThread && ` · ${sections.length} posts`}
                 </span>
-                {permalink && (
+                {permalink && !target.inbox_tracking?.public_posts.length && (
                     <a
                         href={permalink}
                         target="_blank"
@@ -301,6 +321,11 @@ function PublishedCard({
                         handoff={inboxHandoff}
                     />
                 )}
+                <TikTokInboxTracking
+                    key={`tracking-${target.id}`}
+                    postId={postId}
+                    target={target}
+                />
                 {sections.map((section, index) => {
                     const isLast = index === sections.length - 1;
 
@@ -637,6 +662,7 @@ function PublishedBody({
 
             {selectedTarget && (
                 <PublishedCard
+                    postId={post.id}
                     target={selectedTarget}
                     media={post.media}
                     publishedAt={post.published_at}

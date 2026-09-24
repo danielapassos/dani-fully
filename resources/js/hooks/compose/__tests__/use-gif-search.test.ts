@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GifCatalog } from '@/types/gifs';
@@ -36,6 +36,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
 });
@@ -96,6 +97,48 @@ describe('useGifSearch', () => {
 
         await waitFor(() => expect(result.current.items).toHaveLength(2));
         expect(result.current.hasNext).toBe(false);
+    });
+
+    it('does not reset an in-flight next page when the unchanged mount query debounce fires', async () => {
+        vi.useFakeTimers();
+        let resolveNext!: (response: Response) => void;
+        const nextResponse = new Promise<Response>((resolve) => {
+            resolveNext = resolve;
+        });
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(
+                new Response(JSON.stringify(page(['unexpected']))),
+            )
+            .mockResolvedValueOnce(
+                new Response(JSON.stringify(page(['a'], true))),
+            )
+            .mockReturnValueOnce(nextResponse);
+        vi.stubGlobal('fetch', fetchMock);
+
+        const { result } = renderHook(() => useGifSearch('gif', true));
+        await act(async () => {});
+        expect(result.current.hasNext).toBe(true);
+        expect(result.current.isLoading).toBe(false);
+
+        act(() => result.current.loadMore());
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+
+        await act(async () => {
+            vi.advanceTimersByTime(300);
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result.current.isLoading).toBe(true);
+        expect(fetchMock.mock.calls[1][1].signal.aborted).toBe(false);
+
+        await act(async () => {
+            resolveNext(new Response(JSON.stringify(page(['b']))));
+        });
+        expect(result.current.items.map((item) => item.slug)).toEqual([
+            'a',
+            'b',
+        ]);
     });
 
     it('surfaces an error and recovers on retry', async () => {
@@ -180,7 +223,11 @@ describe('useGifSearch', () => {
         );
 
         const { result } = renderHook(() => useGifSearch('gif', true));
-        await waitFor(() => expect(calls).toHaveLength(1));
+        await waitFor(() => {
+            expect(result.current.hasNext).toBe(true);
+            expect(result.current.isLoading).toBe(false);
+        });
+        expect(calls).toHaveLength(1);
 
         act(() => result.current.loadMore());
         await waitFor(() => expect(calls).toHaveLength(2));
@@ -221,7 +268,11 @@ describe('useGifSearch', () => {
             ({ catalog }) => useGifSearch(catalog, true),
             { initialProps: { catalog: 'gif' as GifCatalog } },
         );
-        await waitFor(() => expect(calls).toHaveLength(1));
+        await waitFor(() => {
+            expect(result.current.hasNext).toBe(true);
+            expect(result.current.isLoading).toBe(false);
+        });
+        expect(calls).toHaveLength(1);
 
         act(() => result.current.loadMore());
         await waitFor(() => expect(calls).toHaveLength(2));

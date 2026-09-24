@@ -43,6 +43,7 @@ class StorePostRequest extends FormRequest
             'destination.ids' => ['array', 'required_if:destination.kind,accounts'],
             'destination.ids.*' => ['string'],
             'auto_repost' => ['sometimes', 'nullable', 'boolean'],
+            'skip_sync' => ['sometimes', 'boolean'],
             'targets' => ['array'],
             'targets.*.connected_account_id' => ['required', 'string'],
             'targets.*.format' => ['nullable', Rule::enum(PostFormat::class)],

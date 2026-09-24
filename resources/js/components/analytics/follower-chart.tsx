@@ -91,7 +91,9 @@ export default function FollowerChart({
                         accountMetricsEnabled[account.platform] ?? true
                     }
                     posts={posts.filter((post) =>
-                        post.platforms.includes(account.platform),
+                        post.connected_account_ids
+                            ? post.connected_account_ids.includes(account.id)
+                            : post.platforms.includes(account.platform),
                     )}
                     xDomain={xDomain}
                 />
@@ -162,6 +164,24 @@ function AccountTrendCard({
                     )}
                 </div>
             </div>
+
+            {(account.status === 'failed' ||
+                account.status === 'rate_limited') && (
+                <p className="text-xs text-amber-700 dark:text-amber-300">
+                    Latest refresh failed.
+                    {account.captured_at
+                        ? ` Showing the capture from ${dayjs(account.captured_at).fromNow()}.`
+                        : ' No measurements yet.'}
+                </p>
+            )}
+            {account.stale &&
+                account.status === 'ok' &&
+                account.captured_at && (
+                    <p className="text-xs text-muted-foreground">
+                        Last captured {dayjs(account.captured_at).fromNow()}.
+                        Awaiting a fresh measurement.
+                    </p>
+                )}
 
             {!metricsEnabled ? (
                 <p className="flex h-[120px] items-center justify-center rounded-lg bg-muted/30 text-center text-xs text-muted-foreground">

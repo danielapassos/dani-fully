@@ -7,6 +7,7 @@ use App\Enums\ErrorKind;
 use App\Enums\Platform;
 use App\Enums\PostStatus;
 use App\Enums\PostTargetStatus;
+use App\Events\PostTargetPublished;
 use App\Jobs\PublishPostTarget;
 use App\Models\PostTargetAttempt;
 use App\Services\Publishing\BackoffSchedule;
@@ -18,6 +19,7 @@ use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 
 test('successful publish marks the target published with remote ids', function () {
@@ -48,6 +50,7 @@ test('a completed handoff stops processing without announcing a public post or s
         'next_attempt_at' => now()->addMinute(),
     ])->save();
     Bus::fake();
+    Event::fake([PostTargetPublished::class]);
     Notification::fake();
     $message = $outcome === 'awaiting_action' ? 'Open TikTok to finish posting; this is not live.' : 'Uploaded privately.';
     bindConnector($outcome === 'awaiting_action'
@@ -77,6 +80,7 @@ test('a completed handoff stops processing without announcing a public post or s
     expect($target->fresh()->status->value)->toBe($outcome);
     Notification::assertNothingSent();
     Bus::assertNotDispatched(PublishPostTarget::class);
+    Event::assertNotDispatched(PostTargetPublished::class);
 })->with([
     'TikTok inbox' => ['awaiting_action', []],
     'private YouTube video' => ['completed', ['video_42']],
@@ -357,6 +361,33 @@ test('auth expired after the recovery refresh marks the target failed without re
         ->and($attempt->error_kind)->toBe(ErrorKind::AuthExpired);
 
     Bus::assertNotDispatched(PublishPostTarget::class);
+});
+
+test('a transient refresh failure retries the publish without flipping the account', function () {
+    Bus::fake();
+    $target = publishTarget();
+    $target->account()->firstOrFail()->secret()->firstOrFail()->forceFill([
+        'refresh_token' => 'refresh-old',
+    ])->save();
+    Http::fake([
+        'https://api.twitter.com/2/oauth2/token' => Http::response([], 503),
+    ]);
+    bindConnector(PublishResult::failure(ErrorKind::AuthExpired, 'Unauthorized', 401));
+
+    (new PublishPostTarget($target))->handle(
+        app(PublishConnectorRegistry::class),
+        app(TokenManager::class),
+        app(PostStatusRollup::class),
+        app(BackoffSchedule::class),
+    );
+
+    $target->refresh();
+    expect($target->status)->toBe(PostTargetStatus::Publishing)
+        ->and($target->error_kind)->toBe(ErrorKind::ServerError)
+        ->and($target->next_attempt_at)->not->toBeNull();
+    expect($target->account()->firstOrFail()->status)->toBe(ConnectedAccountStatus::Active);
+
+    Bus::assertDispatched(PublishPostTarget::class);
 });
 
 test('retry stops after five attempts', function () {

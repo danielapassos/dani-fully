@@ -75,6 +75,7 @@ export type ComposerState = {
     scheduleTray: ScheduleTray;
     conflict: PostView | null;
     autoRepost: boolean | null;
+    skipSync: boolean;
 };
 
 export type ComposerAction =
@@ -86,6 +87,7 @@ export type ComposerAction =
     | { type: 'setActiveTab'; tab: string }
     | { type: 'setDestination'; destination: Destination }
     | { type: 'setAutoRepost'; value: boolean | null }
+    | { type: 'setSkipSync'; value: boolean }
     | { type: 'toggleAutoSplit'; accountId: string }
     | { type: 'setFormat'; accountId: string; format: PostFormat }
     | {
@@ -199,6 +201,7 @@ export function initialComposerState(
             : { mode: 'now', pickedAt: null },
         conflict: null,
         autoRepost: null,
+        skipSync: false,
     };
 }
 
@@ -496,6 +499,7 @@ function hydrate(post: PostView): ComposerState {
         },
         conflict: null,
         autoRepost: post.auto_repost ?? null,
+        skipSync: post.skip_sync ?? false,
     };
 }
 
@@ -581,6 +585,13 @@ export function composerReducer(
             return {
                 ...state,
                 autoRepost: action.value,
+                saveState: 'dirty',
+            };
+
+        case 'setSkipSync':
+            return {
+                ...state,
+                skipSync: action.value,
                 saveState: 'dirty',
             };
 
@@ -1043,6 +1054,7 @@ export type PutBody = {
     mentions: MentionPlaceholder[];
     expected_updated_at: string | null;
     auto_repost: boolean | null;
+    skip_sync: boolean;
     segment_breaks: string[];
     placements: Placement[];
 };
@@ -1134,6 +1146,7 @@ export function buildPutBody(
         mentions: state.mentions,
         expected_updated_at: state.baselineUpdatedAt,
         auto_repost: state.autoRepost,
+        skip_sync: state.skipSync,
         segment_breaks: state.segmentBreaks,
         placements: flattenPlacements(state.placements),
     };

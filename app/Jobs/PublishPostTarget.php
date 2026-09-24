@@ -11,7 +11,9 @@ use App\Enums\ConnectedAccountStatus;
 use App\Enums\ErrorKind;
 use App\Enums\Platform;
 use App\Enums\PostTargetStatus;
+use App\Events\PostTargetPublished;
 use App\Exceptions\TokenRefreshException;
+use App\Exceptions\TransientTokenRefreshException;
 use App\Models\ConnectedAccount;
 use App\Models\PostTarget;
 use App\Models\PostTargetAttempt;
@@ -257,6 +259,11 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
                     $credentials = $tokens->fresh($account, force: true);
                     $result = $connector->publish($this->context($target, $credentials));
                 }
+            } catch (TransientTokenRefreshException $e) {
+                // A transient token-endpoint failure (429/5xx/timeout) is not a bad
+                // credential — treat it as a retryable server error so the publish backs
+                // off and retries instead of flipping the account to needs-attention.
+                $result = PublishResult::failure(ErrorKind::ServerError, $e->getMessage());
             } catch (TokenRefreshException $e) {
                 $result = PublishResult::failure(ErrorKind::AuthExpired, $e->getMessage());
             }
@@ -370,6 +377,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         app(PostStatusRollup::class)->recompute($target->post()->firstOrFail());
 
         $this->notifyPublished($target);
+        PostTargetPublished::dispatch($target);
     }
 
     /**
@@ -526,6 +534,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         ])->save();
 
         $this->notifyPublished($target);
+        PostTargetPublished::dispatch($target);
     }
 
     private function reconcileRecordedOutcome(PostTarget $target, PostStatusRollup $rollup): bool

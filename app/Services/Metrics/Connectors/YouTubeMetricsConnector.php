@@ -44,7 +44,7 @@ class YouTubeMetricsConnector implements MetricsConnector
         $this->meter(UsageCategory::ExternalApi, UsageOperation::METRICS_FETCH_POST, $account, $response);
 
         if ($response->failed()) {
-            return $response->status() === 429
+            return $this->isRateLimited($response)
                 ? PostMetricsResult::rateLimited($this->excerpt($response))
                 : PostMetricsResult::failed($this->excerpt($response));
         }
@@ -54,9 +54,13 @@ class YouTubeMetricsConnector implements MetricsConnector
             return PostMetricsResult::failed('YouTube did not return the requested video.');
         }
 
+        if (! is_numeric($statistics['likeCount'] ?? null) || ! is_numeric($statistics['commentCount'] ?? null)) {
+            return PostMetricsResult::failed('YouTube did not return all requested engagement metrics.');
+        }
+
         return PostMetricsResult::ok(
-            likes: (int) ($statistics['likeCount'] ?? 0),
-            comments: (int) ($statistics['commentCount'] ?? 0),
+            likes: (int) $statistics['likeCount'],
+            comments: (int) $statistics['commentCount'],
             reposts: 0,
             impressions: isset($statistics['viewCount']) ? (int) $statistics['viewCount'] : null,
             raw: $response->json(),
@@ -78,7 +82,7 @@ class YouTubeMetricsConnector implements MetricsConnector
         $this->meter(UsageCategory::ExternalApi, UsageOperation::METRICS_FETCH_ACCOUNT, $account, $response);
 
         if ($response->failed()) {
-            return $response->status() === 429
+            return $this->isRateLimited($response)
                 ? AccountMetricsResult::rateLimited($this->excerpt($response))
                 : AccountMetricsResult::failed($this->excerpt($response));
         }
@@ -88,8 +92,12 @@ class YouTubeMetricsConnector implements MetricsConnector
             return AccountMetricsResult::failed('YouTube did not return channel metrics.');
         }
 
+        if (($statistics['hiddenSubscriberCount'] ?? false) === true || ! is_numeric($statistics['subscriberCount'] ?? null)) {
+            return AccountMetricsResult::failed('YouTube did not expose a subscriber count for this channel.');
+        }
+
         return AccountMetricsResult::ok(
-            followers: (int) ($statistics['subscriberCount'] ?? 0),
+            followers: (int) $statistics['subscriberCount'],
             postsCount: isset($statistics['videoCount']) ? (int) $statistics['videoCount'] : null,
             raw: $response->json(),
         );
@@ -103,6 +111,13 @@ class YouTubeMetricsConnector implements MetricsConnector
             ->connectTimeout(5)
             ->withToken((string) ($credentials['access_token'] ?? ''))
             ->acceptJson();
+    }
+
+    private function isRateLimited(Response $response): bool
+    {
+        return $response->status() === 429 || in_array($response->json('error.errors.0.reason'), [
+            'quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded', 'userRateLimitExceeded',
+        ], true);
     }
 
     private function excerpt(Response $response): string

@@ -379,9 +379,11 @@ describe('GifPicker', () => {
         MockIntersectionObserver.instances[0]?.trigger(true);
 
         // Page 2 is in flight and page 1's tiles are still on screen.
-        expect(
-            await screen.findByRole('status', { name: /loading more/i }),
-        ).toBeInTheDocument();
+        await waitFor(() =>
+            expect(
+                screen.getByRole('status', { name: /loading more/i }),
+            ).toBeInTheDocument(),
+        );
         expect(screen.getAllByRole('button', { name: /insert/i })).toHaveLength(
             2,
         );

@@ -53,14 +53,6 @@ class InstagramMetricsConnector implements MetricsConnector
                 return PostMetricsResult::rateLimited($this->excerpt($response));
             }
 
-            // Non-fatal only for 400: the insights endpoint legitimately 400s for
-            // young media or metrics not yet available. Auth (401/403) and server
-            // (5xx) errors must surface as failures so token-refresh can trigger
-            // and outages aren't masked as zero-value success.
-            if ($response->status() === 400) {
-                return PostMetricsResult::ok(0, 0, 0);
-            }
-
             return PostMetricsResult::failed($this->excerpt($response));
         }
 
@@ -68,16 +60,22 @@ class InstagramMetricsConnector implements MetricsConnector
 
         foreach ((array) $response->json('data', []) as $entry) {
             $name = $entry['name'] ?? null;
-            $value = $entry['values'][0]['value'] ?? null;
+            $value = $entry['values'][0]['value'] ?? $entry['total_value']['value'] ?? null;
 
             if ($name !== null) {
                 $metrics[$name] = $value;
             }
         }
 
-        $likes = (int) ($metrics['likes'] ?? 0);
-        $comments = (int) ($metrics['comments'] ?? 0);
-        $reposts = (int) ($metrics['shares'] ?? 0);
+        foreach (['likes', 'comments', 'shares'] as $required) {
+            if (! is_numeric($metrics[$required] ?? null)) {
+                return PostMetricsResult::failed('Instagram did not return all requested engagement metrics.');
+            }
+        }
+
+        $likes = (int) $metrics['likes'];
+        $comments = (int) $metrics['comments'];
+        $reposts = (int) $metrics['shares'];
 
         $impressions = $metrics['views'] ?? $metrics['reach'] ?? null;
         $impressions = is_numeric($impressions) ? (int) $impressions : null;
@@ -109,8 +107,12 @@ class InstagramMetricsConnector implements MetricsConnector
             };
         }
 
-        $followers = (int) $response->json('followers_count', 0);
-        $postsCount = (int) $response->json('media_count', 0);
+        if (! is_numeric($response->json('followers_count')) || ! is_numeric($response->json('media_count'))) {
+            return AccountMetricsResult::failed('Instagram did not return the requested account metrics.');
+        }
+
+        $followers = (int) $response->json('followers_count');
+        $postsCount = (int) $response->json('media_count');
 
         return AccountMetricsResult::ok($followers, postsCount: $postsCount, raw: $response->json());
     }

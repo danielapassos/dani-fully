@@ -3,10 +3,12 @@
 use App\Enums\ConnectedAccountStatus;
 use App\Enums\Platform;
 use App\Exceptions\TokenRefreshException;
+use App\Exceptions\TransientTokenRefreshException;
 use App\Models\ConnectedAccount;
 use App\Models\ConnectedAccountSecret;
 use App\Services\Publishing\TokenManager;
 use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
@@ -408,7 +410,7 @@ test('bluesky app-password refresh serializes under the per-account lock', funct
         ->with(10, Mockery::type('Closure'))
         ->andReturnUsing(fn (int $seconds, Closure $callback) => $callback());
     Cache::partialMock()->shouldReceive('lock')->once()
-        ->with("connected-account-token-refresh:{$account->id}", 60)
+        ->with("connected-account-token-refresh:{$account->id}", 120)
         ->andReturn($lock);
 
     $creds = app(TokenManager::class)->fresh($account->fresh());
@@ -451,7 +453,7 @@ test('fresh re-reads the rotated bluesky session under the lock before refreshin
             return $callback();
         });
     Cache::partialMock()->shouldReceive('lock')->once()
-        ->with("connected-account-token-refresh:{$account->id}", 60)
+        ->with("connected-account-token-refresh:{$account->id}", 120)
         ->andReturn($lock);
 
     app(TokenManager::class)->fresh($staleAccount);
@@ -490,6 +492,52 @@ test('fresh falls back to an app-password login when the refresh token has lapse
         && $request['password'] === 'app-pass');
 });
 
+test('fresh reuses a recently refreshed bluesky session instead of rotating again', function () {
+    // The interval floor stops a burst of pollers each rotating the single-use token.
+    $account = ConnectedAccount::factory()->bluesky()->create([
+        'token_expires_at' => null,
+        'last_refreshed_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'app_password' => 'app-pass',
+        'session' => ['accessJwt' => 'current-jwt', 'refreshJwt' => 'rjwt', 'pds' => 'https://bsky.social'],
+    ]);
+
+    Http::fake();
+
+    $creds = app(TokenManager::class)->fresh($account->fresh());
+
+    expect($creds['session']['accessJwt'])->toBe('current-jwt')
+        ->and($creds['app_password'])->toBe('app-pass');
+    Http::assertNothingSent();
+});
+
+test('fresh forces a bluesky refresh past the interval floor when the publish retries', function () {
+    // The publish retry after a 401 must bypass the floor, not reuse the rejected session.
+    $account = ConnectedAccount::factory()->bluesky()->create([
+        'token_expires_at' => null,
+        'last_refreshed_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'app_password' => 'app-pass',
+        'session' => ['accessJwt' => 'stale-jwt', 'refreshJwt' => 'rjwt', 'pds' => 'https://bsky.social'],
+    ]);
+
+    Http::fake([
+        'https://bsky.social/xrpc/com.atproto.server.refreshSession' => Http::response([
+            'accessJwt' => 'fresh-jwt',
+            'refreshJwt' => 'fresh-rjwt',
+        ]),
+    ]);
+
+    $creds = app(TokenManager::class)->fresh($account->fresh(), force: true);
+
+    expect($creds['session']['accessJwt'])->toBe('fresh-jwt');
+    Http::assertSent(fn ($request) => $request->url() === 'https://bsky.social/xrpc/com.atproto.server.refreshSession');
+});
+
 test('fresh refreshes a threads token via refresh_access_token and persists the new expiry', function () {
     $account = ConnectedAccount::factory()->create([
         'platform' => Platform::Threads->value,
@@ -518,6 +566,44 @@ test('fresh refreshes a threads token via refresh_access_token and persists the 
         ->and($account->status)->toBe(ConnectedAccountStatus::Active)
         ->and($account->last_refreshed_at)->not->toBeNull()
         ->and($account->token_expires_at->diffInDays(now(), true))->toBeGreaterThan(59);
+});
+
+test('fresh leaves a threads account active on a transient HTTP refresh failure', function (int $status) {
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::Threads->value,
+        'token_expires_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'access_token' => 'stale-long-token',
+    ]);
+
+    Http::fake(['https://graph.threads.net/refresh_access_token*' => Http::response([], $status)]);
+
+    expect(fn () => app(TokenManager::class)->fresh($account->fresh()))
+        ->toThrow(TransientTokenRefreshException::class);
+
+    expect($account->fresh()->status)->toBe(ConnectedAccountStatus::Active)
+        ->and($account->fresh()->refresh_failed_at)->toBeNull();
+})->with([429, 503]);
+
+test('fresh leaves a threads account active on a refresh connection failure', function () {
+    $account = ConnectedAccount::factory()->create([
+        'platform' => Platform::Threads->value,
+        'token_expires_at' => now()->subMinute(),
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'access_token' => 'stale-long-token',
+    ]);
+
+    Http::fake(['https://graph.threads.net/refresh_access_token*' => fn () => throw new ConnectionException('Timed out')]);
+
+    expect(fn () => app(TokenManager::class)->fresh($account->fresh()))
+        ->toThrow(TransientTokenRefreshException::class);
+
+    expect($account->fresh()->status)->toBe(ConnectedAccountStatus::Active)
+        ->and($account->fresh()->refresh_failed_at)->toBeNull();
 });
 
 test('fresh does not refresh a threads token that is not near expiry', function () {
@@ -574,6 +660,71 @@ test('fresh flips a threads account to needs-attention on a malformed successful
     expect($account->fresh()->status)->toBe(ConnectedAccountStatus::NeedsAttention)
         ->and($account->fresh()->refresh_failure_reason)->toContain('valid access_token and expires_in')
         ->and($account->fresh()->secret->access_token)->toBe('stale-long-token');
+});
+
+test('fresh leaves a bluesky app-password account active on a transient refresh failure', function (int $status) {
+    $account = ConnectedAccount::factory()->bluesky()->create([
+        'remote_account_id' => 'did:plc:abc123',
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'app_password' => 'app-pass',
+        'session' => ['accessJwt' => 'stale-jwt', 'refreshJwt' => 'refresh-jwt', 'pds' => 'https://bsky.social'],
+    ]);
+
+    Http::fake([
+        'https://bsky.social/xrpc/com.atproto.server.refreshSession' => Http::response([], $status),
+    ]);
+
+    expect(fn () => app(TokenManager::class)->fresh($account->fresh()))
+        ->toThrow(TransientTokenRefreshException::class);
+
+    expect($account->fresh()->status)->toBe(ConnectedAccountStatus::Active)
+        ->and($account->fresh()->refresh_failed_at)->toBeNull();
+    Http::assertSentCount(1);
+})->with([429, 503]);
+
+test('fresh leaves a bluesky app-password account active when refresh connection fails', function () {
+    $account = ConnectedAccount::factory()->bluesky()->create([
+        'remote_account_id' => 'did:plc:abc123',
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'app_password' => 'app-pass',
+        'session' => ['accessJwt' => 'stale-jwt', 'refreshJwt' => 'refresh-jwt', 'pds' => 'https://bsky.social'],
+    ]);
+
+    Http::fake([
+        'https://bsky.social/xrpc/com.atproto.server.refreshSession' => fn () => throw new ConnectionException('Timed out'),
+    ]);
+
+    expect(fn () => app(TokenManager::class)->fresh($account->fresh()))
+        ->toThrow(TransientTokenRefreshException::class);
+
+    expect($account->fresh()->status)->toBe(ConnectedAccountStatus::Active)
+        ->and($account->fresh()->refresh_failed_at)->toBeNull();
+});
+
+test('fresh leaves a bluesky app-password account active when fallback login fails transiently', function () {
+    $account = ConnectedAccount::factory()->bluesky()->create([
+        'remote_account_id' => 'did:plc:abc123',
+    ]);
+    ConnectedAccountSecret::factory()->create([
+        'connected_account_id' => $account->id,
+        'app_password' => 'app-pass',
+        'session' => ['accessJwt' => 'stale-jwt', 'refreshJwt' => 'expired-rjwt', 'pds' => 'https://bsky.social'],
+    ]);
+
+    Http::fake([
+        'https://bsky.social/xrpc/com.atproto.server.refreshSession' => Http::response([], 400),
+        'https://bsky.social/xrpc/com.atproto.server.createSession' => Http::response([], 503),
+    ]);
+
+    expect(fn () => app(TokenManager::class)->fresh($account->fresh()))
+        ->toThrow(TransientTokenRefreshException::class);
+
+    expect($account->fresh()->status)->toBe(ConnectedAccountStatus::Active)
+        ->and($account->fresh()->refresh_failed_at)->toBeNull();
 });
 
 test('fresh flags the bluesky account for attention when both refresh and login fail', function () {

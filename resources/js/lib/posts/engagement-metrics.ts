@@ -11,9 +11,9 @@ export type EngagementItem = {
 
 /** The metric numbers a published target carries; a subset of PostStatTarget. */
 export type EngagementSource = {
-    likes: number;
-    comments: number;
-    reposts: number;
+    likes: number | null;
+    comments: number | null;
+    reposts: number | null;
     impressions: number | null;
 };
 
@@ -82,12 +82,10 @@ export function engagementItems(
 ): EngagementItem[] {
     const slots = LAYOUT[platform] ?? [];
 
-    return slots
-        .filter((slot) => slot.key !== 'views' || stat.impressions !== null)
-        .map((slot) => ({
-            key: slot.key,
-            label: slot.label,
-            value:
-                slot.key === 'views' ? (stat.impressions ?? 0) : stat[slot.key],
-        }));
+    return slots.flatMap((slot) => {
+        const value = slot.key === 'views' ? stat.impressions : stat[slot.key];
+        return value === null
+            ? []
+            : [{ key: slot.key, label: slot.label, value }];
+    });
 }

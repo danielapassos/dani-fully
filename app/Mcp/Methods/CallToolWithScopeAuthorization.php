@@ -7,8 +7,10 @@ namespace App\Mcp\Methods;
 use App\Mcp\Tools\GetCalendarTool;
 use App\Mcp\Tools\GetPostingScheduleTool;
 use App\Mcp\Tools\GetPostTool;
+use App\Mcp\Tools\ListAccountAnalyticsTool;
 use App\Mcp\Tools\ListAccountSetsTool;
 use App\Mcp\Tools\ListConnectedAccountsTool;
+use App\Mcp\Tools\ListPostAnalyticsTool;
 use App\Mcp\Tools\ListPostsTool;
 use App\Mcp\Tools\ListSharesTool;
 use App\Mcp\Tools\ListWorkspacesTool;
@@ -34,6 +36,8 @@ class CallToolWithScopeAuthorization extends CallTool
         GetCalendarTool::class,
         ListConnectedAccountsTool::class,
         ListAccountSetsTool::class,
+        ListAccountAnalyticsTool::class,
+        ListPostAnalyticsTool::class,
         GetPostingScheduleTool::class,
         ListSharesTool::class,
     ];
@@ -47,11 +51,12 @@ class CallToolWithScopeAuthorization extends CallTool
             $user = Auth::user();
 
             if (! $user instanceof User || ! $user->currentAccessToken() instanceof AccessToken || ! $user->tokenCan('write')) {
-                return $this->toJsonRpcResponse(
-                    $request,
-                    Response::error('This MCP connection does not have write access. Reconnect and grant write access before changing workspace data.'),
-                    $this->serializable($tool),
-                );
+                $error = Response::error('This MCP connection does not have write access. Reconnect and grant write access before changing workspace data.');
+
+                return JsonRpcResponse::result($request->id, [
+                    'content' => [$error->content()->toTool($tool)],
+                    'isError' => true,
+                ]);
             }
         }
 

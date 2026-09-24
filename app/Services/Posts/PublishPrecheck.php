@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Posts;
 
 use App\Enums\Platform;
+use App\Enums\PostOrigin;
 use App\Models\Post;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
@@ -44,6 +45,10 @@ class PublishPrecheck
     public function blockingTargets(Post $post): array
     {
         $media = $post->media;
+        $externalMedia = collect($post->external_media ?? []);
+        $missingNativeMedia = $post->origin === PostOrigin::Sync && $externalMedia->isNotEmpty()
+            && ($externalMedia->contains(fn (mixed $item): bool => ! is_array($item) || ($item['kind'] ?? null) !== 'image')
+                || $media->count() < $externalMedia->count());
 
         /** @var list<array{connected_account_id: string, handle: ?string, platform: string, issues: list<string>}> $blocking */
         $blocking = [];
@@ -54,6 +59,10 @@ class PublishPrecheck
             $issues = $this->hasContent($target, $targetMedia->count())
                 ? $this->targetIssues($target, $targetMedia)
                 : ['empty'];
+
+            if ($missingNativeMedia) {
+                $issues[] = 'sync_source_media_unavailable';
+            }
 
             if ($issues === []) {
                 continue;
@@ -85,6 +94,7 @@ class PublishPrecheck
             ? app(TikTokPostOptions::class)->describe($issue)
             : match ($issue) {
                 'empty' => 'Add text or media before publishing.',
+                'sync_source_media_unavailable' => 'The native source media could not be imported completely. Duplicate this post, attach the original media, and review it before publishing.',
                 'publishing_unavailable' => "Reconnect the {$label} account or enable {$label} publishing before posting.",
                 'youtube_options_required' => 'Review YouTube visibility, format, audience, synthetic-media, paid-placement, and subscriber notification choices before publishing.',
                 'youtube_thumbnail_unavailable' => YouTubeThumbnail::UNAVAILABLE_MESSAGE,
@@ -100,6 +110,7 @@ class PublishPrecheck
                 'too_many_media' => "Too many media items for {$label}.",
                 'mixed_video_and_images' => 'A post can contain one video or images, not both.',
                 'video_too_long' => "The video is longer than {$label} allows.",
+                'video_bad_aspect_ratio' => "The video's aspect ratio is outside {$label}'s allowed range (widest 3:1, tallest 1:3).",
                 'video_too_large' => "The video is larger than {$label} allows.",
                 'gif_not_mixable' => "{$label} allows only one GIF and won't mix it with other media.",
                 'unplaced_media' => "Some attached media isn't placed in this post — remove it or add it to a thread section.",
@@ -210,14 +221,40 @@ class PublishPrecheck
             }
         }
 
-        $videos = $media->filter(fn (PostMedia $item): bool => $item->isVideo());
-        foreach ($videos as $video) {
-            if ($video->duration_seconds !== null && $video->duration_seconds > $platform->maxVideoDurationSeconds()) {
-                $issues[] = 'video_too_long';
+        foreach ($media->filter(fn (PostMedia $item): bool => $item->isVideo()) as $video) {
+            foreach ($this->videoIssues($platform, $video) as $issue) {
+                $issues[] = $issue;
             }
+        }
 
-            if ($video->size_bytes > $platform->maxVideoBytes()) {
-                $issues[] = 'video_too_large';
+        return $issues;
+    }
+
+    /**
+     * Per-video limit rules — duration, byte size, and aspect ratio — for a
+     * single attached video. Aspect ratio is only bounded on some platforms (X
+     * rejects anything outside 1:3–3:1); incomplete client metadata (a missing
+     * width or height) is left to publish time rather than blocked here.
+     *
+     * @return list<string>
+     */
+    private function videoIssues(Platform $platform, PostMedia $video): array
+    {
+        $issues = [];
+
+        if ($video->duration_seconds !== null && $video->duration_seconds > $platform->maxVideoDurationSeconds()) {
+            $issues[] = 'video_too_long';
+        }
+
+        if ($video->size_bytes > $platform->maxVideoBytes()) {
+            $issues[] = 'video_too_large';
+        }
+
+        $range = $platform->videoAspectRatioRange();
+        if ($range !== null && $video->width > 0 && $video->height > 0) {
+            $ratio = $video->width / $video->height;
+            if ($ratio < $range['min'] || $ratio > $range['max']) {
+                $issues[] = 'video_bad_aspect_ratio';
             }
         }
 

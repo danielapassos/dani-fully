@@ -26,7 +26,7 @@ test('forPost sums ok targets and flags support', function () {
     expect($payload['targets'])->toHaveCount(2);
 });
 
-test('all unsupported targets yields supported false and zero totals', function () {
+test('all unsupported targets yields supported false and unavailable totals', function () {
     $post = Post::factory()->create();
     PostTarget::factory()->for($post)->create([
         'platform' => Platform::LinkedIn, 'status' => PostTargetStatus::Published,
@@ -40,7 +40,7 @@ test('all unsupported targets yields supported false and zero totals', function 
     $payload = MetricsPresenter::forPost($post);
 
     expect($payload['supported'])->toBeFalse();
-    expect($payload['totals'])->toBe(['likes' => 0, 'comments' => 0, 'reposts' => 0]);
+    expect($payload['totals'])->toBe(['likes' => null, 'comments' => null, 'reposts' => null]);
     expect($payload['targets'])->toHaveCount(2);
 });
 
@@ -119,4 +119,46 @@ test('forPost returns each ok target an ordered engagement series', function () 
     expect($row['series'])->toHaveCount(2);
     expect($row['series'][0]['likes'])->toBe(4);   // oldest first
     expect($row['series'][1]['likes'])->toBe(9);
+});
+
+test('a failed first measurement is unavailable instead of zero and failed later captures retain dated samples', function (): void {
+    $post = Post::factory()->create();
+    $missing = PostTarget::factory()->published()->for($post)->create(['metrics_status' => MetricsStatus::Failed]);
+    $stale = PostTarget::factory()->published()->for($post)->create([
+        'metrics_status' => MetricsStatus::Failed, 'metrics_captured_at' => now(),
+    ]);
+    $sample = PostTargetMetric::factory()->for($stale, 'target')->create([
+        'captured_at' => now()->subDay(), 'likes' => 42,
+    ]);
+    $payload = MetricsPresenter::forPost($post);
+    $rows = collect($payload['targets'])->keyBy('id');
+    expect($payload['totals'])->toBe(['likes' => null, 'comments' => null, 'reposts' => null])
+        ->and($rows[$missing->id]['likes'])->toBeNull()
+        ->and($rows[$missing->id]['captured_at'])->toBeNull()
+        ->and($rows[$stale->id]['likes'])->toBe(42)
+        ->and($rows[$stale->id]['captured_at'])->toBe($sample->captured_at->toIso8601String())
+        ->and($rows[$stale->id]['stale'])->toBeTrue();
+});
+
+test('legacy private uploads and inbox deliveries cannot contribute public post statistics', function (): void {
+    $post = Post::factory()->create();
+    PostTarget::factory()->published()->for($post)->create([
+        'platform' => Platform::YouTube, 'metrics_status' => MetricsStatus::Ok, 'likes' => 90,
+        'media_upload_state' => ['media' => ['metadata' => ['privacy_status' => 'unlisted']]],
+    ]);
+    PostTarget::factory()->published()->for($post)->create([
+        'platform' => Platform::TikTok, 'metrics_status' => MetricsStatus::Ok, 'likes' => 900,
+        'media_upload_state' => ['publication' => ['status' => 'awaiting_action']],
+    ]);
+    $payload = MetricsPresenter::forPost($post);
+    expect($payload['targets'])->toBeEmpty()->and($payload['totals']['likes'])->toBeNull();
+});
+
+test('old successful post statistics are marked stale after polling stops', function (): void {
+    $post = Post::factory()->create();
+    PostTarget::factory()->published()->for($post)->create([
+        'platform' => Platform::YouTube, 'metrics_status' => MetricsStatus::Ok, 'likes' => 3,
+        'posted_at' => now()->subYear(), 'metrics_captured_at' => now()->subYear(),
+    ]);
+    expect(MetricsPresenter::forPost($post)['targets'][0]['stale'])->toBeTrue();
 });

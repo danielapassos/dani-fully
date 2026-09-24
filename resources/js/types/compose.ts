@@ -143,6 +143,8 @@ export type PlatformLimits = {
     allowedVideoMime: string[];
     maxVideoBytes: number;
     maxVideoDurationSeconds: number;
+    /** Allowed width:height ratio bounds for a video, or null when unconstrained. */
+    videoAspectRatioRange: { min: number; max: number } | null;
 };
 
 export type MediaView = {
@@ -232,6 +234,19 @@ export type TargetView = {
         caption: string;
         instructions: string;
     } | null;
+    inbox_tracking?: {
+        can_refresh: boolean;
+        status: string;
+        message: string;
+        checked_at: string | null;
+        verified_at?: string | null;
+        public_posts: {
+            id: string;
+            url: string;
+            caption: string;
+            created_at: number | null;
+        }[];
+    } | null;
     error_kind: string | null;
     error_message: string | null;
     /** Server-authoritative manual retry gate. Optional for older/partial payloads. */
@@ -261,6 +276,7 @@ export type PostView = {
     updated_at: string;
     scheduled_at: string | null;
     auto_repost: boolean | null;
+    skip_sync?: boolean;
     destination: { kind: string; id: string | null; ids?: string[] };
     targets: TargetView[];
     media: MediaView[];

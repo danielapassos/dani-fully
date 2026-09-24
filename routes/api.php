@@ -11,6 +11,8 @@ use App\Http\Controllers\Api\V1\PostActionsController;
 use App\Http\Controllers\Api\V1\PostingScheduleController;
 use App\Http\Controllers\Api\V1\PostsController;
 use App\Http\Controllers\Api\V1\SharesController;
+use App\Http\Controllers\Api\V1\TikTokInboxRefreshController;
+use App\Http\Controllers\Api\V1\VideoUploadsController;
 use App\Http\Middleware\RecordApiUsage;
 use App\Http\Middleware\RequireWriteScope;
 use App\Http\Middleware\ResolveApiWorkspace;
@@ -40,11 +42,14 @@ Route::middleware(['auth:api', ResolveApiWorkspace::class, 'throttle:api', Recor
             Route::post('posts/{id}/queue', [PostActionsController::class, 'queue']);
             Route::post('posts/{id}/publish', [PostActionsController::class, 'publish']);
             Route::post('posts/{id}/targets/{targetId}/retry', [PostActionsController::class, 'retry']);
+            Route::post('posts/{id}/targets/{targetId}/tiktok-inbox/refresh', [TikTokInboxRefreshController::class, 'store'])->middleware('throttle:10,1');
 
             Route::post('posts/{id}/shares', [SharesController::class, 'store']);
             Route::delete('posts/{id}/shares/{shareId}', [SharesController::class, 'destroy']);
 
             Route::post('media', [MediaController::class, 'store']);
+            Route::post('media/video-uploads', [VideoUploadsController::class, 'store']);
+            Route::post('media/video-uploads/{uploadId}/complete', [VideoUploadsController::class, 'complete'])->whereUuid('uploadId');
             Route::delete('media/{mediaId}', [MediaController::class, 'destroy']);
 
             Route::post('account-sets', [AccountSetsController::class, 'store']);
