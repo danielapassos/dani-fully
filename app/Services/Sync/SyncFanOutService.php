@@ -138,7 +138,9 @@ class SyncFanOutService
         // Claim the (source, pipeline) pair first so the unique index guards the
         // race between the immediate event and the reconcile backstop.
         try {
-            $synced = Post::create([
+            // A duplicate must roll back its savepoint before it is ignored;
+            // PostgreSQL otherwise aborts any surrounding caller transaction.
+            $synced = DB::transaction(fn (): Post => Post::create([
                 'workspace_id' => $source->workspace_id,
                 'author_id' => $source->author_id,
                 'origin' => PostOrigin::Sync->value,
@@ -149,7 +151,7 @@ class SyncFanOutService
                 'mentions' => $source->mentions,
                 'external_media' => $source->origin === PostOrigin::External ? $source->external_media : null,
                 'status' => PostStatus::Draft->value,
-            ]);
+            ]));
         } catch (UniqueConstraintViolationException) {
             return; // Another run already fanned this out.
         }

@@ -104,6 +104,7 @@ test('fan-out is idempotent under repeated calls', function () {
     app(SyncFanOutService::class)->fanOut($target);
 
     expect(Post::where('source_post_id', $post->id)->count())->toBe(1);
+    Queue::assertPushed(PublishPostTarget::class, 1);
 });
 
 test('a synced post never triggers further fan-out', function () {
