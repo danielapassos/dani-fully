@@ -81,7 +81,8 @@ test('private or pending moderation completion remains nonpublic and can later r
     app(TikTokInboxReconciliation::class)->reconcile($target);
     expect($target->fresh()->publicationStatus())->toBe(PostTargetStatus::Completed)
         ->and($target->fresh()->remote_id)->toBeNull()
-        ->and($target->fresh()->posted_at)->toBeNull();
+        ->and($target->fresh()->posted_at)->toBeNull()
+        ->and($target->post->fresh()->published_at)->toBeNull();
     Http::assertSentCount(1);
     $this->travel(16)->minutes();
     Http::swap(new Factory);
@@ -91,17 +92,81 @@ test('private or pending moderation completion remains nonpublic and can later r
     expect($target->fresh()->publicationStatus())->toBe(PostTargetStatus::Published);
 });
 
+test('verified inbox completion retains the actual publication time across refreshes', function (): void {
+    $this->freezeSecond();
+    $target = inboxTrackingTarget();
+    $publishedAt = now()->subHour();
+    fakeInboxPublicPosts();
+
+    app(TikTokInboxReconciliation::class)->reconcile($target);
+    expect($target->fresh()->posted_at->equalTo($publishedAt))->toBeTrue()
+        ->and($target->post->fresh()->published_at->equalTo($publishedAt))->toBeTrue();
+
+    $this->travel(16)->minutes();
+    app(TikTokInboxReconciliation::class)->reconcile($target);
+    expect($target->fresh()->posted_at->equalTo($publishedAt))->toBeTrue()
+        ->and($target->post->fresh()->published_at->equalTo($publishedAt))->toBeTrue();
+    Http::assertSentCount(4);
+});
+
+test('verified inbox completion uses the earliest public target and preserves an earlier parent date', function (bool $hasEarlierParentDate): void {
+    $this->freezeSecond();
+    $target = inboxTrackingTarget();
+    $post = $target->post;
+    $earlierPublication = now()->subHours($hasEarlierParentDate ? 3 : 2);
+    if ($hasEarlierParentDate) {
+        $post->update(['published_at' => $earlierPublication]);
+    }
+    PostTarget::factory()->for($post)->published()->create([
+        'platform' => Platform::Instagram,
+        'posted_at' => now()->subHours(2),
+    ]);
+    PostTarget::factory()->for($post)->published()->create([
+        'platform' => Platform::YouTube,
+        'posted_at' => now()->subDays(2),
+        'media_upload_state' => ['video' => ['metadata' => ['privacy_status' => 'private']]],
+    ]);
+    PostTarget::factory()->for($post)->published()->create(['posted_at' => now()->addDay()]);
+    PostTarget::factory()->for($post)->published()->create(['posted_at' => null]);
+    fakeInboxPublicPosts();
+
+    app(TikTokInboxReconciliation::class)->reconcile($target);
+
+    expect($post->fresh()->published_at->equalTo($earlierPublication))->toBeTrue();
+})->with([false, true]);
+
+test('missing or invalid provider creation times cannot backdate inbox completion', function (?int $offset): void {
+    $this->freezeSecond();
+    $target = inboxTrackingTarget(attributes: ['posted_at' => now()->subDay()]);
+    $confirmedAt = now();
+    Http::fake([
+        '*/status/fetch/' => Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'PUBLISH_COMPLETE', 'publicaly_available_post_id' => ['7688668628333643789']]]),
+        '*/video/query/*' => Http::response(['error' => ['code' => 'ok'], 'data' => ['videos' => [[
+            'id' => '7688668628333643789',
+            'share_url' => 'https://www.tiktok.com/@mommygorl/video/7688668628333643789',
+            'create_time' => $offset === null ? null : ($offset === 0 ? 0 : now()->addSeconds($offset)->timestamp),
+        ]]]]),
+    ]);
+
+    app(TikTokInboxReconciliation::class)->reconcile($target);
+
+    expect($target->fresh()->publicationStatus())->toBe(PostTargetStatus::Published)
+        ->and($target->post->fresh()->published_at->equalTo($confirmedAt))->toBeTrue();
+})->with(['missing' => null, 'zero' => 0, 'future' => 60]);
+
 test('inbox delivery never claims public publication', function (): void {
     $target = inboxTrackingTarget();
     Http::fake(['*' => Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'SEND_TO_USER_INBOX']])]);
     app(TikTokInboxReconciliation::class)->reconcile($target);
     expect($target->fresh()->status)->toBe(PostTargetStatus::AwaitingAction)
-        ->and($target->fresh()->remote_id)->toBeNull();
+        ->and($target->fresh()->remote_id)->toBeNull()
+        ->and($target->post->fresh()->published_at)->toBeNull();
     Http::assertSentCount(1);
 });
 
 test('does not infer ownership from captions or partial query results', function (array $videos): void {
     $target = inboxTrackingTarget();
+    $videos = array_map(fn (array $video): array => [...$video, 'create_time' => now()->subHour()->timestamp], $videos);
     Http::fake([
         '*/status/fetch/' => Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'PUBLISH_COMPLETE', 'publicaly_available_post_id' => ['7688668628333643789']]]),
         '*/video/query/*' => Http::response(['error' => ['code' => 'ok'], 'data' => ['videos' => $videos]]),
@@ -109,6 +174,7 @@ test('does not infer ownership from captions or partial query results', function
     app(TikTokInboxReconciliation::class)->reconcile($target);
     expect($target->fresh()->publicationStatus())->toBe(PostTargetStatus::AwaitingAction)
         ->and($target->fresh()->remote_id)->toBeNull()
+        ->and($target->post->fresh()->published_at)->toBeNull()
         ->and(app(TikTokInboxReconciliation::class)->view($target->fresh())['error'])->not->toBeNull();
 })->with([
     'no owned videos' => [[]],

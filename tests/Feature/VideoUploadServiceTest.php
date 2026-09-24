@@ -39,6 +39,7 @@ function signedVideoSession(array $input = []): array
 }
 
 test('signs a workspace and actor bound expiring upload without exposing a final path', function (): void {
+    $this->freezeSecond();
     [$user, $workspace, $signed] = signedVideoSession();
     $session = VideoUploadSession::findOrFail($signed['upload_id']);
 
@@ -47,7 +48,7 @@ test('signs a workspace and actor bound expiring upload without exposing a final
         ->and($signed['expires_at'])->toBe($session->expires_at->toISOString())
         ->and($signed['max_size_bytes'])->toBe(Platform::maxVideoBytesCeiling())
         ->and($signed['size_bytes'])->toBe(strlen(signedVideoBytes()))
-        ->and($session->expires_at->diffInSeconds(now(), absolute: true))->toBeGreaterThanOrEqual(899)
+        ->and($session->expires_at->equalTo(now()->addMinutes(15)))->toBeTrue()
         ->and($session->user_id)->toBe($user->id)
         ->and($session->workspace_id)->toBe($workspace->id)
         ->and($session->disk)->toBe('local')
