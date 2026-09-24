@@ -4,6 +4,7 @@ use App\Enums\MetricsStatus;
 use App\Enums\Platform;
 use App\Enums\PostStatus;
 use App\Enums\WorkspaceRole;
+use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\AccountMetric;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
@@ -12,6 +13,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceMembership;
 use App\Support\InstanceSettings;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Date;
 
@@ -372,4 +374,46 @@ test('account analytics mark old successful or disabled collection samples as st
 
     $this->actingAs($this->user)->get(route('analytics.index'))->assertInertia(fn ($page) => $page
         ->where('accounts', fn ($accounts) => $accounts->every(fn ($account) => $account['stale'] === true)));
+});
+
+test('filtered analytics markers serialize as JSON arrays for the follower chart', function (): void {
+    $account = ConnectedAccount::factory()->for($this->workspace)->create(['platform' => Platform::YouTube]);
+    AccountMetric::factory()->create(['connected_account_id' => $account->id, 'captured_at' => now()->subDay(), 'followers' => 100]);
+    AccountMetric::factory()->create(['connected_account_id' => $account->id, 'captured_at' => now(), 'followers' => 110]);
+    $publicPostIds = [];
+
+    // Removing the first and third posts leaves sparse collection keys (1, 3).
+    // JSON must still contain an array for the chart's map/filter operations.
+    foreach (['private', 'public', 'private', 'public'] as $index => $visibility) {
+        $post = Post::factory()->for($this->workspace)->create([
+            'status' => PostStatus::Published,
+            'published_at' => now()->subDays(4 - $index),
+        ]);
+        PostTarget::factory()->published()->for($post)->create([
+            'connected_account_id' => $account->id,
+            'platform' => Platform::YouTube,
+            'metrics_status' => MetricsStatus::Ok,
+            'media_upload_state' => ['media' => ['metadata' => ['privacy_status' => $visibility]]],
+        ]);
+        if ($visibility === 'public') {
+            $publicPostIds[] = $post->id;
+        }
+    }
+
+    $response = $this->actingAs($this->user)
+        ->getJson(route('analytics.index'), [
+            'X-Inertia' => 'true',
+            'X-Inertia-Version' => (string) app(HandleInertiaRequests::class)
+                ->version(Request::create('/analytics')),
+        ])
+        ->assertOk();
+    $props = json_decode($response->getContent(), flags: JSON_THROW_ON_ERROR)->props;
+
+    expect($props->posts)->toBeArray()->toHaveCount(2)
+        ->and(array_column($props->posts, 'id'))->toBe($publicPostIds)
+        ->and($props->posts[0]->connected_account_ids)->toBe([$account->id])
+        ->and($props->accounts)->toBeArray()
+        ->and($props->accounts[0]->series)->toBeArray()->toHaveCount(2)
+        ->and($props->comparison->top)->toBeArray()
+        ->and($props->comparison->bottom)->toBeArray();
 });

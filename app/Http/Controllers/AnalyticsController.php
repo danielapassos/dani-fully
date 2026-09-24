@@ -99,7 +99,7 @@ class AnalyticsController extends Controller
             'published_at' => $post->published_at?->toIso8601String(),
             'platforms' => $post->targets->pluck('platform')->map(fn ($p): string => $p->value)->unique()->values()->all(),
             'connected_account_ids' => $post->targets->pluck('connected_account_id')->unique()->values()->all(),
-        ])->all();
+        ])->values()->all();
 
         $ranked = $posts
             ->filter(fn (Post $post): bool => $post->targets->contains(
