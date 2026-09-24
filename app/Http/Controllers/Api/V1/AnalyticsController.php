@@ -12,7 +12,15 @@ use Illuminate\Http\Request;
 
 class AnalyticsController extends Controller
 {
-    /** Latest stored account measurements. This request does not poll providers. */
+    /**
+     * Read the latest stored account measurements.
+     *
+     * Includes captured_at, last_attempt_at, metrics_status, polling_enabled,
+     * freshness and stored permission_evidence. Missing measurements are null,
+     * not zero. An unknown OAuth grant is not itself a reconnect requirement.
+     * This request does not poll providers. Follow pagination.next_cursor for
+     * remaining accounts in the bound workspace.
+     */
     public function accounts(Request $request, StoredAnalytics $analytics): JsonResponse
     {
         $this->authorize('viewAny', Post::class);
@@ -30,7 +38,18 @@ class AnalyticsController extends Controller
         ));
     }
 
-    /** Latest lifetime counters for workspace targets in the publication window. */
+    /**
+     * Read stored lifetime counters for published workspace targets.
+     *
+     * The days filter selects publication dates, not engagement accrued during
+     * that period. remote_ids and metric_scope identify whether counters cover
+     * one remote post or an aggregate across the target's remote posts. Captions
+     * are descriptive context, never proof of identity. Inbox delivery and private
+     * uploads without public evidence are excluded. Read captured_at, freshness,
+     * metrics_status and polling_enabled before interpreting measurements.
+     * Missing or unsupported measurements are null; paid_context is unknown.
+     * This request does not poll providers. Follow pagination.next_cursor.
+     */
     public function posts(Request $request, StoredAnalytics $analytics): JsonResponse
     {
         $this->authorize('viewAny', Post::class);

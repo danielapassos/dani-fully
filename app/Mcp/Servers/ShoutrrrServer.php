@@ -6,6 +6,8 @@ namespace App\Mcp\Servers;
 
 use App\Mcp\Methods\CallToolWithScopeAuthorization;
 use App\Mcp\Tools\AddPostMediaTool;
+use App\Mcp\Tools\BeginVideoUploadTool;
+use App\Mcp\Tools\CompleteVideoUploadTool;
 use App\Mcp\Tools\CreateAccountSetTool;
 use App\Mcp\Tools\CreatePostTool;
 use App\Mcp\Tools\CreateShareLinkTool;
@@ -39,7 +41,7 @@ use Override;
 
 #[Name('Shoutrrr')]
 #[Version('1.0.0')]
-#[Instructions('Read and manage social posts, schedules, and connected accounts for one workspace. Read stored analytics with list_account_analytics and list_post_analytics; use captured_at, freshness, and metrics_status to distinguish measured zeros from missing or stale data. Use refresh_tiktok_inbox to check an existing TikTok inbox upload for verified public completion without uploading again. The workspace is fixed at connection time. Use list_workspaces to see which workspace this connection operates on; reconnect to switch. Write tools let you create and edit drafts, schedule, manage media and account sets, and share links. Irreversible outward-facing actions (publish_post_now, retry_post_target, delete_post) require explicit human confirmation — call them with confirm=true only after the human approves.')]
+#[Instructions('Read and manage social posts, schedules, and connected accounts for one workspace. Read stored analytics with list_account_analytics and list_post_analytics; use captured_at, freshness, and metrics_status to distinguish measured zeros from missing or stale data. Use refresh_tiktok_inbox to check an existing TikTok inbox upload for verified public completion without uploading again. The workspace is fixed at connection time. Use list_workspaces to see which workspace this connection operates on; reconnect to switch. Write tools let you create and edit drafts, schedule, manage media and account sets, and share links. For original MP4 files, use begin_video_upload, stream the original bytes with HTTP PUT to its temporary signed URL, then complete_video_upload and attach the returned media ID to a draft; the browser composer is not required. Keep signed URLs and headers private. Uploading does not publish. Irreversible outward-facing actions (publish_post_now, retry_post_target, delete_post) require explicit human confirmation — call them with confirm=true only after the human approves.')]
 class ShoutrrrServer extends Server
 {
     #[Override]
@@ -66,6 +68,8 @@ class ShoutrrrServer extends Server
         SchedulePostTool::class,
         QueuePostTool::class,
         AddPostMediaTool::class,
+        BeginVideoUploadTool::class,
+        CompleteVideoUploadTool::class,
         RemovePostMediaTool::class,
         CreateAccountSetTool::class,
         UpdateAccountSetTool::class,

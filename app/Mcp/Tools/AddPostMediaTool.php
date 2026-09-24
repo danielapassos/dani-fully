@@ -14,7 +14,7 @@ use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 use RuntimeException;
 
-#[Description('Attach an image to the workspace media library by downloading it from a public URL (jpeg, png, webp, gif; max 8 MiB). Returns the media id to use in create_post/update_post media_ids.')]
+#[Description('Download a public image into the workspace media library (jpeg, png, webp, gif; max 8 MiB). Returns a media id to attach to a draft with the post-update tool. For original-quality MP4 video, use begin_video_upload and complete_video_upload.')]
 class AddPostMediaTool extends WorkspaceTool
 {
     public function handle(Request $request, MediaStorageService $media): Response

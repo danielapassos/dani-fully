@@ -109,7 +109,7 @@ class UpdatePostTool extends WorkspaceTool
                 'id' => $schema->string(),
                 'ids' => $schema->array(),
             ])->description('Where to post.')->required(),
-            'media_ids' => $schema->array()->description('Ordered media ids to attach (from add_post_media).'),
+            'media_ids' => $schema->array()->description('Ordered workspace image or video media ids to attach. Video ids come from complete_video_upload; image ids come from the image-upload tool.'),
             'segment_breaks' => $schema->array()->description('Ordered authored-segment break ids used by media placements.'),
             'placements' => $schema->array()->description('Canonical media placements. Each item has media_id, segment_ref, and zero-based position.'),
             'targets' => $schema->array()->description('Optional per-account settings. A target may carry connected_account_id, format, content_override (including tiktok/youtube choices or instagram.cover_media_id), segment_breaks, and placements. Set instagram.cover_media_id or youtube.thumbnail_media_id to null to remove a cover; omission preserves a saved cover. Set instagram.trial_params to {"graduation_strategy":"MANUAL"} or {"graduation_strategy":"SS_PERFORMANCE"} for a Trial Reel; null removes trial settings, omission preserves them. MANUAL keeps sharing to everyone manual; SS_PERFORMANCE permits automatic sharing based on performance. Trial settings require one Instagram Reel video and cannot change once upload starts. YouTube requires a workspace JPEG/PNG image up to 8 MB. Never add cover images to video placements, and copy to a new draft to change a cover after upload starts. An explicit empty placements array excludes all attached media for that account.'),

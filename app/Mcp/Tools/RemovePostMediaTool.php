@@ -12,7 +12,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Remove an image from the workspace media library by id.')]
+#[Description('Remove an image or video from the workspace media library by id.')]
 class RemovePostMediaTool extends WorkspaceTool
 {
     public function handle(Request $request): Response
