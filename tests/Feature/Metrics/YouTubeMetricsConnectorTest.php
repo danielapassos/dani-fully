@@ -55,3 +55,28 @@ test('youtube rate limits stay visible', function () {
     expect(app(YouTubeMetricsConnector::class)->fetchPost($account, $target, ['access_token' => 'token'])->status)
         ->toBe(MetricsStatus::RateLimited);
 });
+
+test('youtube missing or hidden counters are unavailable rather than zero', function (): void {
+    Http::fake([
+        'https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [['statistics' => ['viewCount' => '55']]]]),
+        'https://www.googleapis.com/youtube/v3/channels*' => Http::response(['items' => [['statistics' => ['hiddenSubscriberCount' => true, 'videoCount' => '4']]]]),
+    ]);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::YouTube]);
+    $target = PostTarget::factory()->create(['platform' => Platform::YouTube, 'remote_id' => 'video_42']);
+    $connector = app(YouTubeMetricsConnector::class);
+
+    expect($connector->fetchPost($account, $target, ['access_token' => 'token'])->status)->toBe(MetricsStatus::Failed)
+        ->and($connector->fetchAccount($account, ['access_token' => 'token'])->status)->toBe(MetricsStatus::Failed);
+});
+
+test('youtube quota exhausted responses remain rate limited', function (): void {
+    Http::fake(['https://www.googleapis.com/youtube/v3/*' => Http::response([
+        'error' => ['message' => 'Quota exhausted', 'errors' => [['reason' => 'quotaExceeded']]],
+    ], 403)]);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::YouTube]);
+    $target = PostTarget::factory()->create(['platform' => Platform::YouTube, 'remote_id' => 'video_42']);
+    $connector = app(YouTubeMetricsConnector::class);
+
+    expect($connector->fetchPost($account, $target, ['access_token' => 'token'])->status)->toBe(MetricsStatus::RateLimited)
+        ->and($connector->fetchAccount($account, ['access_token' => 'token'])->status)->toBe(MetricsStatus::RateLimited);
+});

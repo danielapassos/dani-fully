@@ -5,25 +5,29 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Enums\MetricsStatus;
+use App\Enums\Platform;
 use App\Enums\PostTargetStatus;
 use App\Models\Post;
 use App\Models\PostTarget;
 use App\Models\PostTargetMetric;
+use App\Services\Metrics\MetricsCaptureCadence;
+use App\Services\Metrics\StoredAnalytics;
+use Carbon\CarbonImmutable;
 
 final class MetricsPresenter
 {
     /**
-     * @return array{supported: bool, captured_at: string|null, totals: array{likes: int, comments: int, reposts: int}, targets: list<array{id: string, platform: string, handle: string|null, display_name: string|null, avatar_url: string|null, status: string|null, likes: int, comments: int, reposts: int, impressions: int|null, captured_at: string|null, series: array<int, array{at: string, likes: int, comments: int, reposts: int, impressions: int|null}>}>}
+     * @return array{supported: bool, captured_at: string|null, totals: array{likes: int|null, comments: int|null, reposts: int|null}, targets: list<array<string, mixed>>}
      */
     public static function forPost(Post $post): array
     {
         $post->loadMissing(['targets.account', 'targets.metrics']);
 
         $targets = $post->targets
-            ->filter(fn (PostTarget $t): bool => $t->status === PostTargetStatus::Published)
+            ->filter(fn (PostTarget $t): bool => $t->publicationStatus() === PostTargetStatus::Published)
             ->values();
 
-        $totals = ['likes' => 0, 'comments' => 0, 'reposts' => 0];
+        $totals = ['likes' => null, 'comments' => null, 'reposts' => null];
         $capturedAt = null;
         $supported = false;
         $rows = [];
@@ -31,11 +35,21 @@ final class MetricsPresenter
         foreach ($targets as $target) {
             $isOk = $target->metrics_status === MetricsStatus::Ok;
             $supported = $supported || $target->metrics_status !== MetricsStatus::Unsupported;
+            $latest = $target->metrics->sortByDesc('captured_at')->first();
+            $sample = $isOk ? $target : $latest;
+            $sampleAt = $isOk ? $target->metrics_captured_at : $latest?->captured_at;
+            $likes = $sample?->likes;
+            $comments = $target->platform === Platform::Discord ? null : $sample?->comments;
+            $reposts = in_array($target->platform, [Platform::YouTube, Platform::Discord], true) ? null : $sample?->reposts;
+            $interval = app(InstanceSettings::class)->metricsEnabled() && $target->account !== null && ! $target->account->isDisabled()
+                ? app(MetricsCaptureCadence::class)->effectiveIntervalSeconds($target, CarbonImmutable::now()) : null;
 
             if ($isOk) {
-                $totals['likes'] += $target->likes;
-                $totals['comments'] += $target->comments;
-                $totals['reposts'] += $target->reposts;
+                foreach (['likes' => $likes, 'comments' => $comments, 'reposts' => $reposts] as $key => $value) {
+                    if ($value !== null) {
+                        $totals[$key] = ($totals[$key] ?? 0) + $value;
+                    }
+                }
 
                 $at = $target->metrics_captured_at?->toIso8601String();
                 if ($at !== null && ($capturedAt === null || $at > $capturedAt)) {
@@ -50,11 +64,13 @@ final class MetricsPresenter
                 'display_name' => $target->account?->display_name,
                 'avatar_url' => $target->account?->avatar_url,
                 'status' => $target->metrics_status?->value,
-                'likes' => $target->likes,
-                'comments' => $target->comments,
-                'reposts' => $target->reposts,
-                'impressions' => $target->impressions,
-                'captured_at' => $target->metrics_captured_at?->toIso8601String(),
+                'likes' => $likes,
+                'comments' => $comments,
+                'reposts' => $reposts,
+                'impressions' => $sample?->impressions,
+                'captured_at' => $sampleAt?->toIso8601String(),
+                'last_attempt_at' => $target->metrics_captured_at?->toIso8601String(),
+                'stale' => app(StoredAnalytics::class)->freshness($sampleAt, $target->metrics_status, $interval) !== 'current',
                 'series' => $target->metrics
                     ->sortBy('captured_at')
                     ->map(fn (PostTargetMetric $m): array => [

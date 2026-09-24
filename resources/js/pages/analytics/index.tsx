@@ -291,10 +291,10 @@ export default function AnalyticsIndex({
                                     deltaLabel={`followers over the last ${rangeLabel}`}
                                 />
                                 <StatTile
-                                    label="Engagement"
+                                    label="Post engagement"
                                     metric={summary.engagement}
-                                    caption="likes, comments & reposts this period"
-                                    deltaLabel="vs previous period"
+                                    caption="latest lifetime counts for posts published in this period"
+                                    deltaLabel="vs posts published in the previous period"
                                 />
                                 <StatTile
                                     label="Posts published"

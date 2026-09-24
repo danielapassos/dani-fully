@@ -74,8 +74,10 @@ export function useGifSearch(
                 // Bail out when nothing actually changed. `request` is compared
                 // by identity in the fetch effect below, so returning a fresh
                 // object with identical values would fire a second, byte-for-byte
-                // identical page-1 request every time the picker opens.
-                current.query === query && current.page === 1
+                // identical page-1 request every time the picker opens. A fast
+                // loadMore may already have advanced the page when the mount
+                // timer fires; an unchanged query must preserve that page too.
+                current.query === query
                     ? current
                     : { ...current, query, page: 1 },
             );

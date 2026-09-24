@@ -1,7 +1,7 @@
 <?php
 
 use App\Services\Gifs\GifAttacher;
-use Illuminate\Foundation\Cloud;
+use Illuminate\Foundation\CloudBootstrapper;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Vite;
 
@@ -94,7 +94,7 @@ test('a Cloud-injected disk permits its actual virtual-hosted upload origin with
             'is_default' => true,
         ]], JSON_THROW_ON_ERROR);
 
-        Cloud::configureDisks($this->app);
+        CloudBootstrapper::configureDisks($this->app);
     } finally {
         if ($previousCloudConfig === null) {
             unset($_SERVER['LARAVEL_CLOUD_DISK_CONFIG']);

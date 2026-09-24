@@ -7,10 +7,12 @@ namespace App\Http\Controllers;
 use App\Enums\MetricsStatus;
 use App\Enums\Platform;
 use App\Enums\PostStatus;
+use App\Enums\PostTargetStatus;
 use App\Models\AccountMetric;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
 use App\Models\PostTarget;
+use App\Services\Metrics\StoredAnalytics;
 use App\Support\InstanceSettings;
 use Carbon\CarbonInterface;
 use Illuminate\Http\Request;
@@ -73,23 +75,30 @@ class AnalyticsController extends Controller
                 'avatar_url' => $account->avatar_url,
                 'status' => $account->metrics_status?->value,
                 'latest_followers' => $account->metrics->last()?->followers,
+                'captured_at' => $account->metrics->last()?->captured_at->toIso8601String(),
+                'last_attempt_at' => $account->metrics_captured_at?->toIso8601String(),
+                'stale' => $this->accountMetricsStale($account),
                 'followers_delta' => $this->followerDelta($account->metrics),
                 'series' => $this->downsampleDaily($account->metrics),
             ])->all();
 
         $posts = Post::query()
-            ->with('targets:id,post_id,platform,likes,comments,reposts,metrics_status')
+            ->with('targets:id,post_id,connected_account_id,platform,likes,comments,reposts,metrics_status,status,media_upload_state')
             ->whereIn('status', [PostStatus::Published->value, PostStatus::Partial->value])
             ->whereNotNull('published_at')
             ->where('published_at', '>=', $from)
             ->orderBy('published_at')
-            ->get();
+            ->get()
+            ->each(fn (Post $post) => $post->setRelation('targets', $post->targets
+                ->filter(fn (PostTarget $target): bool => $target->publicationStatus() === PostTargetStatus::Published)))
+            ->filter(fn (Post $post): bool => $post->targets->isNotEmpty());
 
         $markers = $posts->map(fn (Post $post): array => [
             'id' => $post->id,
             'title' => $this->resolveTitle($post),
             'published_at' => $post->published_at?->toIso8601String(),
             'platforms' => $post->targets->pluck('platform')->map(fn ($p): string => $p->value)->unique()->values()->all(),
+            'connected_account_ids' => $post->targets->pluck('connected_account_id')->unique()->values()->all(),
         ])->all();
 
         $ranked = $posts
@@ -101,7 +110,9 @@ class AnalyticsController extends Controller
                 'title' => $this->resolveTitle($post),
                 'published_at' => $post->published_at?->toIso8601String(),
                 'platforms' => $post->targets->pluck('platform')->map(fn ($p): string => $p->value)->unique()->values()->all(),
-                'engagement' => (int) $post->targets->sum(fn (PostTarget $t): int => $t->likes + $t->comments + $t->reposts),
+                'connected_account_ids' => $post->targets->pluck('connected_account_id')->unique()->values()->all(),
+                'engagement' => (int) $post->targets->filter(fn (PostTarget $t): bool => $t->metrics_status === MetricsStatus::Ok)
+                    ->sum(fn (PostTarget $t): int => $t->likes + $t->comments + $t->reposts),
             ])
             ->sortByDesc('engagement')
             ->values();
@@ -119,7 +130,7 @@ class AnalyticsController extends Controller
             'posts' => $markers,
             'summary' => $this->buildSummary(
                 $accounts,
-                (int) $ranked->sum('engagement'),
+                $ranked->isEmpty() ? null : (int) $ranked->sum('engagement'),
                 $posts->count(),
                 $previousFrom,
                 $from,
@@ -133,34 +144,39 @@ class AnalyticsController extends Controller
 
     /**
      * The headline numbers — total followers, engagement, and posts published.
-     * The follower delta is growth across the selected window; the engagement
-     * and posts deltas compare against the previous equal-length window. Deltas
+     * The follower delta is growth across the selected window; engagement compares
+     * latest lifetime totals for publication cohorts, not engagement accrued in
+     * those periods. Posts compare against the previous equal-length window. Deltas
      * are null when there's no honest baseline to compare against.
      *
      * @param  array<int, array<string, mixed>>  $accounts
      * @return array{
      *     account_count: int,
-     *     followers: array{value: int, delta: int|null},
-     *     engagement: array{value: int, delta: int|null},
+     *     followers: array{value: int|null, delta: int|null},
+     *     engagement: array{value: int|null, delta: int|null},
      *     posts: array{value: int, delta: int|null},
      * }
      */
-    private function buildSummary(array $accounts, int $totalEngagement, int $postsCount, CarbonInterface $previousFrom, CarbonInterface $from): array
+    private function buildSummary(array $accounts, ?int $totalEngagement, int $postsCount, CarbonInterface $previousFrom, CarbonInterface $from): array
     {
         $accountsCollection = collect($accounts);
 
-        $totalFollowers = (int) $accountsCollection->sum(fn (array $a): int => (int) ($a['latest_followers'] ?? 0));
+        $measuredAccounts = $accountsCollection->filter(fn (array $a): bool => $a['latest_followers'] !== null);
+        $totalFollowers = $measuredAccounts->isEmpty() ? null : (int) $measuredAccounts->sum('latest_followers');
         $trackedDeltas = $accountsCollection->pluck('followers_delta')->filter(fn ($d): bool => $d !== null);
         $followersDelta = $trackedDeltas->isEmpty() ? null : (int) $trackedDeltas->sum();
 
         // Previous window — only used as a baseline for the delta chips.
         $previousPosts = Post::query()
-            ->with('targets:id,post_id,platform,likes,comments,reposts,metrics_status')
+            ->with('targets:id,post_id,connected_account_id,platform,likes,comments,reposts,metrics_status,status,media_upload_state')
             ->whereIn('status', [PostStatus::Published->value, PostStatus::Partial->value])
             ->whereNotNull('published_at')
             ->where('published_at', '>=', $previousFrom)
             ->where('published_at', '<', $from)
-            ->get();
+            ->get()
+            ->each(fn (Post $post) => $post->setRelation('targets', $post->targets
+                ->filter(fn (PostTarget $target): bool => $target->publicationStatus() === PostTargetStatus::Published)))
+            ->filter(fn (Post $post): bool => $post->targets->isNotEmpty());
 
         // Engagement is only measurable on posts that captured Ok metrics, so the
         // baseline for the engagement delta must also require such a post — a
@@ -170,26 +186,39 @@ class AnalyticsController extends Controller
         ));
         $hasEngagementBaseline = $previousMeasuredPosts->isNotEmpty();
         $previousEngagement = (int) $previousMeasuredPosts->sum(
-            fn (Post $post): int => (int) $post->targets->sum(fn (PostTarget $t): int => $t->likes + $t->comments + $t->reposts),
+            fn (Post $post): int => (int) $post->targets->filter(fn (PostTarget $t): bool => $t->metrics_status === MetricsStatus::Ok)
+                ->sum(fn (PostTarget $t): int => $t->likes + $t->comments + $t->reposts),
         );
 
         $hasPostBaseline = $previousPosts->isNotEmpty();
 
         return [
-            'account_count' => $accountsCollection->count(),
+            'account_count' => $measuredAccounts->count(),
             'followers' => [
                 'value' => $totalFollowers,
                 'delta' => $followersDelta,
             ],
             'engagement' => [
                 'value' => $totalEngagement,
-                'delta' => $hasEngagementBaseline ? $totalEngagement - $previousEngagement : null,
+                'delta' => $totalEngagement !== null && $hasEngagementBaseline ? $totalEngagement - $previousEngagement : null,
             ],
             'posts' => [
                 'value' => $postsCount,
                 'delta' => $hasPostBaseline ? $postsCount - $previousPosts->count() : null,
             ],
         ];
+    }
+
+    private function accountMetricsStale(ConnectedAccount $account): bool
+    {
+        $settings = app(InstanceSettings::class);
+        $polling = $settings->metricsEnabled() && $settings->accountMetricsPollingEnabled($account->platform) && ! $account->isDisabled();
+
+        return app(StoredAnalytics::class)->freshness(
+            $account->metrics->last()?->captured_at,
+            $account->metrics_status,
+            $polling ? $settings->accountMetricsPollIntervalMinutes($account->platform) * 60 : null,
+        ) !== 'current';
     }
 
     /**

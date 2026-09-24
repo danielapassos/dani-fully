@@ -2,8 +2,11 @@
 
 use App\Enums\MetricsStatus;
 use App\Enums\Platform;
+use App\Jobs\CapturePostTargetMetrics;
 use App\Models\ConnectedAccount;
+use App\Models\ConnectedAccountSecret;
 use App\Models\PostTarget;
+use App\Models\PostTargetMetric;
 use App\Services\Metrics\Connectors\InstagramMetricsConnector;
 use Illuminate\Support\Facades\Http;
 
@@ -72,4 +75,61 @@ test('direct instagram login fetches account metrics from graph instagram', func
 
     expect($this->connector->fetchAccount($account, ['access_token' => 't'])->isOk())->toBeTrue();
     Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://graph.instagram.com/'));
+});
+
+test('instagram insight errors remain failures instead of zero engagement', function (int $status): void {
+    Http::preventStrayRequests();
+    Http::fake(['graph.facebook.com/*/insights*' => Http::response(['error' => ['message' => 'Insights unavailable']], $status)]);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::Instagram]);
+    $target = PostTarget::factory()->create(['platform' => Platform::Instagram, 'remote_id' => '17800000000000000']);
+
+    $result = $this->connector->fetchPost($account, $target, ['access_token' => 't']);
+    expect($result->status)->toBe(MetricsStatus::Failed)->and($result->message)->toBe('Insights unavailable');
+})->with([400, 401, 403, 500]);
+
+test('instagram missing insight fields do not create a successful zero snapshot', function (): void {
+    Http::fake(['graph.facebook.com/*/insights*' => Http::response(['data' => []])]);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::Instagram]);
+    $target = PostTarget::factory()->create(['platform' => Platform::Instagram, 'remote_id' => '17800000000000000']);
+
+    expect($this->connector->fetchPost($account, $target, ['access_token' => 't'])->status)->toBe(MetricsStatus::Failed);
+});
+
+test('instagram total value metrics retain real zero measurements', function (): void {
+    Http::fake(['graph.facebook.com/*/insights*' => Http::response(['data' => [
+        ['name' => 'likes', 'total_value' => ['value' => 0]],
+        ['name' => 'comments', 'total_value' => ['value' => 0]],
+        ['name' => 'shares', 'total_value' => ['value' => 0]],
+    ]])]);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::Instagram]);
+    $target = PostTarget::factory()->create(['platform' => Platform::Instagram, 'remote_id' => '17800000000000000']);
+
+    $result = $this->connector->fetchPost($account, $target, ['access_token' => 't']);
+    expect($result->status)->toBe(MetricsStatus::Ok)->and($result->likes)->toBe(0)->and($result->impressions)->toBeNull();
+});
+
+test('instagram missing account counters remain unavailable', function (): void {
+    Http::fake(['graph.facebook.com/*' => Http::response(['id' => '123'])]);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::Instagram]);
+    expect($this->connector->fetchAccount($account, ['access_token' => 't'])->status)->toBe(MetricsStatus::Failed);
+});
+
+test('an instagram 400 capture preserves the last successful measurement', function (): void {
+    Http::preventStrayRequests();
+    Http::fake(['graph.facebook.com/*/insights*' => Http::response(['error' => ['message' => 'Insights unavailable']], 400)]);
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::Instagram, 'token_expires_at' => null]);
+    ConnectedAccountSecret::factory()->create(['connected_account_id' => $account->id, 'access_token' => 'token']);
+    $target = PostTarget::factory()->published()->create([
+        'platform' => Platform::Instagram, 'connected_account_id' => $account->id,
+        'remote_id' => '17800000000000000', 'likes' => 42, 'metrics_status' => MetricsStatus::Ok,
+    ]);
+    PostTargetMetric::factory()->create([
+        'post_target_id' => $target->id, 'captured_at' => now()->subDay(), 'likes' => 42,
+    ]);
+
+    CapturePostTargetMetrics::dispatchSync($target);
+
+    expect($target->fresh()->metrics_status)->toBe(MetricsStatus::Failed)
+        ->and($target->fresh()->likes)->toBe(42)
+        ->and($target->metrics()->count())->toBe(1);
 });

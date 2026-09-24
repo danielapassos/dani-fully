@@ -13,13 +13,16 @@ use App\Mcp\Tools\DeleteShareTool;
 use App\Mcp\Tools\GetCalendarTool;
 use App\Mcp\Tools\GetPostingScheduleTool;
 use App\Mcp\Tools\GetPostTool;
+use App\Mcp\Tools\ListAccountAnalyticsTool;
 use App\Mcp\Tools\ListAccountSetsTool;
 use App\Mcp\Tools\ListConnectedAccountsTool;
+use App\Mcp\Tools\ListPostAnalyticsTool;
 use App\Mcp\Tools\ListPostsTool;
 use App\Mcp\Tools\ListSharesTool;
 use App\Mcp\Tools\ListWorkspacesTool;
 use App\Mcp\Tools\PublishPostTool;
 use App\Mcp\Tools\QueuePostTool;
+use App\Mcp\Tools\RefreshTikTokInboxTool;
 use App\Mcp\Tools\RemovePostMediaTool;
 use App\Mcp\Tools\RetryPostTargetTool;
 use App\Mcp\Tools\SchedulePostTool;
@@ -49,6 +52,7 @@ dataset('MCP mutating tools', [
     'delete share' => DeleteShareTool::class,
     'publish post' => PublishPostTool::class,
     'retry target' => RetryPostTargetTool::class,
+    'refresh TikTok inbox' => RefreshTikTokInboxTool::class,
     'delete post' => DeletePostTool::class,
 ]);
 
@@ -118,6 +122,8 @@ test('read-only MCP grants retain access to every read tool', function (string $
     'calendar' => GetCalendarTool::class,
     'connected accounts' => ListConnectedAccountsTool::class,
     'account sets' => ListAccountSetsTool::class,
+    'account analytics' => ListAccountAnalyticsTool::class,
+    'post analytics' => ListPostAnalyticsTool::class,
     'posting schedule' => GetPostingScheduleTool::class,
     'shares' => ListSharesTool::class,
 ]);

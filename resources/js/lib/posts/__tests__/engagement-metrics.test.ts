@@ -5,6 +5,16 @@ import { engagementItems } from '../engagement-metrics';
 const stat = { likes: 820, comments: 210, reposts: 54, impressions: 12_400 };
 
 describe('engagementItems', () => {
+    it('keeps a measured zero and omits missing counters', () => {
+        expect(
+            engagementItems('tiktok', {
+                likes: 0,
+                comments: null,
+                reposts: null,
+                impressions: null,
+            }),
+        ).toEqual([{ key: 'likes', label: 'likes', value: 0 }]);
+    });
     it('orders X as replies, reposts, likes, views', () => {
         expect(engagementItems('x', stat)).toEqual([
             { key: 'comments', label: 'replies', value: 210 },

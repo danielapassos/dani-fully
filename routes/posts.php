@@ -22,6 +22,7 @@ use App\Http\Controllers\Posts\PostShareController;
 use App\Http\Controllers\Posts\PostTargetRetryController;
 use App\Http\Controllers\Posts\PostVideoUploadController;
 use App\Http\Controllers\Posts\PublishController;
+use App\Http\Controllers\Posts\TikTokInboxRefreshController;
 use App\Http\Controllers\Posts\YouTubeCoverController;
 use App\Models\AccountSet;
 use App\Models\Post;
@@ -77,6 +78,8 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
     Route::post('posts/{post}/queue', [PostQueueController::class, 'store'])->name('posts.queue');
     Route::post('posts/{post}/publish', [PublishController::class, 'store'])->name('posts.publish');
     Route::post('posts/{post}/targets/{target}/retry', [PostTargetRetryController::class, 'store'])->name('posts.targets.retry');
+    Route::post('posts/{post}/targets/{target}/tiktok-inbox/refresh', [TikTokInboxRefreshController::class, 'store'])
+        ->middleware('throttle:10,1')->name('posts.targets.tiktok-inbox.refresh');
     // Bypasses the queued job's own per-platform rate limiting (dispatchSync runs
     // inline, skipping queue middleware), so throttle here — each hit is a real,
     // metered X API read across every published target on the post.

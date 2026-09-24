@@ -76,7 +76,7 @@ test('the engagement summary compares against the previous window', function ():
         'status' => PostStatus::Published->value,
         'published_at' => Date::now()->subDays(15),
     ]);
-    PostTarget::factory()->create([
+    PostTarget::factory()->published()->create([
         'post_id' => $previous->id,
         'metrics_status' => MetricsStatus::Ok->value,
         'likes' => 40, 'comments' => 0, 'reposts' => 0,
@@ -89,7 +89,7 @@ test('the engagement summary compares against the previous window', function ():
         'status' => PostStatus::Published->value,
         'published_at' => Date::now()->subDay(),
     ]);
-    PostTarget::factory()->create([
+    PostTarget::factory()->published()->create([
         'post_id' => $current->id,
         'metrics_status' => MetricsStatus::Ok->value,
         'likes' => 70, 'comments' => 20, 'reposts' => 10,
@@ -112,7 +112,7 @@ test('deltas are null when the previous window has no baseline posts', function 
         'status' => PostStatus::Published->value,
         'published_at' => Date::now()->subDay(),
     ]);
-    PostTarget::factory()->create([
+    PostTarget::factory()->published()->create([
         'post_id' => $post->id,
         'metrics_status' => MetricsStatus::Ok->value,
         'likes' => 50, 'comments' => 0, 'reposts' => 0,
@@ -136,7 +136,7 @@ test('engagement delta is null when the previous window has posts but no capture
         'status' => PostStatus::Published->value,
         'published_at' => Date::now()->subDays(15),
     ]);
-    PostTarget::factory()->create([
+    PostTarget::factory()->published()->create([
         'post_id' => $previous->id,
         'metrics_status' => MetricsStatus::Failed->value,
         'likes' => 0, 'comments' => 0, 'reposts' => 0,
@@ -148,7 +148,7 @@ test('engagement delta is null when the previous window has posts but no capture
         'status' => PostStatus::Published->value,
         'published_at' => Date::now()->subDay(),
     ]);
-    PostTarget::factory()->create([
+    PostTarget::factory()->published()->create([
         'post_id' => $current->id,
         'metrics_status' => MetricsStatus::Ok->value,
         'likes' => 50, 'comments' => 0, 'reposts' => 0,
@@ -225,7 +225,7 @@ test('comparison collapses to single ranked list when fewer than 10 eligible pos
     // Give each post a different engagement total so ranking is deterministic.
     $engagements = [10, 30, 20];
     foreach ($posts as $i => $post) {
-        PostTarget::factory()->create([
+        PostTarget::factory()->published()->create([
             'post_id' => $post->id,
             'metrics_status' => MetricsStatus::Ok->value,
             'likes' => $engagements[$i],
@@ -322,4 +322,54 @@ test('disconnecting an account removes it from cached analytics', function (): v
         ->assertInertia(fn ($page) => $page
             ->has('accounts', 1)
             ->where('accounts.0.id', $keptAccount->id));
+});
+
+test('analytics summary distinguishes no measurements from observed zero', function (): void {
+    ConnectedAccount::factory()->for($this->workspace)->create();
+    $post = Post::factory()->for($this->workspace)->create([
+        'status' => PostStatus::Published, 'published_at' => now(),
+    ]);
+    PostTarget::factory()->published()->for($post)->create(['metrics_status' => MetricsStatus::Failed]);
+    $this->actingAs($this->user)->get(route('analytics.index'))->assertInertia(fn ($page) => $page
+        ->where('summary.followers.value', null)->where('summary.engagement.value', null)
+        ->where('summary.engagement.delta', null)->where('summary.posts.value', 1));
+});
+
+test('only public measured targets contribute engagement and markers identify exact accounts', function (): void {
+    $post = Post::factory()->for($this->workspace)->create([
+        'status' => PostStatus::Partial, 'published_at' => now(),
+    ]);
+    $public = PostTarget::factory()->published()->for($post)->create([
+        'platform' => Platform::Instagram, 'metrics_status' => MetricsStatus::Ok, 'likes' => 5, 'comments' => 0, 'reposts' => 0,
+    ]);
+    $failed = PostTarget::factory()->published()->for($post)->create([
+        'platform' => Platform::TikTok, 'metrics_status' => MetricsStatus::Failed, 'likes' => 500,
+    ]);
+    $private = PostTarget::factory()->published()->for($post)->create([
+        'platform' => Platform::YouTube, 'metrics_status' => MetricsStatus::Ok, 'likes' => 5000,
+        'media_upload_state' => ['media' => ['metadata' => ['privacy_status' => 'private']]],
+    ]);
+    $onlyPrivate = Post::factory()->for($this->workspace)->create([
+        'status' => PostStatus::Published, 'published_at' => now(),
+    ]);
+    PostTarget::factory()->published()->for($onlyPrivate)->create([
+        'platform' => Platform::YouTube, 'metrics_status' => MetricsStatus::Ok, 'likes' => 9000,
+        'media_upload_state' => ['publication' => ['status' => 'completed']],
+    ]);
+
+    $this->actingAs($this->user)->get(route('analytics.index'))->assertInertia(fn ($page) => $page
+        ->where('summary.engagement.value', 5)->where('summary.posts.value', 1)
+        ->where('comparison.top.0.engagement', 5)->has('posts', 1)
+        ->where('posts.0.connected_account_ids', fn ($ids) => $ids->contains($public->connected_account_id)
+            && $ids->contains($failed->connected_account_id) && ! $ids->contains($private->connected_account_id)));
+});
+
+test('account analytics mark old successful or disabled collection samples as stale', function (): void {
+    $old = ConnectedAccount::factory()->for($this->workspace)->create(['metrics_status' => MetricsStatus::Ok]);
+    AccountMetric::factory()->create(['connected_account_id' => $old->id, 'captured_at' => now()->subDays(10)]);
+    $disabled = ConnectedAccount::factory()->for($this->workspace)->create(['metrics_status' => MetricsStatus::Ok, 'disabled_at' => now()]);
+    AccountMetric::factory()->create(['connected_account_id' => $disabled->id, 'captured_at' => now()]);
+
+    $this->actingAs($this->user)->get(route('analytics.index'))->assertInertia(fn ($page) => $page
+        ->where('accounts', fn ($accounts) => $accounts->every(fn ($account) => $account['stale'] === true)));
 });

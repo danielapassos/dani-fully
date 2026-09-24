@@ -1411,14 +1411,16 @@ export default function Composer({
                                         })
                                     }
                                     onUploadingChange={(uploading) =>
-                                        setCoverUploadingByAccount((previous) =>
-                                            (previous[account.id] ?? false) ===
-                                            uploading
-                                                ? previous
-                                                : {
-                                                      ...previous,
-                                                      [account.id]: uploading,
-                                                  },
+                                        setCoverUploadingByAccount(
+                                            (previous) =>
+                                                (previous[account.id] ??
+                                                    false) === uploading
+                                                    ? previous
+                                                    : {
+                                                          ...previous,
+                                                          [account.id]:
+                                                              uploading,
+                                                      },
                                         )
                                     }
                                 />
@@ -1573,6 +1575,18 @@ export default function Composer({
                                               value,
                                           }),
                                       accounts: repostAccounts,
+                                  }
+                                : undefined
+                        }
+                        syncPipeline={
+                            tabAccounts.length > 0
+                                ? {
+                                      skip: state.skipSync,
+                                      onChange: (skip) =>
+                                          dispatch({
+                                              type: 'setSkipSync',
+                                              value: skip,
+                                          }),
                                   }
                                 : undefined
                         }

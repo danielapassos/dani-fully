@@ -9,11 +9,13 @@ export type PostStatTarget = {
     display_name: string | null;
     avatar_url: string | null;
     status: MetricsStatus | null;
-    likes: number;
-    comments: number;
-    reposts: number;
+    likes: number | null;
+    comments: number | null;
+    reposts: number | null;
     impressions: number | null;
     captured_at: string | null;
+    last_attempt_at?: string | null;
+    stale?: boolean;
     series: {
         at: string;
         likes: number;
@@ -26,7 +28,11 @@ export type PostStatTarget = {
 export type PostStatsPayload = {
     supported: boolean;
     captured_at: string | null;
-    totals: { likes: number; comments: number; reposts: number };
+    totals: {
+        likes: number | null;
+        comments: number | null;
+        reposts: number | null;
+    };
     targets: PostStatTarget[];
 };
 
@@ -38,6 +44,9 @@ export type AnalyticsAccount = {
     avatar_url: string | null;
     status: MetricsStatus | null;
     latest_followers: number | null;
+    captured_at?: string | null;
+    last_attempt_at?: string | null;
+    stale?: boolean;
     /** Change in followers across the selected window (null until 2+ readings). */
     followers_delta: number | null;
     series: { at: string; followers: number; following: number | null }[];
@@ -48,6 +57,7 @@ export type AnalyticsPostMarker = {
     title: string;
     published_at: string;
     platforms: PlatformName[];
+    connected_account_ids?: string[];
 };
 
 export type AnalyticsComparisonRow = AnalyticsPostMarker & {
@@ -56,7 +66,7 @@ export type AnalyticsComparisonRow = AnalyticsPostMarker & {
 
 /** A single number with an optional change-over-the-period delta. */
 export type AnalyticsSummaryMetric = {
-    value: number;
+    value: number | null;
     /** Change vs the previous equal-length window; null when there's no baseline. */
     delta: number | null;
 };
