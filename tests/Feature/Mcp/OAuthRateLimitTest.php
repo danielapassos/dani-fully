@@ -98,7 +98,9 @@ test('client registration retains its independent twenty request limit', functio
 
 test('an exhausted unrelated numeric throttle does not block OAuth discovery or registration', function (): void {
     for ($request = 0; $request < 30; $request++) {
-        $this->get('/share/does-not-exist')->assertNotFound();
+        $this->get('/share/does-not-exist')->assertOk()
+            ->assertHeader('X-RateLimit-Limit', '30')
+            ->assertHeader('X-RateLimit-Remaining', (string) (29 - $request));
     }
 
     $this->get('/share/does-not-exist')->assertStatus(429);
