@@ -194,7 +194,11 @@ export default function Composer({
                   type: 'hydrate',
                   post: p,
               })
-            : initialComposerState(initialScheduleAt, initialDestination),
+            : initialComposerState(
+                  initialScheduleAt,
+                  initialDestination,
+                  accounts,
+              ),
     );
 
     useEffect(() => {

@@ -82,6 +82,69 @@ function postWithOptions(options: YouTubePostOptions): PostView {
 }
 
 describe('YouTube per-post settings', () => {
+    it('starts new YouTube targets with editable No disclosure answers in the save payload', () => {
+        let state = initialComposerState(null, null, [
+            { id: 'youtube-account', platform: 'youtube' },
+            { id: 'instagram-account', platform: 'instagram' },
+        ]);
+        expect(state.youtubeByAccount).toEqual({
+            'youtube-account': {
+                category_id: '22',
+                notify_subscribers: false,
+                contains_synthetic_media: false,
+                has_paid_product_placement: false,
+            },
+        });
+        expect(
+            buildPutBody(state, ['youtube-account']).targets[0].content_override
+                ?.youtube,
+        ).toEqual(state.youtubeByAccount['youtube-account']);
+        expect(
+            youtubeOptionsComplete(state.youtubeByAccount['youtube-account']),
+        ).toBe(false);
+
+        state = composerReducer(state, {
+            type: 'setYouTubeOptions',
+            accountId: 'youtube-account',
+            options: {
+                ...state.youtubeByAccount['youtube-account'],
+                contains_synthetic_media: true,
+                has_paid_product_placement: true,
+            },
+        });
+        expect(
+            buildPutBody(state, ['youtube-account']).targets[0].content_override
+                ?.youtube,
+        ).toMatchObject({
+            contains_synthetic_media: true,
+            has_paid_product_placement: true,
+        });
+    });
+
+    it.each([
+        undefined,
+        { privacy_status: 'public' as const },
+        { contains_synthetic_media: true, has_paid_product_placement: true },
+    ])(
+        'does not apply new-post disclosure defaults when hydrating an existing draft with %j',
+        (options) => {
+            const post = postWithOptions(options ?? {});
+            if (options === undefined) post.targets[0].content_override = null;
+            const state = composerReducer(
+                initialComposerState(null, null, [
+                    { id: 'youtube-account', platform: 'youtube' },
+                ]),
+                { type: 'hydrate', post },
+            );
+            expect(state.youtubeByAccount['youtube-account']).toEqual(options);
+            expect(
+                buildPutBody(state, ['youtube-account']).targets[0]
+                    .content_override?.youtube,
+            ).toEqual(options);
+            expect(contentMatchesServer(state, post)).toBe(true);
+        },
+    );
+
     it('merges a completed cover upload into the latest settings without attaching another post image', () => {
         const post = postWithOptions({
             ...selectedOptions,

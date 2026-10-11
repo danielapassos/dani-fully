@@ -6,6 +6,12 @@ export const YOUTUBE_DEFAULT_OPTIONS: YouTubePostOptions = {
     notify_subscribers: false,
 };
 
+export const NEW_YOUTUBE_DEFAULT_OPTIONS: YouTubePostOptions = {
+    ...YOUTUBE_DEFAULT_OPTIONS,
+    contains_synthetic_media: false,
+    has_paid_product_placement: false,
+};
+
 /** Laravel can return an explicit empty description as null; omission inherits. */
 export function normalizeYouTubePostOptions(
     options: YouTubePostOptions,

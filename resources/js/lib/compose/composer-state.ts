@@ -5,6 +5,7 @@ import {
 } from '@/lib/compose/instagram-trial';
 import { segmentRefs } from '@/lib/compose/tiptap-doc';
 import {
+    NEW_YOUTUBE_DEFAULT_OPTIONS,
     normalizeYouTubePostOptions,
     youtubePostOptionsEqual,
 } from '@/lib/compose/youtube';
@@ -177,6 +178,7 @@ export function shouldShowConnectAccountPrompt(
 export function initialComposerState(
     scheduleAt: string | null = null,
     initialDestination: Destination | null = null,
+    accounts: Pick<Account, 'id' | 'platform'>[] = [],
 ): ComposerState {
     return {
         postId: null,
@@ -191,7 +193,14 @@ export function initialComposerState(
         overrideByAccount: {},
         instagramByAccount: {},
         tiktokByAccount: {},
-        youtubeByAccount: {},
+        youtubeByAccount: Object.fromEntries(
+            accounts
+                .filter((account) => account.platform === 'youtube')
+                .map((account) => [
+                    account.id,
+                    { ...NEW_YOUTUBE_DEFAULT_OPTIONS },
+                ]),
+        ),
         media: [],
         segmentBreaks: [],
         placements: {},
