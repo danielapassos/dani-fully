@@ -11,9 +11,9 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Laravel\Mcp\Facades\Mcp;
 
-// Throttle the OAuth authorize/token endpoints so consent and token-exchange
-// can't be hammered (credential/consent abuse).
-Route::middleware(['throttle:20,1', LogMcpOAuthRegistration::class, McpOAuthScopes::class])->group(function (): void {
+// Isolate metadata discovery from client registration and unrelated throttles.
+// Passport registers and protects its authorize/token routes separately.
+Route::middleware(['throttle:mcp-oauth', LogMcpOAuthRegistration::class, McpOAuthScopes::class])->group(function (): void {
     Mcp::oauthRoutes();
 });
 

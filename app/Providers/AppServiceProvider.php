@@ -23,6 +23,7 @@ use Illuminate\Auth\Events\Authenticated;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Middleware\TrustProxies;
+use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\ValidateSignature;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Date;
@@ -115,6 +116,20 @@ class AppServiceProvider extends ServiceProvider
             'read' => 'Read workspace data',
             'write' => 'Create and modify workspace data',
         ]);
+
+        RateLimiter::for('mcp-oauth', function (Request $request): Limit {
+            $discovery = ($request->isMethod('GET') || $request->isMethod('HEAD'))
+                && $request->routeIs(
+                    'mcp.oauth.authorization-server',
+                    'mcp.oauth.authorization-server.nested',
+                    'mcp.oauth.protected-resource',
+                    'mcp.oauth.protected-resource.nested',
+                );
+
+            return $discovery
+                ? Limit::perMinute(120)->by('discovery|'.$request->ip())
+                : Limit::perMinute(20)->by('registration|'.$request->ip());
+        });
 
         RateLimiter::for('mcp', fn ($request) => Limit::perMinute(60)
             ->by($request->user()?->id ?: $request->ip()));
