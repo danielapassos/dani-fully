@@ -71,13 +71,21 @@ function loadedImageDimensions(
         naturalWidth: { value: width, configurable: true },
         naturalHeight: { value: height, configurable: true },
     });
-    act(() => image.dispatchEvent(new Event('load')));
+    act(() => {
+        image.dispatchEvent(new Event('load'));
+    });
 }
 
 function mediaFrame(el: HTMLElement): HTMLElement {
     return el.querySelector<HTMLElement>(
         '[aria-label="Instagram media preview"]',
     )!;
+}
+
+function mediaFrameRatio(el: HTMLElement): number {
+    const [width, height = '1'] = mediaFrame(el).style.aspectRatio.split('/');
+
+    return Number(width) / Number(height);
 }
 
 function rerender(preview: PlatformPreview): void {
@@ -169,7 +177,7 @@ describe('InstagramPreview feed', () => {
             'img[src*="source.jpg"]',
         );
 
-        expect(mediaFrame(el).style.aspectRatio).toBe(String(width / height));
+        expect(mediaFrameRatio(el)).toBe(width / height);
         expect(image?.classList.contains('object-contain')).toBe(true);
         expect(image?.getAttribute('src')).toBe(media.url);
         expect(measuringImages).toHaveLength(0);
@@ -193,7 +201,7 @@ describe('InstagramPreview feed', () => {
         );
 
         expect(el.textContent).toContain('2/2');
-        expect(mediaFrame(el).style.aspectRatio).toBe('0.8');
+        expect(mediaFrameRatio(el)).toBe(0.8);
         expect(
             el
                 .querySelector('img[src*="landscape.jpg"]')
@@ -203,7 +211,7 @@ describe('InstagramPreview feed', () => {
 
     it('uses loaded source dimensions even after navigating past the first slide', () => {
         const el = renderFeed(2);
-        expect(mediaFrame(el).style.aspectRatio).toBe('1');
+        expect(mediaFrameRatio(el)).toBe(1);
         act(() =>
             el
                 .querySelector<HTMLButtonElement>('[aria-label="Next photo"]')
@@ -212,7 +220,7 @@ describe('InstagramPreview feed', () => {
         loadedImageDimensions(measuringImages[0], 1080, 1350);
 
         expect(el.textContent).toContain('2/2');
-        expect(mediaFrame(el).style.aspectRatio).toBe('0.8');
+        expect(mediaFrameRatio(el)).toBe(0.8);
         expect(el.querySelector('img[src*="m1.jpg"]')).not.toBeNull();
     });
 
@@ -230,7 +238,7 @@ describe('InstagramPreview feed', () => {
 
         const el = renderFeed(1);
 
-        expect(mediaFrame(el).style.aspectRatio).toBe('0.8');
+        expect(mediaFrameRatio(el)).toBe(0.8);
     });
 
     it('resets the frame and slide when the first image is reordered', () => {
@@ -249,7 +257,7 @@ describe('InstagramPreview feed', () => {
 
         rerender(makePreview('instagram', [square, portrait]));
 
-        expect(mediaFrame(el).style.aspectRatio).toBe('1');
+        expect(mediaFrameRatio(el)).toBe(1);
         expect(el.textContent).toContain('1/2');
         expect(el.querySelector('img[src*="square.jpg"]')).not.toBeNull();
     });
@@ -259,7 +267,7 @@ describe('InstagramPreview feed', () => {
         const el = renderFormat([original], 'feed');
         const originalProbe = measuringImages[0];
         loadedImageDimensions(originalProbe, 1080, 1350);
-        expect(mediaFrame(el).style.aspectRatio).toBe('0.8');
+        expect(mediaFrameRatio(el)).toBe(0.8);
 
         rerender(
             makePreview('instagram', [
@@ -270,10 +278,10 @@ describe('InstagramPreview feed', () => {
             ]),
         );
         loadedImageDimensions(originalProbe, 1200, 800);
-        expect(mediaFrame(el).style.aspectRatio).toBe('1');
+        expect(mediaFrameRatio(el)).toBe(1);
 
         loadedImageDimensions(measuringImages[1], 1200, 800);
-        expect(mediaFrame(el).style.aspectRatio).toBe('1.5');
+        expect(mediaFrameRatio(el)).toBe(1.5);
     });
 
     it('keeps the full source visible when dimensions cannot be loaded', () => {
@@ -282,9 +290,11 @@ describe('InstagramPreview feed', () => {
             'feed',
         );
         loadedImageDimensions(measuringImages[0], 0, 0);
-        act(() => measuringImages[0].dispatchEvent(new Event('error')));
+        act(() => {
+            measuringImages[0].dispatchEvent(new Event('error'));
+        });
 
-        expect(mediaFrame(el).style.aspectRatio).toBe('1');
+        expect(mediaFrameRatio(el)).toBe(1);
         expect(
             el
                 .querySelector('img[src*="unknown.jpg"]')

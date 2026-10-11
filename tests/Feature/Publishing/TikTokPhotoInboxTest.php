@@ -297,36 +297,52 @@ test('photo inbox refuses credentials from an account other than the selected ta
 
 test('photo initialization rate limits remain retryable without dropping the submitted caption snapshot', function (): void {
     $context = tikTokPhotoInboxContext([tikTokInboxPhoto()]);
-    Http::fake(['*/content/init/' => Http::response(['error' => ['code' => 'rate_limit_exceeded']], 429, ['Retry-After' => '60'])]);
+    Http::fake([
+        '*/content/init/' => Http::sequence()
+            ->push(['error' => ['code' => 'rate_limit_exceeded']], 429, ['Retry-After' => '60'])
+            ->push(['data' => ['publish_id' => 'retried-photo-publish'], 'error' => ['code' => 'ok']]),
+        '*/status/fetch/' => Http::response(['data' => ['status' => 'SEND_TO_USER_INBOX'], 'error' => ['code' => 'ok']]),
+    ]);
 
     $first = app(TikTokConnector::class)->publish($context);
     expect($first->errorKind)->toBe(ErrorKind::RateLimited)->and($first->retryAfter)->toBe(60);
-    fakeTikTokPhotoInbox();
+    Http::assertSentCount(1);
 
-    expect(app(TikTokConnector::class)->publish($context)->outcome)->toBe('awaiting_action');
-    Http::assertSentCount(2);
+    $retry = app(TikTokConnector::class)->publish($context);
+
+    expect($retry->errorKind)->toBeNull()->and($retry->outcome)->toBe('awaiting_action')
+        ->and($context->target->fresh()->media_upload_state[$context->media[0]->id]['remote_ref'])->toBe('retried-photo-publish');
+    Http::assertSentCount(3);
 });
 
 test('photo inbox retry after definitive failure preserves original media order and caption', function (bool $changeCaption): void {
     $context = tikTokPhotoInboxContext([tikTokInboxPhoto(), tikTokInboxPhoto()]);
     Http::fake([
-        '*/content/init/' => Http::response(['data' => ['publish_id' => 'failed-photo-publish']]),
-        '*/status/fetch/' => Http::response(['data' => ['status' => 'FAILED', 'fail_reason' => 'internal']]),
+        '*/content/init/' => Http::sequence()
+            ->push(['data' => ['publish_id' => 'failed-photo-publish']])
+            ->push(['data' => ['publish_id' => 'retried-photo-publish']]),
+        '*/status/fetch/' => Http::sequence()
+            ->push(['data' => ['status' => 'FAILED', 'fail_reason' => 'internal']])
+            ->push(['data' => ['status' => 'SEND_TO_USER_INBOX']]),
     ]);
     $first = app(TikTokConnector::class)->publish($context);
     expect($first->errorKind)->toBe(ErrorKind::ServerError);
+    Http::assertSentCount(2);
     config(['services.tiktok.direct_post_enabled' => true]);
     $retry = new PublishContext($context->target->fresh(), $changeCaption ? ['changed'] : $context->segments, $context->media, $context->account, $context->credentials);
-    fakeTikTokPhotoInbox();
 
     $result = app(TikTokConnector::class)->publish($retry);
 
     if ($changeCaption) {
         expect($result->errorKind)->toBe(ErrorKind::Validation);
-        Http::assertNothingSent();
+        Http::assertSentCount(2);
     } else {
-        expect($result->outcome)->toBe('awaiting_action');
-        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/content/init/') && $request['post_mode'] === 'MEDIA_UPLOAD');
+        expect($result->errorKind)->toBeNull()->and($result->outcome)->toBe('awaiting_action')
+            ->and($retry->target->fresh()->media_upload_state[$context->media[0]->id]['remote_ref'])->toBe('retried-photo-publish');
+        Http::assertSentCount(4);
+        expect(Http::recorded(fn (Request $request): bool => str_ends_with($request->url(), '/content/init/')
+            && $request['post_mode'] === 'MEDIA_UPLOAD'
+            && $request['post_info']['description'] === implode("\n\n", $context->segments)))->toHaveCount(2);
     }
 })->with([false, true]);
 

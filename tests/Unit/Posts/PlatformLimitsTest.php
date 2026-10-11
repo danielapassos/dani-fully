@@ -23,7 +23,7 @@ test('only linkedin caps the thread length', function () {
 test('media constraints match each platform', function () {
     expect(Platform::X->maxMedia())->toBe(4)
         ->and(Platform::LinkedIn->maxMedia())->toBe(9)
-        ->and(Platform::TikTok->requiresVideo())->toBeTrue()
+        ->and(Platform::TikTok->requiresVideo())->toBeFalse()
         ->and(Platform::YouTube->requiresVideo())->toBeTrue()
         ->and(Platform::Instagram->requiresVideo())->toBeFalse()
         ->and(Platform::Bluesky->maxMediaBytes())->toBe(2_000_000)

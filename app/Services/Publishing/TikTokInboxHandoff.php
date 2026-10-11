@@ -83,12 +83,12 @@ final class TikTokInboxHandoff
             if (is_array($entry) && data_get($entry, 'metadata.media_type') === 'PHOTO') {
                 return true;
             }
-            if (is_array($entry) && ! empty($entry['remote_ref'])) {
+            if (is_array($entry) && (! empty($entry['remote_ref']) || data_get($entry, 'metadata.init_outcome_unknown') === true)) {
                 return false;
             }
         }
         $selection = app(TargetMediaSelection::class)->resolve($target, $target->placements);
-        $media = $target->post?->media ?? collect();
+        $media = $target->post->media ?? collect();
         if ($selection['explicit']) {
             $media = $media->whereIn('id', array_column($selection['placements'], 'post_media_id'));
         }

@@ -242,7 +242,7 @@ class TikTokConnector implements PublishConnector
 
         try {
             if ($context->account->id !== $context->target->connected_account_id
-                || ! is_string($context->account->remote_account_id) || $context->account->remote_account_id === ''
+                || $context->account->remote_account_id === ''
                 || ($savedMediaId !== null && (($metadata['connected_account_id'] ?? null) !== $context->account->id
                     || ($metadata['remote_account_id'] ?? null) !== $context->account->remote_account_id))) {
                 return PublishResult::failure(ErrorKind::Validation, 'The TikTok account identity differs from this photo submission. Reconcile the original account and submission before retrying.');

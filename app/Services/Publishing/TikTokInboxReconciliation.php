@@ -198,7 +198,7 @@ class TikTokInboxReconciliation
             if (data_get($entry, 'metadata.media_type') === 'PHOTO') {
                 $account = $target->account()->withoutGlobalScopes()->first();
                 if ($account === null || data_get($entry, 'metadata.connected_account_id') !== $target->connected_account_id
-                    || ! is_string($account->remote_account_id) || $account->remote_account_id === ''
+                    || $account->remote_account_id === ''
                     || data_get($entry, 'metadata.remote_account_id') !== $account->remote_account_id) {
                     return null;
                 }

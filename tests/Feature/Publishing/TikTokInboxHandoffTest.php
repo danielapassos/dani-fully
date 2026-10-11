@@ -191,3 +191,14 @@ test('saved inbox media type and photo caption prevail over changed current draf
         ->and($handoff['caption_included'])->toBe($photo)
         ->and($handoff['caption'])->toBe($photo ? 'Actual uploaded caption' : 'Changed current caption');
 })->with([true, false]);
+
+test('uncertain video inbox initialization never claims a later photo caption was included', function (): void {
+    $post = Post::factory()->create();
+    PostMedia::factory()->for($post)->create();
+    $target = PostTarget::factory()->for($post)->create([
+        'platform' => Platform::TikTok, 'status' => PostTargetStatus::AwaitingAction,
+        'media_upload_state' => ['original-video' => ['metadata' => ['publish_mode' => 'inbox', 'init_outcome_unknown' => true]]],
+    ]);
+    $handoff = app(TikTokInboxHandoff::class)->forTarget($target);
+    expect($handoff['media_type'])->toBe('video')->and($handoff['caption_included'])->toBeFalse();
+});
