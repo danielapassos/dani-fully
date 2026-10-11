@@ -201,3 +201,16 @@ test('deleting a published post dispatches remote deletion for targets with a re
     expect(Post::whereKey($post->id)->exists())->toBeTrue()
         ->and($post->status)->toBe(PostStatus::Deleted);
 });
+
+test('partial API edits preserve music requirement unless explicitly cleared', function (bool $clear): void {
+    [$user, $workspace, $token] = issuedKey();
+    $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
+    $account = ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::Instagram]);
+    $target = PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id, 'platform' => Platform::Instagram, 'content_override' => ['music' => ['track' => 'Required song']]]);
+    $this->withToken($token)->patchJson("/api/v1/posts/{$post->id}", [
+        'base_text' => 'Edited caption',
+        'destination' => ['kind' => 'account', 'id' => $account->id],
+        'targets' => [['connected_account_id' => $account->id, 'content_override' => ['segments' => ['Edited caption'], ...($clear ? ['music' => null] : [])]]],
+    ])->assertOk();
+    expect($target->fresh()->content_override['music'])->toBe($clear ? null : ['track' => 'Required song']);
+})->with([true, false]);

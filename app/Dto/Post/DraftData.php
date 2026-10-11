@@ -18,7 +18,7 @@ final class DraftData
      * @param  list<string>  $destinationIds
      * @param  list<string>  $mediaIds
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
-     * @param  array<string, array{auto_split?: bool, format?: string, content_override?: array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null, placements?: list<array{media_id: string, segment_ref: string, position: int}>, segment_breaks?: list<string>}>  $targetsByAccount
+     * @param  array<string, array{auto_split?: bool, format?: string, content_override?: array{segments?: list<string>, media_ids?: list<string>, music?: array{track?: string|null}|null, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null, placements?: list<array{media_id: string, segment_ref: string, position: int}>, segment_breaks?: list<string>}>  $targetsByAccount
      * @param  list<string>  $segmentBreaks
      * @param  list<array{media_id: string, segment_ref: string, position: int}>  $placements
      */
@@ -137,7 +137,7 @@ final class DraftData
     }
 
     /**
-     * @return array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null
+     * @return array{segments?: list<string>, media_ids?: list<string>, music?: array{track?: string|null}|null, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null
      */
     public function overrideFor(string $accountId): ?array
     {
@@ -203,7 +203,7 @@ final class DraftData
     }
 
     /**
-     * @return array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null
+     * @return array{segments?: list<string>, media_ids?: list<string>, music?: array{track?: string|null}|null, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null
      */
     private static function readOverride(mixed $override): ?array
     {
@@ -225,6 +225,10 @@ final class DraftData
 
         if (array_key_exists('media_ids', $override)) {
             $normalized['media_ids'] = array_values(is_array($override['media_ids']) ? $override['media_ids'] : []);
+        }
+
+        if (array_key_exists('music', $override)) {
+            $normalized['music'] = is_array($override['music']) ? array_intersect_key($override['music'], ['track' => true]) : null;
         }
 
         if (isset($override['tiktok']) && is_array($override['tiktok'])) {

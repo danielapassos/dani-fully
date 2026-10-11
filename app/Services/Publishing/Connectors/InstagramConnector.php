@@ -20,6 +20,7 @@ use App\Services\Publishing\Connectors\Concerns\MapsHttpErrors;
 use App\Services\Publishing\Contracts\PublishConnector;
 use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\InstagramTrialReel;
+use App\Services\Publishing\PhotoMusic;
 use App\Services\Usage\Concerns\TracksUsage;
 use App\Support\UsageOperation;
 use Illuminate\Http\Client\ConnectionException;
@@ -78,6 +79,10 @@ class InstagramConnector implements PublishConnector
         $state = new MediaUploadState($context->target->media_upload_state);
         if ($this->publishOutcomeUnknown($state)) {
             return $this->publishNeedsReview();
+        }
+
+        if (app(PhotoMusic::class)->issues($context->target, $context->effectiveMedia()) !== []) {
+            return PublishResult::failure(ErrorKind::Validation, 'This post requires music to be selected in Instagram. Keep it as a draft for manual publication, or remove the music note to publish without music.');
         }
 
         $trials = app(InstagramTrialReel::class);

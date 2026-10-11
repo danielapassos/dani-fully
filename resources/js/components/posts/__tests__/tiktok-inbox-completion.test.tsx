@@ -77,3 +77,35 @@ it('does not offer to copy a nonexistent caption', () => {
     expect(screen.getByRole('button', { name: 'Copy caption' })).toBeDisabled();
     expect(screen.queryByText(/Caption copied/)).not.toBeInTheDocument();
 });
+
+it('shows an included photo caption and separate native music note', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    render(
+        <TikTokInboxCompletion
+            handoff={{
+                ...handoff,
+                media_type: 'photo',
+                caption_included: true,
+                music_track: 'Song title — Artist',
+            }}
+        />,
+    );
+    expect(
+        screen.getByLabelText('Photo caption to review in TikTok'),
+    ).toHaveValue(caption);
+    expect(screen.getByRole('status')).toHaveTextContent(
+        'photo upload includes this caption',
+    );
+    expect(screen.getByText(/Song title — Artist/)).toBeInTheDocument();
+    expect(
+        screen.getByText(/has not been selected automatically/),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy caption' }));
+    await waitFor(() =>
+        expect(writeText).toHaveBeenCalledExactlyOnceWith(caption),
+    );
+    expect(screen.getByRole('status')).not.toHaveTextContent(
+        'Paste it over any text',
+    );
+});

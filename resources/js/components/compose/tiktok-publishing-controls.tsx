@@ -21,6 +21,7 @@ type Props = {
     account: Account;
     options: TikTokPostOptions | undefined;
     durationSeconds: number | null | undefined;
+    hasPhotos?: boolean;
     onChange: (options: TikTokPostOptions) => void;
     onCreatorInfo: (creator: TikTokCreatorInfo | null) => void;
 };
@@ -29,6 +30,7 @@ export function TikTokPublishingControls({
     account,
     options,
     durationSeconds,
+    hasPhotos = false,
     onChange,
     onCreatorInfo,
 }: Props) {
@@ -40,10 +42,11 @@ export function TikTokPublishingControls({
     const [revision, setRevision] = useState(0);
     const [loading, setLoading] = useState(true);
     const current = options ?? TIKTOK_DEFAULT_OPTIONS;
-    const publishingBlocked = account.publishing_ready === false;
-    const unavailableReason =
-        account.publishing_unavailable_reason ??
-        'This TikTok account is not ready to publish. Check its publishing setup in Accounts.';
+    const publishingBlocked = account.publishing_ready === false || hasPhotos;
+    const unavailableReason = hasPhotos
+        ? TIKTOK_ISSUE_MESSAGES.tiktok_photos_require_inbox
+        : (account.publishing_unavailable_reason ??
+          'This TikTok account is not ready to publish. Check its publishing setup in Accounts.');
 
     useEffect(() => {
         let cancelled = false;
@@ -149,7 +152,7 @@ export function TikTokPublishingControls({
                     {publishingBlocked ? unavailableReason : error}
                 </p>
             )}
-            {publishingBlocked && (
+            {account.publishing_ready === false && (
                 <Link
                     href={accountsRoute().url}
                     className="text-sm underline underline-offset-2"

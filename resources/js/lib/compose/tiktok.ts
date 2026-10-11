@@ -1,4 +1,5 @@
 import type {
+    MediaView,
     TikTokCreatorInfo,
     TikTokPostOptions,
     TikTokPrivacy,
@@ -45,9 +46,39 @@ export const TIKTOK_ISSUE_MESSAGES = {
     tiktok_cover_invalid: 'Choose a cover time within the video.',
     tiktok_interaction_unavailable:
         'An interaction is disabled in this TikTok account’s settings. Refresh the publishing controls.',
+    tiktok_photos_require_inbox:
+        'TikTok photo posts require native inbox delivery. Direct publishing and other publishing providers do not support photos in Shoutrrr.',
+    tiktok_photo_type_invalid:
+        'TikTok photo posts require JPEG or WebP images.',
+    tiktok_photo_too_large: 'Each TikTok photo must be 20 MB or smaller.',
+    tiktok_photo_caption_too_long:
+        'Shorten the TikTok photo caption to 4,000 characters or fewer.',
 } as const;
 
 export type TikTokIssue = keyof typeof TIKTOK_ISSUE_MESSAGES;
+
+export function tiktokMediaIssues(
+    media: MediaView[],
+    inboxEnabled: boolean,
+): (TikTokIssue | 'mixed_video_and_images' | 'too_many_media')[] {
+    const videos = media.filter((item) => item.kind === 'video');
+    const photos = media.filter((item) => item.kind === 'image');
+    if (videos.length > 0 && photos.length > 0)
+        return ['mixed_video_and_images'];
+    if (videos.length > 1) return ['too_many_media'];
+    if (photos.length === 0) return [];
+
+    const issues: ReturnType<typeof tiktokMediaIssues> = [];
+    if (!inboxEnabled) issues.push('tiktok_photos_require_inbox');
+    if (photos.length > 35) issues.push('too_many_media');
+    if (
+        photos.some((item) => !['image/jpeg', 'image/webp'].includes(item.mime))
+    )
+        issues.push('tiktok_photo_type_invalid');
+    if (photos.some((item) => (item.size_bytes ?? 0) > 20_000_000))
+        issues.push('tiktok_photo_too_large');
+    return issues;
+}
 
 export function tiktokIssues(
     options: TikTokPostOptions | undefined,

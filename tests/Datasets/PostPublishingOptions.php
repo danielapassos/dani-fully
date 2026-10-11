@@ -3,6 +3,8 @@
 use App\Enums\Platform;
 
 dataset('declared publishing options', [
+    'Instagram photo music reminder' => [Platform::Instagram, 'music', ['track' => 'Peggy Gou - selected song']],
+    'TikTok photo music reminder' => [Platform::TikTok, 'music', ['track' => 'Selected artist and song']],
     'TikTok complete choices' => [Platform::TikTok, 'tiktok', [
         'privacy_level' => 'SELF_ONLY',
         'disable_comment' => true,
@@ -36,6 +38,8 @@ dataset('declared publishing options', [
 ]);
 
 dataset('invalid publishing options', [
+    'Music note too long' => [Platform::Instagram, 'music', ['track' => str_repeat('a', 201)]],
+    'Music arbitrary audio payload' => [Platform::TikTok, 'music', ['audio_id' => 'not-a-supported-parameter']],
     'TikTok string consent' => [Platform::TikTok, 'tiktok', ['music_usage_confirmed' => 'true']],
     'YouTube string declaration' => [Platform::YouTube, 'youtube', ['made_for_kids' => 'false']],
     'TikTok unsupported privacy' => [Platform::TikTok, 'tiktok', ['privacy_level' => 'public']],

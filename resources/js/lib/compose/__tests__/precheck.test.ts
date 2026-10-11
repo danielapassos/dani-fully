@@ -44,6 +44,130 @@ function accountFor(
 
 const NO_MEDIA: MediaView[] = [];
 
+describe('photo inbox and music readiness', () => {
+    const inbox = accountFor({
+        platform: 'tiktok',
+        tiktok_inbox_enabled: true,
+        tiktok_direct_post_enabled: false,
+    });
+    const photo = mediaItem({ id: 'photo', size_bytes: 20_000_000 });
+    const video = mediaItem({ id: 'video', mime: 'video/mp4', kind: 'video' });
+    const input = {
+        accounts: [inbox],
+        segments: ['Caption'],
+        mentions: [],
+        autoSplitByAccount: {},
+        overrideByAccount: {},
+        formatByAccount: {},
+        media: [photo],
+        limits: [
+            limitsFor({
+                platform: 'tiktok',
+                requiresMedia: true,
+                maxMedia: 35,
+                threadMax: 1,
+                maxLength: 2200,
+            }),
+        ],
+    };
+
+    it('accepts ordered JPEG/WebP photos without video duration or direct post consent', () => {
+        const media = Array.from({ length: 35 }, (_, index) => ({
+            ...photo,
+            id: `photo-${index}`,
+            mime: index % 2 ? 'image/webp' : 'image/jpeg',
+        }));
+        expect(
+            precheckDestinations({
+                ...input,
+                media,
+                placements: { __head__: media.map((item) => item.id) },
+            }),
+        ).toEqual([]);
+    });
+
+    it.each([
+        [[{ ...photo, mime: 'image/png' }], 'tiktok_photo_type_invalid'],
+        [[{ ...photo, size_bytes: 20_000_001 }], 'tiktok_photo_too_large'],
+        [[photo, video], 'mixed_video_and_images'],
+        [[video, { ...video, id: 'other-video' }], 'too_many_media'],
+        [
+            Array.from({ length: 36 }, (_, index) => ({
+                ...photo,
+                id: `${index}`,
+            })),
+            'too_many_media',
+        ],
+    ] as const)('rejects unsupported TikTok media (%s)', (media, reason) => {
+        expect(
+            precheckDestinations({ ...input, media: [...media] })[0].reasons,
+        ).toContain(reason);
+    });
+
+    it('rejects direct/provider photo routes without irrelevant video consent errors', () => {
+        const blocks = precheckDestinations({
+            ...input,
+            accounts: [
+                {
+                    ...inbox,
+                    tiktok_inbox_enabled: false,
+                    tiktok_direct_post_enabled: true,
+                },
+            ],
+        });
+        expect(blocks[0].reasons).toEqual(['tiktok_photos_require_inbox']);
+    });
+
+    it('validates only media placed on the target', () => {
+        expect(
+            precheckDestinations({
+                ...input,
+                media: [photo, video],
+                placementsByAccount: { [inbox.id]: { __head__: ['photo'] } },
+            }),
+        ).toEqual([]);
+    });
+
+    it('passes a song note to photo inbox completion but blocks direct routes and video notes', () => {
+        const musicByAccount = { [inbox.id]: { track: 'Song — Artist' } };
+        expect(precheckDestinations({ ...input, musicByAccount })).toEqual([]);
+        expect(
+            precheckDestinations({
+                ...input,
+                musicByAccount,
+                media: [video],
+            })[0].reasons,
+        ).toContain('music_requires_photos');
+        expect(
+            precheckDestinations({
+                ...input,
+                musicByAccount,
+                accounts: [{ ...inbox, tiktok_inbox_enabled: false }],
+            })[0].reasons,
+        ).toContain('music_requires_native_completion');
+    });
+
+    it('keeps Instagram music photo drafts blocked until the note is cleared', () => {
+        const instagram = {
+            ...input,
+            accounts: [accountFor({ platform: 'instagram' })],
+            limits: [limitsFor({ platform: 'instagram' })],
+        };
+        expect(
+            precheckDestinations({
+                ...instagram,
+                musicByAccount: { 'acc-1': { track: 'Song — Artist' } },
+            })[0].reasons,
+        ).toEqual(['music_requires_native_completion']);
+        expect(
+            precheckDestinations({
+                ...instagram,
+                musicByAccount: { 'acc-1': null },
+            }),
+        ).toEqual([]);
+    });
+});
+
 describe('precheckAccount', () => {
     it('flags a non-capped auto-split-off segment over the limit', () => {
         const reasons = precheckAccount({

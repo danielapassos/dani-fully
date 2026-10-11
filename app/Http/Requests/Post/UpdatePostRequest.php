@@ -9,6 +9,7 @@ use App\Http\Requests\Post\Concerns\DerivesMentionHandleRules;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\InstagramTrialReel;
+use App\Services\Publishing\PhotoMusic;
 use App\Services\Publishing\YouTubePostOptions;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -55,6 +56,7 @@ class UpdatePostRequest extends FormRequest
             ...YouTubePostOptions::draftRules(),
             ...InstagramReelCover::draftRules(),
             ...InstagramTrialReel::draftRules(),
+            ...PhotoMusic::draftRules(),
             'targets.*.segment_breaks' => ['nullable', 'array'],
             'targets.*.segment_breaks.*' => ['string'],
             'targets.*.placements' => ['nullable', 'array'],

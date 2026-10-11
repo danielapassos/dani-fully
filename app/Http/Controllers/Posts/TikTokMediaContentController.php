@@ -27,7 +27,9 @@ class TikTokMediaContentController extends Controller
         $media = PostMedia::withoutGlobalScopes()->findOrFail($mediaId);
         $source = $request->query('source');
         abort_unless(is_string($source) && hash_equals($urls->tikTokSourceVersion($media), $source), 404);
-        abort_unless($media->isVideo() && in_array($media->mime, ['video/mp4', 'video/quicktime', 'video/webm'], true), 404);
+        $isPhoto = $media->kind === 'image' && in_array($media->mime, ['image/jpeg', 'image/webp'], true)
+            && $media->size_bytes > 0 && $media->size_bytes <= 20_000_000;
+        abort_unless($isPhoto || ($media->isVideo() && in_array($media->mime, ['video/mp4', 'video/quicktime', 'video/webm'], true)), 404);
 
         $disk = Storage::disk($media->disk);
         try {
@@ -41,9 +43,11 @@ class TikTokMediaContentController extends Controller
         $headers = [
             'Content-Type' => $media->mime,
             'Content-Length' => (string) $size,
-            'Content-Disposition' => 'inline; filename="video.'.match ($media->mime) {
+            'Content-Disposition' => 'inline; filename="'.($isPhoto ? 'photo' : 'video').'.'.match ($media->mime) {
                 'video/quicktime' => 'mov',
                 'video/webm' => 'webm',
+                'image/jpeg' => 'jpg',
+                'image/webp' => 'webp',
                 default => 'mp4',
             }.'"',
             'Accept-Ranges' => 'bytes',

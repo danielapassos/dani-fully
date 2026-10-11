@@ -386,3 +386,11 @@ test('instagram resume guard returns success without making any http calls', fun
 
     Http::assertNothingSent();
 });
+
+test('instagram connector never silently publishes photos with a saved music requirement', function (): void {
+    Http::preventStrayRequests();
+    $photo = PostMedia::factory()->create();
+    $result = app(InstagramConnector::class)->publish(igContext(['Photo caption'], [$photo], ['content_override' => ['music' => ['track' => 'Required song']]]));
+    expect($result->isSuccessful())->toBeFalse()->and($result->errorKind)->toBe(ErrorKind::Validation);
+    Http::assertNothingSent();
+});

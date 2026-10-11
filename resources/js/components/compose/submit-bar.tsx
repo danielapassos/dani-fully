@@ -395,9 +395,10 @@ export function SubmitBar({
         <div className="flex flex-col items-stretch gap-1.5 sm:items-end sm:justify-self-end">
             {hasInboxDelivery && (
                 <p className="max-w-sm text-[12px] leading-5 text-muted-foreground">
-                    TikTok receives the video only. Open its Inbox upload
-                    notification, paste your saved caption, and check mentions,
-                    cover and privacy before posting.
+                    Photo uploads include your caption; video uploads require
+                    pasting your saved caption. Open the TikTok Inbox upload
+                    notification to review your media, choose music, and check
+                    mentions, cover and privacy before posting.
                     {tray.mode !== 'now' &&
                         ' The selected time schedules inbox delivery; you finish posting in TikTok.'}
                 </p>

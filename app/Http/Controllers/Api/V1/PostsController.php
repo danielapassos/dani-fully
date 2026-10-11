@@ -18,6 +18,7 @@ use App\Services\Posts\DraftService;
 use App\Services\Posts\PostStaleWriteException;
 use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\InstagramTrialReel;
+use App\Services\Publishing\PhotoMusic;
 use App\Services\Publishing\TikTokPublishingRoute;
 use App\Services\Publishing\YouTubePostOptions;
 use App\Support\CursorPage;
@@ -87,6 +88,7 @@ class PostsController extends Controller
             'targets.*.content_override.media_ids' => ['array'],
             'targets.*.content_override.media_ids.*' => ['string'],
             ...TikTokPostOptions::draftRules(),
+            ...PhotoMusic::draftRules(),
             ...YouTubePostOptions::draftRules(),
             ...InstagramReelCover::draftRules(),
             ...InstagramTrialReel::draftRules(),
@@ -145,6 +147,7 @@ class PostsController extends Controller
             'targets.*.content_override.media_ids' => ['array'],
             'targets.*.content_override.media_ids.*' => ['string'],
             ...TikTokPostOptions::draftRules(),
+            ...PhotoMusic::draftRules(),
             ...YouTubePostOptions::draftRules(),
             ...InstagramReelCover::draftRules(),
             ...InstagramTrialReel::draftRules(),

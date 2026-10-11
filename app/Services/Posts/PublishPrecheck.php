@@ -12,6 +12,7 @@ use App\Models\PostTarget;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\InstagramTrialReel;
+use App\Services\Publishing\PhotoMusic;
 use App\Services\Publishing\SegmentMediaResolver;
 use App\Services\Publishing\TargetMediaSelection;
 use App\Services\Publishing\TikTokPublishingRoute;
@@ -93,6 +94,8 @@ class PublishPrecheck
         $messages = array_map(static fn (string $issue): string => str_starts_with($issue, 'tiktok_')
             ? app(TikTokPostOptions::class)->describe($issue)
             : match ($issue) {
+                'music_requires_photos' => 'Music notes apply to Instagram photos or TikTok photo inbox uploads only.',
+                'music_requires_native_completion' => 'This post requires music to be selected in the native app. Keep it as a draft for manual publication, or remove the music note to publish without music.',
                 'empty' => 'Add text or media before publishing.',
                 'sync_source_media_unavailable' => 'The native source media could not be imported completely. Duplicate this post, attach the original media, and review it before publishing.',
                 'publishing_unavailable' => "Reconnect the {$label} account or enable {$label} publishing before posting.",
@@ -168,7 +171,11 @@ class PublishPrecheck
             $issues[] = $issue;
         }
 
-        if ($platform === Platform::TikTok && (config('services.tiktok.direct_post_enabled')
+        if ($platform === Platform::TikTok) {
+            $issues = array_merge($issues, $this->tikTokMediaIssues($target, $media));
+        }
+
+        if ($platform === Platform::TikTok && ! $media->contains(fn (PostMedia $item): bool => ! $item->isVideo()) && (config('services.tiktok.direct_post_enabled')
             || in_array(app(TikTokPublishingRoute::class)->forTarget($target), ['metricool', 'accounts_api'], true))
             && ! collect($target->media_upload_state ?? [])->contains(static fn (mixed $entry): bool => is_array($entry) && ! empty($entry['remote_ref']))) {
             $options = $target->content_override['tiktok'] ?? [];
@@ -184,7 +191,39 @@ class PublishPrecheck
         }
 
         $mediaItems = array_values($media->all());
-        $issues = array_merge($issues, app(InstagramReelCover::class)->issues($target, $mediaItems), app(InstagramTrialReel::class)->issues($target, $mediaItems), app(YouTubeThumbnail::class)->issues($target, $mediaItems));
+        $issues = array_merge($issues, app(PhotoMusic::class)->issues($target, $mediaItems), app(InstagramReelCover::class)->issues($target, $mediaItems), app(InstagramTrialReel::class)->issues($target, $mediaItems), app(YouTubeThumbnail::class)->issues($target, $mediaItems));
+
+        return array_values(array_unique($issues));
+    }
+
+    /** @param Collection<int, PostMedia> $media
+     * @return list<string>
+     */
+    private function tikTokMediaIssues(PostTarget $target, Collection $media): array
+    {
+        $videos = $media->filter(fn (PostMedia $item): bool => $item->isVideo());
+        $photos = $media->reject(fn (PostMedia $item): bool => $item->isVideo());
+        $issues = $videos->count() > 1 || $media->count() > 35 ? ['too_many_media'] : [];
+        if ($photos->isEmpty()) {
+            return $issues;
+        }
+        if (app(TikTokPublishingRoute::class)->forTarget($target) !== 'native'
+            || config('services.tiktok.inbox_enabled') !== true
+            || config('services.tiktok.direct_post_enabled') === true) {
+            $issues[] = 'tiktok_photos_require_inbox';
+        }
+        foreach ($photos as $photo) {
+            if ($photo->kind !== 'image' || ! in_array($photo->mime, Platform::TikTok->allowedMime(), true)) {
+                $issues[] = 'tiktok_photo_type_invalid';
+            }
+            if ($photo->size_bytes <= 0 || $photo->size_bytes > Platform::TikTok->maxMediaBytes()) {
+                $issues[] = 'tiktok_photo_too_large';
+            }
+        }
+        $caption = implode("\n\n", $target->sections ?? []);
+        if (strlen(mb_convert_encoding($caption, 'UTF-16LE', 'UTF-8')) / 2 > 4000) {
+            $issues[] = 'tiktok_photo_caption_too_long';
+        }
 
         return array_values(array_unique($issues));
     }

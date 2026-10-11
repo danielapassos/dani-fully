@@ -415,7 +415,8 @@ enum Platform: string
             self::X, self::Bluesky => 4,
             self::LinkedIn => 9,
             self::Facebook, self::Instagram, self::Threads => 10,
-            self::TikTok, self::YouTube => 1,
+            self::TikTok => 35,
+            self::YouTube => 1,
             self::Discord => 10,
         };
     }
@@ -431,12 +432,12 @@ enum Platform: string
 
     /**
      * Whether the platform accepts only video for this publishing path.
-     * TikTok's inbox upload and YouTube's videos.insert flow cannot publish an
-     * image, so the composer must reject image-only drafts before dispatch.
+     * YouTube's videos.insert flow cannot publish images. TikTok also supports
+     * photo inbox uploads; route-specific restrictions are checked per target.
      */
     public function requiresVideo(): bool
     {
-        return in_array($this, [self::TikTok, self::YouTube], true);
+        return $this === self::YouTube;
     }
 
     /**
@@ -528,7 +529,8 @@ enum Platform: string
             self::LinkedIn => 8_388_608,
             self::Facebook => 4_194_304,
             self::Instagram, self::Threads => 8_388_608,
-            self::TikTok, self::YouTube => 0,
+            self::TikTok => 20_000_000,
+            self::YouTube => 0,
             self::Discord => 10_485_760, // 10 MiB (Discord's default webhook attachment cap)
         };
     }
@@ -544,7 +546,8 @@ enum Platform: string
             self::Facebook => ['image/jpeg', 'image/png', 'image/gif'],
             self::Instagram => ['image/jpeg'],
             self::Threads => ['image/jpeg', 'image/png'],
-            self::TikTok, self::YouTube => [],
+            self::TikTok => ['image/jpeg', 'image/webp'],
+            self::YouTube => [],
             self::Discord => ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
         };
     }

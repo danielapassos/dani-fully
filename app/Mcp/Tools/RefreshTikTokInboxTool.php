@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
 
 #[Name('refresh_tiktok_inbox')]
-#[Description('Refresh the status of an existing TikTok inbox upload by its exact post and target IDs. Verifies public video IDs on the connected account and saves completion evidence. Never uploads, retries, or publishes content. Requires write access to update tracking, but no publish confirmation. Caption matching is never used as proof. Checks are limited to once per minute per target.')]
+#[Description('Refresh the status of an existing TikTok inbox upload by its exact post and target IDs. Verifies public post IDs on the connected account and saves completion evidence. Never uploads, retries, or publishes content. Requires write access to update tracking, but no publish confirmation. Caption matching is never used as proof. Checks are limited to once per minute per target.')]
 class RefreshTikTokInboxTool extends WorkspaceTool
 {
     public function handle(Request $request, TikTokInboxReconciliation $reconciliation): Response

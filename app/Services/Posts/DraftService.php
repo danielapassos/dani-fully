@@ -178,7 +178,7 @@ class DraftService
      * @param  list<string>  $accountIds
      * @param  list<string>  $segments
      * @param  array<string, bool>  $autoSplitByAccount
-     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null>  $overrideByAccount
+     * @param  array<string, array{segments?: list<string>, media_ids?: list<string>, music?: array{track?: string|null}|null, tiktok?: array<string, mixed>, youtube?: array<string, mixed>, instagram?: array{cover_media_id?: string|null, trial_params?: array{graduation_strategy: string}|null}}|null>  $overrideByAccount
      * @param  list<array{id: string, label: string, handles: array<string, string>}>  $mentions
      * @param  array<string, string>  $formatByAccount
      */
@@ -210,6 +210,10 @@ class DraftService
             $override = array_key_exists($accountId, $overrideByAccount)
                 ? $overrideByAccount[$accountId]
                 : $currentOverride;
+            if (! array_key_exists('music', $override ?? []) && array_key_exists('music', $currentOverride ?? [])) {
+                $override ??= [];
+                $override['music'] = $currentOverride['music'];
+            }
             $currentFormat = $current instanceof PostTarget ? $current->format->value : null;
             $format = $formatByAccount[$accountId]
                 ?? ($data?->hasFormatFor($accountId) ? $data->formatFor($accountId) : null)

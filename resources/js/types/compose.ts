@@ -19,6 +19,10 @@ export type InstagramTrialParams = {
     graduation_strategy: 'MANUAL' | 'SS_PERFORMANCE';
 };
 
+export type PhotoMusicOptions = {
+    track: string;
+};
+
 export type InstagramPostOptions = {
     cover_media_id: string | null;
     trial_params?: InstagramTrialParams | null;
@@ -117,7 +121,7 @@ export type Account = {
     /** Actionable explanation shown beside a connection that cannot publish. */
     publishing_unavailable_reason?: string | null;
     tiktok_direct_post_enabled?: boolean;
-    /** Native video-only inbox delivery, requiring completion in TikTok. */
+    /** Native video or photo inbox delivery, requiring completion in TikTok. */
     tiktok_inbox_enabled?: boolean;
 };
 
@@ -152,6 +156,10 @@ export type MediaView = {
     url: string;
     mime: string;
     kind: 'image' | 'video';
+    /** Stored source dimensions; older cached views may not include them. */
+    width?: number | null;
+    height?: number | null;
+    size_bytes?: number | null;
     alt_text: string | null;
     duration_seconds: number | null;
     position: number;
@@ -221,6 +229,7 @@ export type TargetView = {
         segments?: string[];
         media_ids?: string[];
         instagram?: InstagramPostOptions;
+        music?: PhotoMusicOptions | null;
         tiktok?: TikTokPostOptions;
         youtube?: YouTubePostOptions;
     } | null;
@@ -233,6 +242,10 @@ export type TargetView = {
         kind: 'tiktok_inbox';
         caption: string;
         instructions: string;
+        media_type?: 'photo' | 'video';
+        /** Included in the submitted payload, not recipient-side verification. */
+        caption_included?: boolean;
+        music_track?: string | null;
     } | null;
     inbox_tracking?: {
         can_refresh: boolean;

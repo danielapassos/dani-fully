@@ -315,3 +315,44 @@ test('reconciliation does not resurrect a parent deleted or disablement changed 
         expect($target->post()->withoutGlobalScopes()->first()->status)->toBe(PostStatus::Deleted);
     }
 })->with([true, false]);
+
+test('photo completion requires exact original IDs and authenticated ownership evidence', function (bool $owned): void {
+    $id = '7688668628333643789';
+    $target = inboxTrackingTarget();
+    $target->update(['media_upload_state' => ['photo-id' => ['remote_ref' => 'p_pub_url~v2.photo', 'metadata' => [
+        'publish_mode' => 'inbox', 'media_type' => 'PHOTO',
+        'connected_account_id' => $target->connected_account_id,
+        'remote_account_id' => $target->account->remote_account_id,
+    ]]]]);
+    Http::fake([
+        'open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'PUBLISH_COMPLETE', 'publicaly_available_post_id' => [$id]]]),
+        'open.tiktokapis.com/v2/video/query/*' => Http::response(['error' => ['code' => 'ok'], 'data' => ['videos' => $owned ? [['id' => $id, 'share_url' => "https://www.tiktok.com/@creator/photo/{$id}", 'video_description' => 'Edited in TikTok']] : []]]),
+    ]);
+    app(TikTokInboxReconciliation::class)->reconcile($target);
+    expect($target->fresh()->publicationStatus())->toBe($owned ? PostTargetStatus::Published : PostTargetStatus::AwaitingAction)
+        ->and($target->fresh()->remote_id)->toBe($owned ? $id : null)
+        ->and($target->fresh()->media_upload_state['photo-id']['remote_ref'])->toBe('p_pub_url~v2.photo');
+    Http::assertSentCount(2);
+})->with([true, false]);
+
+test('photo reconciliation never uses a replacement creator identity', function (bool $changedDuringRead): void {
+    $target = inboxTrackingTarget();
+    $target->update(['media_upload_state' => ['photo-id' => ['remote_ref' => 'p_pub_url~v2.photo', 'metadata' => [
+        'publish_mode' => 'inbox', 'media_type' => 'PHOTO',
+        'connected_account_id' => $target->connected_account_id,
+        'remote_account_id' => $target->account->remote_account_id,
+    ]]]]);
+    if (! $changedDuringRead) {
+        $target->account->update(['remote_account_id' => 'replacement-creator']);
+    }
+    Http::fake(['*' => function () use ($target) {
+        $target->account->update(['remote_account_id' => 'replacement-creator']);
+
+        return Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'PUBLISH_COMPLETE', 'publicaly_available_post_id' => []]]);
+    }]);
+    app(TikTokInboxReconciliation::class)->reconcile($target);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::AwaitingAction)
+        ->and($target->fresh()->media_upload_state)->not->toHaveKey('_tiktok_reconciliation')
+        ->and($target->fresh()->remote_id)->toBeNull();
+    Http::assertSentCount($changedDuringRead ? 1 : 0);
+})->with([true, false]);

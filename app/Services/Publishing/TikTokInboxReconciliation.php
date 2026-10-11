@@ -195,6 +195,14 @@ class TikTokInboxReconciliation
             if (str_starts_with((string) $key, '_') || $key === 'publication' || ! is_array($entry)) {
                 continue;
             }
+            if (data_get($entry, 'metadata.media_type') === 'PHOTO') {
+                $account = $target->account()->withoutGlobalScopes()->first();
+                if ($account === null || data_get($entry, 'metadata.connected_account_id') !== $target->connected_account_id
+                    || $account->remote_account_id === ''
+                    || data_get($entry, 'metadata.remote_account_id') !== $account->remote_account_id) {
+                    return null;
+                }
+            }
             $mode = data_get($entry, 'metadata.publish_mode');
             if ($mode !== null && $mode !== 'inbox') {
                 return null;
@@ -218,7 +226,7 @@ class TikTokInboxReconciliation
         return is_array($parts) && ($parts['scheme'] ?? null) === 'https'
             && in_array($parts['host'] ?? null, ['www.tiktok.com', 'tiktok.com'], true)
             && ! isset($parts['user']) && ! isset($parts['pass']) && ! isset($parts['port'])
-            && preg_match('~\A/@[^/]+/video/'.preg_quote($id, '~').'/?\z~', $parts['path'] ?? '') === 1;
+            && preg_match('~\A/@[^/]+/(?:video|photo)/'.preg_quote($id, '~').'/?\z~', $parts['path'] ?? '') === 1;
     }
 
     /** @param array{media_key: string, publish_id: string} $reference

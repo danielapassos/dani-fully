@@ -129,7 +129,7 @@ test('blockingTargets prevents single-media formats from silently dropping attac
         ->and($blocked[0]['issues'])->toContain('too_many_media');
 });
 
-test('blockingTargets requires a video for TikTok even when an image is attached', function () {
+test('blockingTargets accepts a photo for the native TikTok inbox', function () {
     config()->set('services.tiktok.inbox_enabled', true);
     $post = Post::factory()->create();
     PostMedia::factory()->for($post)->create(['kind' => 'image']);
@@ -145,8 +145,7 @@ test('blockingTargets requires a video for TikTok even when an image is attached
 
     $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
 
-    expect($blocked)->toHaveCount(1)
-        ->and($blocked[0]['issues'])->toBe(['video_required']);
+    expect($blocked)->toBe([]);
 });
 
 test('blockingTargets passes a publish-ready YouTube target with a video', function () {
@@ -728,3 +727,40 @@ test('blockingTargets allows a GIF mixed with an image on LinkedIn', function ()
 
     expect($blocked)->toBe([]);
 });
+
+test('TikTok photo precheck enforces inbox route file types size and media limits', function (array $files, array $config, string $issue): void {
+    config()->set(['services.tiktok.inbox_enabled' => true, 'services.tiktok.direct_post_enabled' => false, 'services.tiktok.publishing_provider' => 'native', ...$config]);
+    $post = Post::factory()->create();
+    $account = ConnectedAccount::factory()->create(['workspace_id' => $post->workspace_id, 'platform' => Platform::TikTok, 'capabilities' => ['oauth_scopes' => ['video.upload', 'video.publish']]]);
+    PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id, 'platform' => Platform::TikTok, 'sections' => ['Photos']]);
+    foreach ($files as $file) {
+        PostMedia::factory()->for($post)->create($file);
+    }
+
+    $blocked = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+    expect($blocked)->toHaveCount(1)->and($blocked[0]['issues'])->toContain($issue);
+})->with([
+    'png' => [[['mime' => 'image/png']], [], 'tiktok_photo_type_invalid'],
+    'size' => [[['size_bytes' => 20_000_001]], [], 'tiktok_photo_too_large'],
+    'empty' => [[['size_bytes' => 0]], [], 'tiktok_photo_too_large'],
+    '35 photo limit' => [array_fill(0, 36, []), [], 'too_many_media'],
+    'two videos' => [[['kind' => 'video', 'mime' => 'video/mp4'], ['kind' => 'video', 'mime' => 'video/mp4']], [], 'too_many_media'],
+    'mixed' => [[['kind' => 'image'], ['kind' => 'video', 'mime' => 'video/mp4']], [], 'mixed_video_and_images'],
+    'direct' => [[[]], ['services.tiktok.direct_post_enabled' => true], 'tiktok_photos_require_inbox'],
+    'other provider' => [[[]], ['services.tiktok.publishing_provider' => 'metricool'], 'tiktok_photos_require_inbox'],
+]);
+
+test('music requirement blocks Instagram but allows native TikTok photo inbox handoff', function (Platform $platform, bool $blocked): void {
+    config()->set(['services.tiktok.inbox_enabled' => true, 'services.tiktok.direct_post_enabled' => false, 'services.tiktok.publishing_provider' => 'native']);
+    $post = Post::factory()->create();
+    $account = ConnectedAccount::factory()->create(['workspace_id' => $post->workspace_id, 'platform' => $platform, 'capabilities' => ['oauth_scopes' => ['video.upload']]]);
+    PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id, 'platform' => $platform, 'sections' => ['Photos'], 'content_override' => ['music' => ['track' => 'Chosen song']]]);
+    PostMedia::factory()->for($post)->count(4)->create();
+
+    $issues = app(PublishPrecheck::class)->blockingTargets($post->fresh(['targets.account', 'media']));
+    if ($blocked) {
+        expect($issues)->toHaveCount(1)->and($issues[0]['issues'])->toContain('music_requires_native_completion');
+    } else {
+        expect($issues)->toBe([]);
+    }
+})->with([[Platform::Instagram, true], [Platform::TikTok, false]]);
