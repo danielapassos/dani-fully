@@ -45,6 +45,51 @@ test('signed TikTok media streams the exact private object to a guest without a 
     Http::assertNothingSent();
 });
 
+test('signed TikTok photo delivery preserves original portrait bytes and the correct content type', function (string $mime, string $extension): void {
+    $media = PostMedia::factory()->create([
+        'disk' => 's3', 'path' => 'private/photos/portrait.'.$extension, 'mime' => $mime,
+        'size_bytes' => 10, 'width' => 1080, 'height' => 1350,
+    ]);
+    Storage::disk('s3')->put($media->path, '0123456789');
+    $url = app(PublicMediaUrl::class)->forTikTok($media);
+
+    $response = $this->get($url)->assertOk()
+        ->assertHeader('Content-Type', $mime)
+        ->assertHeader('Content-Disposition', 'inline; filename="photo.'.$extension.'"')
+        ->assertHeader('Content-Length', '10')
+        ->assertHeader('X-Content-Type-Options', 'nosniff')
+        ->assertHeaderMissing('Location')
+        ->assertHeaderMissing('Set-Cookie');
+
+    expect($response->streamedContent())->toBe('0123456789')
+        ->and($media->fresh()->width)->toBe(1080)
+        ->and($media->fresh()->height)->toBe(1350);
+    $this->head($url)->assertOk()->assertHeader('Content-Type', $mime)->assertContent('');
+    Http::assertNothingSent();
+})->with([['image/jpeg', 'jpg'], ['image/webp', 'webp']]);
+
+test('TikTok photo delivery rejects unsupported image types and oversized photos', function (array $attributes): void {
+    $media = PostMedia::factory()->create([
+        'disk' => 's3', 'mime' => 'image/jpeg', 'size_bytes' => 10, ...$attributes,
+    ]);
+    Storage::disk('s3')->put($media->path, '0123456789');
+
+    $this->get(app(PublicMediaUrl::class)->forTikTok($media))->assertNotFound()->assertHeaderMissing('Location');
+})->with([
+    'png' => [['mime' => 'image/png']],
+    'svg' => [['mime' => 'image/svg+xml']],
+    'oversized' => [['size_bytes' => 20_000_001]],
+]);
+
+test('signed photo URLs stop granting access after the original source changes', function (): void {
+    $media = PostMedia::factory()->create(['disk' => 's3', 'mime' => 'image/jpeg', 'size_bytes' => 10]);
+    Storage::disk('s3')->put($media->path, '0123456789');
+    $url = app(PublicMediaUrl::class)->forTikTok($media);
+    $media->forceFill(['path' => 'private/photos/replacement.jpg'])->save();
+
+    $this->get($url)->assertNotFound();
+});
+
 test('TikTok media URLs use the canonical origin for six hours without changing the shared URL generator', function (): void {
     $this->freezeTime();
     $media = tikTokDeliveryVideo();

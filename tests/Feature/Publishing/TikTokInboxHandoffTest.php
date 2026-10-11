@@ -5,6 +5,7 @@ use App\Enums\Platform;
 use App\Enums\PostTargetStatus;
 use App\Models\ConnectedAccount;
 use App\Models\Post;
+use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Publishing\TikTokInboxHandoff;
 use App\Support\PostView;
@@ -158,3 +159,35 @@ test('submission wording distinguishes inbox only mixed and other selected desti
     'mixed' => [true, true, 'TikTok inbox targets require manual completion'],
     'other' => [false, true, 'Publishing started.'],
 ]);
+
+test('photo inbox handoff includes exact caption and separate music reminder', function (): void {
+    $account = ConnectedAccount::factory()->create(['platform' => Platform::TikTok]);
+    $post = Post::factory()->create(['workspace_id' => $account->workspace_id]);
+    PostMedia::factory()->for($post)->count(4)->create();
+    $target = PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id, 'platform' => Platform::TikTok, 'sections' => ['Photo caption #tabis'], 'content_override' => ['music' => ['track' => 'Artist - Song']]]);
+    $handoff = app(TikTokInboxHandoff::class)->forTarget($target);
+    expect($handoff['media_type'])->toBe('photo')->and($handoff['caption_included'])->toBeTrue()
+        ->and($handoff['caption'])->toBe('Photo caption #tabis')->and($handoff['music_track'])->toBe('Artist - Song')
+        ->and($handoff['instructions'])->toContain('After TikTok confirms delivery', 'track has not been attached')
+        ->not->toContain('Replace any prefilled caption');
+    Http::assertNothingSent();
+});
+
+test('saved inbox media type and photo caption prevail over changed current draft', function (bool $photo): void {
+    $post = Post::factory()->create();
+    if ($photo) {
+        PostMedia::factory()->for($post)->video()->create();
+    } else {
+        PostMedia::factory()->for($post)->create();
+    }
+    $target = PostTarget::factory()->for($post)->create([
+        'platform' => Platform::TikTok, 'status' => PostTargetStatus::AwaitingAction,
+        'sections' => ['Changed current caption'],
+        'media_upload_state' => ['original-media' => ['remote_ref' => 'saved-upload', 'metadata' => ['publish_mode' => 'inbox', ...($photo ? ['media_type' => 'PHOTO', 'caption' => 'Actual uploaded caption'] : [])]]],
+    ]);
+    config()->set('services.tiktok.publishing_provider', 'metricool');
+    $handoff = app(TikTokInboxHandoff::class)->forTarget($target);
+    expect($handoff['media_type'])->toBe($photo ? 'photo' : 'video')
+        ->and($handoff['caption_included'])->toBe($photo)
+        ->and($handoff['caption'])->toBe($photo ? 'Actual uploaded caption' : 'Changed current caption');
+})->with([true, false]);

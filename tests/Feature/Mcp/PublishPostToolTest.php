@@ -113,3 +113,21 @@ test('publish_post_now rejects a failed post and points to guarded target retry'
         ->and($target->fresh()->status)->toBe(PostTargetStatus::Failed);
     Queue::assertNotPushed(PublishPostTarget::class);
 });
+
+test('MCP accepts photo inbox submission with caption and music reminder without claiming publication', function (): void {
+    Queue::fake();
+    Http::preventStrayRequests();
+    config()->set(['services.tiktok.publishing_provider' => 'native', 'services.tiktok.inbox_enabled' => true, 'services.tiktok.direct_post_enabled' => false]);
+    $user = User::factory()->create();
+    $workspace = Workspace::factory()->create();
+    bindTokenToWorkspace($user, $workspace);
+    $post = Post::factory()->for($workspace)->create();
+    $account = ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::TikTok, 'capabilities' => ['oauth_scopes' => ['video.upload']]]);
+    PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id, 'platform' => Platform::TikTok, 'sections' => ['Approved photo caption'], 'content_override' => ['music' => ['track' => 'Artist - Song']]]);
+    PostMedia::factory()->for($workspace)->count(4)->create(['post_id' => $post->id]);
+    ShoutrrrServer::actingAs($user)->tool(PublishPostTool::class, ['post_id' => $post->id, 'confirm' => true])
+        ->assertOk()->assertSee('Approved photo caption')->assertSee('Artist - Song')
+        ->assertSee('"media_type": "photo"')->assertSee('"caption_included": true');
+    expect($post->fresh()->published_at)->toBeNull();
+    Http::assertNothingSent();
+});

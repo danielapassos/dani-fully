@@ -13,6 +13,7 @@ use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Posts\DraftService;
 use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\InstagramTrialReel;
+use App\Services\Publishing\PhotoMusic;
 use App\Services\Publishing\YouTubePostOptions;
 use App\Support\PostView;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -63,6 +64,7 @@ class CreatePostTool extends WorkspaceTool
             ...YouTubePostOptions::draftRules(),
             ...InstagramReelCover::draftRules(),
             ...InstagramTrialReel::draftRules(),
+            ...PhotoMusic::draftRules(),
         ]);
 
         /** @var User $user */
@@ -96,7 +98,7 @@ class CreatePostTool extends WorkspaceTool
                 'kind' => $schema->string()->enum(['all', 'set', 'account'])->required(),
                 'id' => $schema->string()->description('Account set id (kind=set) or connected account id (kind=account).'),
             ])->description('Where to post.')->required(),
-            'targets' => $schema->array()->description('Per-account declarations: connected_account_id and content_override.tiktok or content_override.youtube. An Instagram Reel can set content_override.instagram.cover_media_id to a workspace image id; the cover stays separate from video media. To opt into a Trial Reel, set content_override.instagram.trial_params to {"graduation_strategy":"MANUAL"} or {"graduation_strategy":"SS_PERFORMANCE"}; MANUAL needs a later explicit share-to-everyone action, SS_PERFORMANCE allows automatic sharing based on performance. Omission creates a normal Reel. Trial settings require one Instagram Reel video. YouTube can set content_override.youtube.thumbnail_media_id to a workspace JPEG/PNG image id up to 8 MB; YouTube checks cover eligibility and the upload stays private if its cover fails. Supply the explicit publishing choices for each selected account; missing choices remain incomplete drafts.'),
+            'targets' => $schema->array()->description('For photo music, set content_override.music.track to a song/artist reminder (max 200 characters), or music:null to clear it. This does not attach music. Instagram music notes block automated publication so the post can be finished natively; native TikTok photo inbox uploads retain the note for manual song selection. Per-account declarations: connected_account_id and content_override.tiktok or content_override.youtube. An Instagram Reel can set content_override.instagram.cover_media_id to a workspace image id; the cover stays separate from video media. To opt into a Trial Reel, set content_override.instagram.trial_params to {"graduation_strategy":"MANUAL"} or {"graduation_strategy":"SS_PERFORMANCE"}; MANUAL needs a later explicit share-to-everyone action, SS_PERFORMANCE allows automatic sharing based on performance. Omission creates a normal Reel. Trial settings require one Instagram Reel video. YouTube can set content_override.youtube.thumbnail_media_id to a workspace JPEG/PNG image id up to 8 MB; YouTube checks cover eligibility and the upload stays private if its cover fails. Supply the explicit publishing choices for each selected account; missing choices remain incomplete drafts.'),
         ];
     }
 }

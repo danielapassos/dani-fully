@@ -161,3 +161,34 @@ test('retrying a non-failed target is rejected', function () {
     $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/targets/{$target->id}/retry")
         ->assertStatus(422);
 });
+
+test('API photo submission retains caption and music note and stays nonpublic', function (): void {
+    Queue::fake();
+    Http::preventStrayRequests();
+    config()->set(['services.tiktok.publishing_provider' => 'native', 'services.tiktok.inbox_enabled' => true, 'services.tiktok.direct_post_enabled' => false]);
+    [$user, $workspace, $token] = issuedKey();
+    $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
+    $account = ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::TikTok, 'capabilities' => ['oauth_scopes' => ['video.upload']]]);
+    PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id, 'platform' => Platform::TikTok, 'sections' => ['Approved photo caption'], 'content_override' => ['music' => ['track' => 'Artist - Song']]]);
+    PostMedia::factory()->for($workspace)->count(4)->create(['post_id' => $post->id]);
+    $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/publish")
+        ->assertStatus(202)->assertJsonPath('post.published_at', null)
+        ->assertJsonPath('post.targets.0.manual_completion.media_type', 'photo')
+        ->assertJsonPath('post.targets.0.manual_completion.caption_included', true)
+        ->assertJsonPath('post.targets.0.manual_completion.music_track', 'Artist - Song');
+    Http::assertNothingSent();
+});
+
+test('API refuses to publish Instagram music notes silently', function (): void {
+    Queue::fake();
+    Http::preventStrayRequests();
+    [$user, $workspace, $token] = issuedKey();
+    $post = Post::factory()->for($workspace)->create(['author_id' => $user->id]);
+    $account = ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::Instagram]);
+    PostTarget::factory()->for($post)->create(['connected_account_id' => $account->id, 'platform' => Platform::Instagram, 'content_override' => ['music' => ['track' => 'Required song']]]);
+    PostMedia::factory()->for($workspace)->count(4)->create(['post_id' => $post->id]);
+    $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/publish")->assertUnprocessable();
+    expect($post->fresh()->status->value)->toBe('draft');
+    Queue::assertNothingPushed();
+    Http::assertNothingSent();
+});

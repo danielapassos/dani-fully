@@ -17,7 +17,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Submit a post to its connected accounts now using their selected publishing settings. Requires confirm=true. TikTok inbox targets upload only the video for manual completion; the caption is not transferred and must be pasted in TikTok. Other targets may publish publicly. Submission is asynchronous: poll get_post for each target result and manual_completion instructions. Queued or awaiting_action is not proof of a live post.')]
+#[Description('Submit a post to its connected accounts now using their selected publishing settings. Requires confirm=true. TikTok inbox targets upload one video or up to 35 JPEG/WebP photos for manual completion. Photo captions are included; video captions must be pasted manually. Choose music in TikTok. Other targets may publish publicly. Submission is asynchronous: poll get_post for each target result and manual_completion instructions. Queued or awaiting_action is not proof of a live post.')]
 class PublishPostTool extends WorkspaceTool
 {
     public function handle(Request $request, PublishDispatcher $dispatcher, WorkspaceSubscriptionGate $subscriptions, TikTokInboxHandoff $handoff): Response
@@ -75,7 +75,7 @@ class PublishPostTool extends WorkspaceTool
     {
         return [
             'post_id' => $schema->string()->description('Id of the post to submit using its selected publishing settings.')->required(),
-            'confirm' => $schema->boolean()->description('Must be true to submit. TikTok inbox uploads still require manual posting and caption entry in TikTok.'),
+            'confirm' => $schema->boolean()->description('Must be true to submit. TikTok inbox uploads still require manual posting in TikTok. Photo captions are included; video captions require manual entry.'),
         ];
     }
 }

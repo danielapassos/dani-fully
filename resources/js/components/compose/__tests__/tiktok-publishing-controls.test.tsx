@@ -70,13 +70,17 @@ afterEach(() => {
     container = null;
 });
 
-function renderControls(selectedAccount: Account = account): HTMLDivElement {
+function renderControls(
+    selectedAccount: Account = account,
+    hasPhotos = false,
+): HTMLDivElement {
     function Harness() {
         const [options, setOptions] = useState<TikTokPostOptions>();
         return createElement(TikTokPublishingControls, {
             account: selectedAccount,
             options,
             durationSeconds: 12,
+            hasPhotos,
             onChange: setOptions,
             onCreatorInfo: () => undefined,
         });
@@ -100,6 +104,16 @@ function checkbox(view: HTMLElement, label: string): HTMLInputElement {
 }
 
 describe('TikTok publishing controls', () => {
+    it('rejects photos on the direct publishing route without requesting video controls', () => {
+        const view = renderControls(account, true);
+        expect(view.textContent).toContain(
+            'photo posts require native inbox delivery',
+        );
+        expect(view.querySelector('select')).toBeNull();
+        expect(view.querySelector('input[type="checkbox"]')).toBeNull();
+        expect(mocks.get).not.toHaveBeenCalled();
+    });
+
     it('shows the current creator and requires deliberate privacy and interaction choices', () => {
         const view = renderControls();
         expect(view.textContent).toContain('Current name · @current_name');

@@ -194,3 +194,15 @@ test('instagram is connectable from direct or linked page credentials', function
     config()->set('services.facebook.client_id', '');
     expect(Platform::Instagram->isConfigured())->toBeFalse();
 });
+
+test('TikTok supports photos without widening other single-post platform thread limits', function (): void {
+    expect(Platform::TikTok->maxMedia())->toBe(35)
+        ->and(Platform::TikTok->requiresVideo())->toBeFalse()
+        ->and(Platform::TikTok->allowedMime())->toBe(['image/jpeg', 'image/webp'])
+        ->and(Platform::TikTok->maxMediaBytes())->toBe(20_000_000)
+        ->and(Platform::YouTube->maxMedia())->toBe(1)
+        ->and(Platform::YouTube->requiresVideo())->toBeTrue();
+    foreach ([Platform::TikTok, Platform::YouTube, Platform::Instagram, Platform::Facebook, Platform::LinkedIn] as $platform) {
+        expect($platform->threadMax())->toBe(1);
+    }
+});

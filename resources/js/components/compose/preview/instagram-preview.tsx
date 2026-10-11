@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { InstagramTrialSummary } from '@/components/compose/instagram-trial-controls';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -50,19 +50,69 @@ function VerifiedBadge() {
 /** Horizontal drag past this many pixels flips to the next/previous slide. */
 const SWIPE_THRESHOLD = 40;
 
-/**
- * Instagram's carousel viewer: one square slide at a time, navigable by swipe (or
- * mouse drag), the dot indicators, and prev/next arrows that appear on hover — the
- * way the Instagram feed presents a multi-photo post. Navigation stops at the
- * first and last slide rather than wrapping. A single attachment renders as a
- * plain square with no carousel chrome.
- */
+function sourceAspectRatio(
+    width: number | null | undefined,
+    height: number | null | undefined,
+): number | null {
+    return typeof width === 'number' &&
+        typeof height === 'number' &&
+        Number.isFinite(width) &&
+        Number.isFinite(height) &&
+        width > 0 &&
+        height > 0
+        ? width / height
+        : null;
+}
+
+/** The first source sets a stable carousel frame; every slide remains uncropped. */
 function InstagramCarousel({ media }: { media: MediaView[] }) {
     const [index, setIndex] = useState(0);
+    const [loadedRatio, setLoadedRatio] = useState<{
+        url: string;
+        ratio: number;
+    } | null>(null);
     const dragStartX = useRef<number | null>(null);
     const safeIndex = clampIndex(index, media.length);
     const current = media[safeIndex];
+    const first = media[0];
+    const firstUrl = first?.url;
+    const firstKind = first?.kind;
+    const storedRatio = sourceAspectRatio(first?.width, first?.height);
+    const aspectRatio =
+        storedRatio ??
+        (loadedRatio?.url === firstUrl ? loadedRatio?.ratio : null) ??
+        1;
     const many = media.length > 1;
+
+    useEffect(() => {
+        if (!firstUrl || firstKind !== 'image' || storedRatio !== null) {
+            return;
+        }
+
+        // Loading the first image independently keeps the frame correct even
+        // when someone moves to the next slide before that image has loaded.
+        const image = new window.Image();
+        let active = true;
+        const readDimensions = () => {
+            const ratio = sourceAspectRatio(
+                image.naturalWidth,
+                image.naturalHeight,
+            );
+            if (active && ratio !== null) {
+                setLoadedRatio({ url: firstUrl, ratio });
+            }
+        };
+        image.onload = readDimensions;
+        image.src = firstUrl;
+        if (image.complete) {
+            readDimensions();
+        }
+
+        return () => {
+            active = false;
+            image.onload = null;
+        };
+    }, [firstUrl, firstKind, storedRatio]);
 
     const go = (delta: number) => {
         setIndex((previous) => clampIndex(previous + delta, media.length));
@@ -74,7 +124,10 @@ function InstagramCarousel({ media }: { media: MediaView[] }) {
 
     return (
         <div
-            className="group relative aspect-square w-full touch-pan-y overflow-hidden bg-neutral-950 select-none"
+            role="group"
+            aria-label="Instagram media preview"
+            className="group relative w-full touch-pan-y overflow-hidden bg-neutral-950 select-none"
+            style={{ aspectRatio }}
             onPointerDown={
                 many
                     ? (event) => {
@@ -107,6 +160,7 @@ function InstagramCarousel({ media }: { media: MediaView[] }) {
                     key={current.id}
                     src={current.url}
                     className="absolute inset-0 size-full"
+                    videoClassName="object-contain"
                 />
             ) : (
                 <img
@@ -114,7 +168,7 @@ function InstagramCarousel({ media }: { media: MediaView[] }) {
                     src={current.url}
                     alt={current.alt_text ?? ''}
                     draggable={false}
-                    className="absolute inset-0 size-full object-cover"
+                    className="absolute inset-0 size-full object-contain"
                 />
             )}
 
@@ -201,7 +255,15 @@ function InstagramFeedPost({ preview }: { preview: PlatformPreview }) {
             </header>
 
             {media.length > 0 ? (
-                <InstagramCarousel media={media} />
+                <>
+                    <InstagramCarousel
+                        key={`${media[0].id}:${media[0].url}`}
+                        media={media}
+                    />
+                    <p className="px-3 pt-2 text-[11px] text-muted-foreground">
+                        Source preview. Instagram may adjust framing.
+                    </p>
+                </>
             ) : (
                 <div className="grid aspect-square w-full place-items-center bg-muted/60 text-center">
                     <div className="space-y-1.5 px-6 text-muted-foreground">
@@ -250,8 +312,8 @@ function InstagramFeedPost({ preview }: { preview: PlatformPreview }) {
 
 /**
  * Renders the active account's Instagram surface. The format comes from the
- * composer (per account), so the preview mirrors exactly what will publish: a
- * feed post, a Reel, or a Story.
+ * composer (per account): a feed post, a Reel, or a Story. Feed media shows the
+ * full source image; Instagram controls the final published framing.
  */
 export function InstagramPreview({ preview }: { preview: PlatformPreview }) {
     return (

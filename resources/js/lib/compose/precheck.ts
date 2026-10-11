@@ -3,6 +3,7 @@ import { measure } from '@/lib/compose/section-split';
 import {
     TIKTOK_ISSUE_MESSAGES,
     tiktokIssues,
+    tiktokMediaIssues,
     type TikTokIssue,
 } from '@/lib/compose/tiktok';
 import { youtubeOptionsComplete } from '@/lib/compose/youtube';
@@ -12,6 +13,7 @@ import type {
     InstagramPostOptions,
     MediaView,
     MentionPlaceholder,
+    PhotoMusicOptions,
     PlatformLimits,
     PlatformName,
     PostFormat,
@@ -28,6 +30,8 @@ export type BlockReason =
     | 'youtube_thumbnail_requires_video'
     | 'instagram_cover_requires_reel'
     | 'instagram_trial_requires_reel'
+    | 'music_requires_photos'
+    | 'music_requires_native_completion'
     | 'empty'
     | 'publishing_unavailable'
     | 'media_required'
@@ -177,6 +181,7 @@ type PrecheckDestinationsInput = {
     instagramByAccount?: Record<string, InstagramPostOptions>;
     tiktokByAccount?: Record<string, TikTokPostOptions>;
     tiktokCreatorByAccount?: Record<string, TikTokCreatorInfo | null>;
+    musicByAccount?: Record<string, PhotoMusicOptions | null>;
 };
 
 /**
@@ -248,6 +253,7 @@ export function precheckDestinations({
     instagramByAccount,
     tiktokByAccount,
     tiktokCreatorByAccount,
+    musicByAccount,
 }: PrecheckDestinationsInput): AccountBlock[] {
     const blocks: AccountBlock[] = [];
     for (const account of accounts) {
@@ -277,6 +283,20 @@ export function precheckDestinations({
             format: formatByAccount[account.id] ?? 'feed',
             limits: platformLimits,
         });
+        if (musicByAccount?.[account.id]?.track.trim()) {
+            if (
+                targetMedia.length === 0 ||
+                targetMedia.some((item) => item.kind !== 'image') ||
+                !['instagram', 'tiktok'].includes(account.platform)
+            ) {
+                reasons.push('music_requires_photos');
+            } else if (
+                account.platform === 'instagram' ||
+                account.tiktok_inbox_enabled !== true
+            ) {
+                reasons.push('music_requires_native_completion');
+            }
+        }
         if (
             account.platform === 'instagram' &&
             instagramByAccount?.[account.id]?.cover_media_id &&
@@ -302,9 +322,18 @@ export function precheckDestinations({
         ) {
             reasons.push('youtube_options_required');
         }
+        if (account.platform === 'tiktok') {
+            for (const issue of tiktokMediaIssues(
+                targetMedia,
+                account.tiktok_inbox_enabled === true,
+            )) {
+                if (!reasons.includes(issue)) reasons.push(issue);
+            }
+        }
         if (
             account.platform === 'tiktok' &&
-            account.tiktok_direct_post_enabled
+            account.tiktok_direct_post_enabled &&
+            !targetMedia.some((item) => item.kind === 'image')
         ) {
             reasons.push(
                 ...tiktokIssues(
@@ -364,6 +393,8 @@ export function describeReason(
             return `${label} allows only ${max} post${max === 1 ? '' : 's'} — remove thread breaks`;
         }
         case 'too_many_media':
+            if (platform === 'tiktok')
+                return 'TikTok accepts one video or up to 35 photos per post';
             return `${label} allows only ${limits.maxMedia} media item${limits.maxMedia === 1 ? '' : 's'}`;
         case 'unplaced_media':
             return 'some attached media is not placed — remove it or add it to a thread section';
@@ -381,6 +412,12 @@ export function describeReason(
             return 'use exactly one video in an Instagram Reel or feed post, or remove its cover';
         case 'instagram_trial_requires_reel':
             return 'use exactly one video in an Instagram Reel or feed post, or turn off Trial Reel';
+        case 'music_requires_photos':
+            return 'Music notes are supported for Instagram and TikTok photo posts. Use photos or clear the music note.';
+        case 'music_requires_native_completion':
+            return platform === 'instagram'
+                ? 'This Instagram photo post needs native music selection. Keep it as a draft to finish in Instagram, or clear the music note to publish without music.'
+                : 'This photo music note requires TikTok inbox delivery. Enable inbox delivery or clear the music note.';
         case 'youtube_options_required':
             return 'Complete YouTube publishing settings and fix any title or description errors before publishing.';
         case 'youtube_thumbnail_unavailable':

@@ -2,7 +2,15 @@
 
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import {
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from 'vitest';
 
 import type { PlatformPreview } from '@/lib/compose/platform-preview';
 import type { MediaView, PostFormat } from '@/types/compose';
@@ -12,6 +20,17 @@ import { imageMedia, makePreview, videoMedia } from './fixtures';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+let measuringImages: HTMLImageElement[] = [];
+
+beforeEach(() => {
+    measuringImages = [];
+    vi.spyOn(window, 'Image').mockImplementation(function () {
+        const image = document.createElement('img');
+        measuringImages.push(image);
+
+        return image;
+    });
+});
 
 beforeAll(() => {
     globalThis.ResizeObserver = class {
@@ -40,7 +59,30 @@ afterEach(() => {
     container?.remove();
     root = null;
     container = null;
+    vi.restoreAllMocks();
 });
+
+function loadedImageDimensions(
+    image: HTMLImageElement,
+    width: number,
+    height: number,
+): void {
+    Object.defineProperties(image, {
+        naturalWidth: { value: width, configurable: true },
+        naturalHeight: { value: height, configurable: true },
+    });
+    act(() => image.dispatchEvent(new Event('load')));
+}
+
+function mediaFrame(el: HTMLElement): HTMLElement {
+    return el.querySelector<HTMLElement>(
+        '[aria-label="Instagram media preview"]',
+    )!;
+}
+
+function rerender(preview: PlatformPreview): void {
+    act(() => root?.render(createElement(InstagramPreview, { preview })));
+}
 
 function mount(preview: PlatformPreview): HTMLDivElement {
     container = document.createElement('div');
@@ -82,7 +124,7 @@ describe('InstagramPreview feed', () => {
 
     it('advances and rewinds the carousel with a swipe', () => {
         const el = renderFeed(3);
-        const carousel = el.querySelector<HTMLElement>('.aspect-square');
+        const carousel = mediaFrame(el);
         expect(carousel).not.toBeNull();
 
         swipe(carousel!, 220, 60);
@@ -94,7 +136,7 @@ describe('InstagramPreview feed', () => {
 
     it('ignores a tap that does not cross the swipe threshold', () => {
         const el = renderFeed(3);
-        const carousel = el.querySelector<HTMLElement>('.aspect-square');
+        const carousel = mediaFrame(el);
 
         swipe(carousel!, 120, 110);
         expect(el.textContent).toContain('1/3');
@@ -114,6 +156,140 @@ describe('InstagramPreview feed', () => {
 
         expect(el.querySelector('[aria-label="Next photo"]')).toBeNull();
         expect(el.textContent).not.toContain('1/1');
+    });
+
+    it.each([
+        ['portrait', 1080, 1350],
+        ['square', 1080, 1080],
+        ['landscape', 1200, 800],
+    ] as const)('keeps a %s source uncropped', (_label, width, height) => {
+        const media = { ...imageMedia('source'), width, height };
+        const el = renderFormat([media], 'feed');
+        const image = el.querySelector<HTMLImageElement>(
+            'img[src*="source.jpg"]',
+        );
+
+        expect(mediaFrame(el).style.aspectRatio).toBe(String(width / height));
+        expect(image?.classList.contains('object-contain')).toBe(true);
+        expect(image?.getAttribute('src')).toBe(media.url);
+        expect(measuringImages).toHaveLength(0);
+        expect(el.textContent).toContain(
+            'Source preview. Instagram may adjust framing.',
+        );
+    });
+
+    it('keeps the first slide ratio while containing differently sized slides', () => {
+        const el = renderFormat(
+            [
+                { ...imageMedia('portrait'), width: 1080, height: 1350 },
+                { ...imageMedia('landscape'), width: 1200, height: 800 },
+            ],
+            'feed',
+        );
+        act(() =>
+            el
+                .querySelector<HTMLButtonElement>('[aria-label="Next photo"]')
+                ?.click(),
+        );
+
+        expect(el.textContent).toContain('2/2');
+        expect(mediaFrame(el).style.aspectRatio).toBe('0.8');
+        expect(
+            el
+                .querySelector('img[src*="landscape.jpg"]')
+                ?.classList.contains('object-contain'),
+        ).toBe(true);
+    });
+
+    it('uses loaded source dimensions even after navigating past the first slide', () => {
+        const el = renderFeed(2);
+        expect(mediaFrame(el).style.aspectRatio).toBe('1');
+        act(() =>
+            el
+                .querySelector<HTMLButtonElement>('[aria-label="Next photo"]')
+                ?.click(),
+        );
+        loadedImageDimensions(measuringImages[0], 1080, 1350);
+
+        expect(el.textContent).toContain('2/2');
+        expect(mediaFrame(el).style.aspectRatio).toBe('0.8');
+        expect(el.querySelector('img[src*="m1.jpg"]')).not.toBeNull();
+    });
+
+    it('reads the intrinsic ratio when an older image is already cached', () => {
+        vi.mocked(window.Image).mockImplementationOnce(function () {
+            const image = document.createElement('img');
+            Object.defineProperties(image, {
+                complete: { value: true },
+                naturalWidth: { value: 1080 },
+                naturalHeight: { value: 1350 },
+            });
+
+            return image;
+        });
+
+        const el = renderFeed(1);
+
+        expect(mediaFrame(el).style.aspectRatio).toBe('0.8');
+    });
+
+    it('resets the frame and slide when the first image is reordered', () => {
+        const portrait = {
+            ...imageMedia('portrait'),
+            width: 1080,
+            height: 1350,
+        };
+        const square = { ...imageMedia('square'), width: 1080, height: 1080 };
+        const el = renderFormat([portrait, square], 'feed');
+        act(() =>
+            el
+                .querySelector<HTMLButtonElement>('[aria-label="Next photo"]')
+                ?.click(),
+        );
+
+        rerender(makePreview('instagram', [square, portrait]));
+
+        expect(mediaFrame(el).style.aspectRatio).toBe('1');
+        expect(el.textContent).toContain('1/2');
+        expect(el.querySelector('img[src*="square.jpg"]')).not.toBeNull();
+    });
+
+    it('ignores a stale load when the first source URL changes', () => {
+        const original = imageMedia('first');
+        const el = renderFormat([original], 'feed');
+        const originalProbe = measuringImages[0];
+        loadedImageDimensions(originalProbe, 1080, 1350);
+        expect(mediaFrame(el).style.aspectRatio).toBe('0.8');
+
+        rerender(
+            makePreview('instagram', [
+                {
+                    ...original,
+                    url: 'https://cdn.example.test/replacement.jpg',
+                },
+            ]),
+        );
+        loadedImageDimensions(originalProbe, 1200, 800);
+        expect(mediaFrame(el).style.aspectRatio).toBe('1');
+
+        loadedImageDimensions(measuringImages[1], 1200, 800);
+        expect(mediaFrame(el).style.aspectRatio).toBe('1.5');
+    });
+
+    it('keeps the full source visible when dimensions cannot be loaded', () => {
+        const el = renderFormat(
+            [{ ...imageMedia('unknown'), width: 1080, height: 0 }],
+            'feed',
+        );
+        loadedImageDimensions(measuringImages[0], 0, 0);
+        act(() => measuringImages[0].dispatchEvent(new Event('error')));
+
+        expect(mediaFrame(el).style.aspectRatio).toBe('1');
+        expect(
+            el
+                .querySelector('img[src*="unknown.jpg"]')
+                ?.classList.contains('object-contain'),
+        ).toBe(true);
     });
 
     it('prompts for media when the post has none', () => {

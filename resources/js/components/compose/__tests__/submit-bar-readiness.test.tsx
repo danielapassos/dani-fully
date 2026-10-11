@@ -161,16 +161,22 @@ it.each([
     ['now', 'Send to TikTok inbox'],
     ['queue', 'Queue inbox delivery'],
     ['pick', 'Schedule inbox delivery'],
-] as const)('describes %s as video-only inbox delivery', (mode, label) => {
-    renderBar([], mode, [inboxAccount]);
-    expect(button(label).disabled).toBe(false);
-    expect(container.textContent).toContain('TikTok receives the video only.');
-    expect(container.textContent).toContain('paste your saved caption');
-    expect(container.textContent).not.toContain('Publish now');
-    if (mode !== 'now') {
-        expect(container.textContent).toContain('schedules inbox delivery');
-    }
-});
+] as const)(
+    'describes %s as media inbox delivery with native completion',
+    (mode, label) => {
+        renderBar([], mode, [inboxAccount]);
+        expect(button(label).disabled).toBe(false);
+        expect(container.textContent).toContain(
+            'Photo uploads include your caption',
+        );
+        expect(container.textContent).toContain('pasting your saved caption');
+        expect(container.textContent).toContain('choose music');
+        expect(container.textContent).not.toContain('Publish now');
+        if (mode !== 'now') {
+            expect(container.textContent).toContain('schedules inbox delivery');
+        }
+    },
+);
 
 it('keeps the mixed submission and destination changes explicit', () => {
     const instagram: Account = {

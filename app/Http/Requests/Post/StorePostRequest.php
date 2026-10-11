@@ -10,6 +10,7 @@ use App\Models\Post;
 use App\Services\ConnectedAccounts\TikTok\TikTokPostOptions;
 use App\Services\Publishing\InstagramReelCover;
 use App\Services\Publishing\InstagramTrialReel;
+use App\Services\Publishing\PhotoMusic;
 use App\Services\Publishing\YouTubePostOptions;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -56,6 +57,7 @@ class StorePostRequest extends FormRequest
             ...YouTubePostOptions::draftRules(),
             ...InstagramReelCover::draftRules(),
             ...InstagramTrialReel::draftRules(),
+            ...PhotoMusic::draftRules(),
             'segment_breaks' => ['array'],
             'segment_breaks.*' => ['string'],
             'placements' => ['array'],

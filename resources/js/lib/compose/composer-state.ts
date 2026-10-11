@@ -17,6 +17,7 @@ import {
     type InstagramTrialParams,
     type MediaView,
     type MentionPlaceholder,
+    type PhotoMusicOptions,
     type Placement,
     type PostFormat,
     type PostView,
@@ -66,6 +67,7 @@ export type ComposerState = {
     instagramByAccount: Record<string, InstagramPostOptions>;
     tiktokByAccount: Record<string, TikTokPostOptions>;
     youtubeByAccount: Record<string, YouTubePostOptions>;
+    musicByAccount: Record<string, PhotoMusicOptions | null>;
     media: MediaView[];
     /** Ordered ids of tiptap segment breaks; segment refs are derived from these. */
     segmentBreaks: string[];
@@ -112,6 +114,7 @@ export type ComposerAction =
           options: YouTubePostOptions;
       }
     | { type: 'setYouTubeThumbnail'; accountId: string; mediaId: string | null }
+    | { type: 'setPhotoMusic'; accountId: string; track: string }
     | { type: 'disableAutoSplit'; accountIds: string[] }
     | { type: 'setOverrideSegments'; accountId: string; segments: string[] }
     | { type: 'discardOverride'; accountId: string }
@@ -193,6 +196,7 @@ export function initialComposerState(
         overrideByAccount: {},
         instagramByAccount: {},
         tiktokByAccount: {},
+        musicByAccount: {},
         youtubeByAccount: Object.fromEntries(
             accounts
                 .filter((account) => account.platform === 'youtube')
@@ -442,12 +446,18 @@ function hydrate(post: PostView): ComposerState {
     const instagramByAccount: Record<string, InstagramPostOptions> = {};
     const tiktokByAccount: Record<string, TikTokPostOptions> = {};
     const youtubeByAccount: Record<string, YouTubePostOptions> = {};
+    const musicByAccount: Record<string, PhotoMusicOptions | null> = {};
     const placementState = placementStateFromPost(post);
 
     for (const target of post.targets) {
         autoSplitByAccount[target.connected_account_id] = target.auto_split;
         formatByAccount[target.connected_account_id] = target.format;
         const overrideSegments = target.content_override?.segments;
+        if (target.content_override?.music?.track?.trim()) {
+            musicByAccount[target.connected_account_id] = {
+                track: target.content_override.music.track,
+            };
+        }
         if (target.content_override?.instagram) {
             instagramByAccount[target.connected_account_id] =
                 normalizeInstagramPostOptions(
@@ -498,6 +508,7 @@ function hydrate(post: PostView): ComposerState {
         instagramByAccount,
         tiktokByAccount,
         youtubeByAccount,
+        musicByAccount,
         media: post.media,
         segmentBreaks: post.segment_breaks ?? [],
         placements: placementState.placements,
@@ -695,6 +706,24 @@ export function composerReducer(
                               }
                             : {}),
                     },
+                },
+                saveState: 'dirty',
+            };
+
+        case 'setPhotoMusic':
+            if (
+                (state.musicByAccount[action.accountId]?.track ?? '') ===
+                action.track
+            ) {
+                return state;
+            }
+            return {
+                ...state,
+                musicByAccount: {
+                    ...state.musicByAccount,
+                    [action.accountId]: action.track
+                        ? { track: action.track }
+                        : null,
                 },
                 saveState: 'dirty',
             };
@@ -1050,6 +1079,7 @@ export type PutTarget = {
         instagram?: InstagramPostOptions;
         tiktok?: TikTokPostOptions;
         youtube?: YouTubePostOptions;
+        music?: PhotoMusicOptions | null;
     } | null;
     segment_breaks?: string[];
     placements?: Placement[];
@@ -1128,6 +1158,13 @@ export function buildPutBody(
             content_override = {
                 ...content_override,
                 tiktok: state.tiktokByAccount[accountId],
+            };
+        }
+        if (accountId in state.musicByAccount) {
+            const track = state.musicByAccount[accountId]?.track.trim();
+            content_override = {
+                ...content_override,
+                music: track ? { track } : null,
             };
         }
 
@@ -1234,6 +1271,29 @@ export function contentMatchesServer(
                 ? []
                 : post.targets.map((target) => target.connected_account_id),
     );
+    const serverMusic = Object.fromEntries(
+        post.targets.flatMap<[string, string]>((target) => {
+            const track = target.content_override?.music?.track?.trim();
+            return track ? [[target.connected_account_id, track]] : [];
+        }),
+    );
+    const localMusicKeys = Object.keys(state.musicByAccount)
+        .filter(
+            (id) =>
+                comparedAccountIds.has(id) &&
+                state.musicByAccount[id]?.track.trim(),
+        )
+        .sort();
+    if (
+        JSON.stringify(localMusicKeys) !==
+            JSON.stringify(Object.keys(serverMusic).sort()) ||
+        localMusicKeys.some(
+            (key) =>
+                state.musicByAccount[key]?.track.trim() !== serverMusic[key],
+        )
+    ) {
+        return false;
+    }
     const serverInstagram = Object.fromEntries(
         post.targets.flatMap<[string, InstagramPostOptions]>((target) => {
             const options = target.content_override?.instagram;

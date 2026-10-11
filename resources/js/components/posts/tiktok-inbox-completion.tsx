@@ -14,6 +14,8 @@ export function TikTokInboxCompletion({
     const captionRef = useRef<HTMLTextAreaElement>(null);
     const [copiedText, copy] = useClipboard();
     const [copyFailed, setCopyFailed] = useState(false);
+    const includesPhotoCaption =
+        handoff.media_type === 'photo' && handoff.caption_included === true;
 
     async function copyCaption() {
         const copied = await copy(handoff.caption);
@@ -30,9 +32,24 @@ export function TikTokInboxCompletion({
             <p className="text-sm leading-6 text-muted-foreground">
                 {handoff.instructions}
             </p>
+            {handoff.media_type === 'photo' && handoff.music_track && (
+                <p className="text-sm leading-6">
+                    <span className="font-medium">
+                        Music to add in TikTok:{' '}
+                    </span>
+                    {handoff.music_track}
+                    <span className="block text-xs text-muted-foreground">
+                        Choose this song in TikTok before posting, if available
+                        for your account. It has not been selected
+                        automatically.
+                    </span>
+                </p>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <label htmlFor={captionId} className="text-sm font-medium">
-                    Caption to paste in TikTok
+                    {includesPhotoCaption
+                        ? 'Photo caption to review in TikTok'
+                        : 'Caption to paste in TikTok'}
                 </label>
                 <Button
                     type="button"
@@ -56,8 +73,12 @@ export function TikTokInboxCompletion({
                     ? 'Could not copy automatically. The caption is selected so you can copy it manually.'
                     : copiedText === handoff.caption &&
                         handoff.caption.length > 0
-                      ? 'Caption copied. Paste it over any text TikTok prefilled, then confirm the mentions.'
-                      : 'The caption is saved in Shoutrrr. TikTok does not receive it with the video.'}
+                      ? includesPhotoCaption
+                          ? 'Caption copied. Use it if you need to restore the approved caption in TikTok.'
+                          : 'Caption copied. Paste it over any text TikTok prefilled, then confirm the mentions.'
+                      : includesPhotoCaption
+                        ? 'The photo upload includes this caption. Review it and choose music in TikTok before posting.'
+                        : 'The caption is saved in Shoutrrr. TikTok does not receive it with the video.'}
             </p>
         </section>
     );

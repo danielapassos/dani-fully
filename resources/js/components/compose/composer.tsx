@@ -76,6 +76,7 @@ import EditorBody, { type EditorBodyHandle } from './editor-body';
 import { ImageEditor } from './image-editor';
 import { InstagramCoverPicker } from './instagram-cover-picker';
 import { InstagramTrialControls } from './instagram-trial-controls';
+import { PhotoMusicControls } from './photo-music-controls';
 import { PlatformPreviewPanel } from './platform-preview-panel';
 import PlatformTabs from './platform-tabs';
 import SaveIndicator from './save-indicator';
@@ -828,6 +829,7 @@ export default function Composer({
                 tiktokByAccount: state.tiktokByAccount,
                 youtubeByAccount: state.youtubeByAccount,
                 instagramByAccount: state.instagramByAccount,
+                musicByAccount: state.musicByAccount,
                 tiktokCreatorByAccount,
             })[0]?.reasons ?? [];
         if (reasons.length > 0) {
@@ -1061,6 +1063,7 @@ export default function Composer({
         tiktokByAccount: state.tiktokByAccount,
         youtubeByAccount: state.youtubeByAccount,
         instagramByAccount: state.instagramByAccount,
+        musicByAccount: state.musicByAccount,
         tiktokCreatorByAccount,
     });
     const notices = precheckNotices({
@@ -1515,6 +1518,11 @@ export default function Composer({
                                     account={account}
                                     options={state.tiktokByAccount[account.id]}
                                     durationSeconds={video?.duration_seconds}
+                                    hasPhotos={state.media.some(
+                                        (item) =>
+                                            item.kind === 'image' &&
+                                            mediaIds.has(item.id),
+                                    )}
                                     onChange={(options) =>
                                         dispatch({
                                             type: 'setTikTokOptions',
@@ -1529,6 +1537,46 @@ export default function Composer({
                                                 [account.id]: creator,
                                             }),
                                         )
+                                    }
+                                />
+                            );
+                        })}
+
+                {!readOnly &&
+                    tabAccounts
+                        .filter((account) =>
+                            ['instagram', 'tiktok'].includes(account.platform),
+                        )
+                        .map((account) => {
+                            const placements =
+                                state.placementsByAccount[account.id] ??
+                                state.placements;
+                            const mediaIds = new Set(
+                                Object.values(placements).flat(),
+                            );
+                            const media = state.media.filter((item) =>
+                                mediaIds.has(item.id),
+                            );
+                            const track =
+                                state.musicByAccount[account.id]?.track ?? '';
+                            // Keep a saved note editable after its media changes so it can be cleared.
+                            if (
+                                !track &&
+                                (media.length === 0 ||
+                                    media.some((item) => item.kind !== 'image'))
+                            )
+                                return null;
+                            return (
+                                <PhotoMusicControls
+                                    key={account.id}
+                                    account={account}
+                                    track={track}
+                                    onChange={(value) =>
+                                        dispatch({
+                                            type: 'setPhotoMusic',
+                                            accountId: account.id,
+                                            track: value,
+                                        })
                                     }
                                 />
                             );

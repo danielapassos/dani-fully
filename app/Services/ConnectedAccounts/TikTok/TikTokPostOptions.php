@@ -81,6 +81,10 @@ class TikTokPostOptions
     public function describe(string $issue): string
     {
         return match ($issue) {
+            'tiktok_photos_require_inbox' => 'TikTok photos require the native inbox delivery route. Finish editing and publish in TikTok.',
+            'tiktok_photo_type_invalid' => 'TikTok photos must be JPEG or WebP images.',
+            'tiktok_photo_too_large' => 'Each TikTok photo must be a nonempty file no larger than 20 MB.',
+            'tiktok_photo_caption_too_long' => 'The TikTok photo caption exceeds 4,000 UTF-16 characters.',
             'tiktok_privacy_required' => 'Choose a privacy setting currently available for this TikTok account.',
             'tiktok_options_required' => 'Review the TikTok publishing controls before posting.',
             'tiktok_music_consent_required' => 'Agree to TikTok’s Music Usage Confirmation before posting.',

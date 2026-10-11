@@ -150,7 +150,7 @@ class PostMedia extends Model
      * editors fetch instead of the display URLs, whose storage origin may omit
      * CORS headers. `source_edit_url` is null when no pre-edit source is kept.
      *
-     * @return array{id: string, url: string, mime: string, kind: string, duration_seconds: int|null, alt_text: string|null, position: int, edit_settings: array<string, mixed>|null, source_url: string|null, edit_url: string, source_edit_url: string|null}
+     * @return array{id: string, url: string, mime: string, kind: string, width: int|null, height: int|null, size_bytes: int, duration_seconds: int|null, alt_text: string|null, position: int, edit_settings: array<string, mixed>|null, source_url: string|null, edit_url: string, source_edit_url: string|null}
      */
     public function toView(): array
     {
@@ -159,6 +159,9 @@ class PostMedia extends Model
             'url' => $this->url(),
             'mime' => $this->mime,
             'kind' => $this->kind,
+            'width' => $this->width,
+            'height' => $this->height,
+            'size_bytes' => $this->size_bytes,
             'duration_seconds' => $this->duration_seconds,
             'alt_text' => $this->alt_text,
             'position' => $this->position,
