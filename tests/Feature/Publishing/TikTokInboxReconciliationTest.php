@@ -1,9 +1,11 @@
 <?php
 
+use App\Enums\ErrorKind;
 use App\Enums\Platform;
 use App\Enums\PostStatus;
 use App\Enums\PostTargetStatus;
 use App\Events\PostTargetPublished;
+use App\Jobs\PublishPostTarget;
 use App\Jobs\ReconcileTikTokInbox;
 use App\Models\ConnectedAccount;
 use App\Models\ConnectedAccountSecret;
@@ -11,7 +13,9 @@ use App\Models\Post;
 use App\Models\PostTarget;
 use App\Models\Workspace;
 use App\Services\Publishing\TikTokInboxReconciliation;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
@@ -47,6 +51,263 @@ function fakeInboxPublicPosts(array $ids = ['7688668628333643789']): void
         'open.tiktokapis.com/v2/video/query/*' => Http::response(['error' => ['code' => 'ok'], 'data' => ['videos' => array_map(fn (string $id): array => ['id' => $id, 'share_url' => "https://www.tiktok.com/@mommygorl/video/{$id}", 'video_description' => 'Changed caption', 'create_time' => now()->subHour()->timestamp], $ids)]]),
     ]);
 }
+
+function failedInboxTrackingTarget(ErrorKind $kind = ErrorKind::Network, array $attributes = []): PostTarget
+{
+    $target = inboxTrackingTarget(attributes: [
+        'status' => PostTargetStatus::Failed,
+        'error_kind' => $kind,
+        'error_message' => 'The saved upload status could not be checked.',
+        'attempts' => 5,
+        'next_attempt_at' => now()->subMinute(),
+        'media_upload_state' => [
+            '_tiktok_provider' => 'native',
+            '_polls' => 7,
+            'media-id' => ['remote_ref' => 'v_inbox_file~v2.123', 'metadata' => [
+                'publish_mode' => 'inbox',
+                'source' => 'FILE_UPLOAD',
+                'upload_complete' => true,
+                'uploaded_bytes' => 1024,
+                'provider_status' => 'PROCESSING_UPLOAD',
+            ]],
+        ],
+        ...$attributes,
+    ]);
+    $target->post->update(['status' => PostStatus::Failed]);
+
+    return $target;
+}
+
+test('a failed retained inbox receipt recovers late delivery without another upload', function (ErrorKind $failure): void {
+    $target = failedInboxTrackingTarget($failure);
+    $saved = $target->media_upload_state;
+    Queue::fake();
+    Event::fake([PostTargetPublished::class]);
+    Http::fake(['open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response([
+        'error' => ['code' => 'ok'], 'data' => ['status' => 'SEND_TO_USER_INBOX'],
+    ])]);
+
+    $service = app(TikTokInboxReconciliation::class);
+    expect($service->view($target)['can_refresh'])->toBeTrue()
+        ->and($service->view($target)['message'])->toContain('accepted this upload', 'delivery is unconfirmed');
+    $service->reconcile($target, manual: true);
+    $target->refresh();
+
+    expect($target->status)->toBe(PostTargetStatus::AwaitingAction)
+        ->and($target->publicationStatus())->toBe(PostTargetStatus::AwaitingAction)
+        ->and($target->post->fresh()->status)->toBe(PostStatus::AwaitingAction)
+        ->and($target->attempts)->toBe(5)
+        ->and($target->error_kind)->toBeNull()
+        ->and($target->error_message)->toBeNull()
+        ->and($target->next_attempt_at)->toBeNull()
+        ->and($target->remote_id)->toBeNull()
+        ->and($target->posted_at)->toBeNull()
+        ->and($target->post->fresh()->published_at)->toBeNull()
+        ->and($target->media_upload_state['_polls'])->toBe($saved['_polls'])
+        ->and($target->media_upload_state['media-id'])->toBe([
+            ...$saved['media-id'],
+            'metadata' => [...$saved['media-id']['metadata'], 'provider_status' => 'SEND_TO_USER_INBOX'],
+        ])
+        ->and($target->canRetryManually())->toBeFalse();
+    Http::assertSentCount(1);
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'POST'
+        && $request->url() === 'https://open.tiktokapis.com/v2/post/publish/status/fetch/'
+        && $request['publish_id'] === 'v_inbox_file~v2.123');
+    Queue::assertNotPushed(PublishPostTarget::class);
+    Event::assertNotDispatched(PostTargetPublished::class);
+})->with(['exhausted network retries' => ErrorKind::Network, 'dead worker' => ErrorKind::Unknown]);
+
+test('a failed retained inbox receipt recovers verified public completion read only', function (): void {
+    $target = failedInboxTrackingTarget(ErrorKind::Unknown);
+    Queue::fake();
+    Event::fake([PostTargetPublished::class]);
+    fakeInboxPublicPosts();
+
+    app(TikTokInboxReconciliation::class)->reconcile($target, manual: true);
+    $target->refresh();
+
+    expect($target->status)->toBe(PostTargetStatus::Published)
+        ->and($target->post->fresh()->status)->toBe(PostStatus::Published)
+        ->and($target->remote_id)->toBe('7688668628333643789')
+        ->and($target->media_upload_state['media-id']['remote_ref'])->toBe('v_inbox_file~v2.123')
+        ->and($target->attempts)->toBe(5)
+        ->and($target->error_kind)->toBeNull()
+        ->and($target->error_message)->toBeNull()
+        ->and($target->next_attempt_at)->toBeNull();
+    Http::assertSentCount(2);
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'PUT' || str_contains($request->url(), '/init/'));
+    Queue::assertNotPushed(PublishPostTarget::class);
+    Event::assertNotDispatched(PostTargetPublished::class);
+});
+
+test('failed receipt completion without public proof remains completed rather than published', function (string $proof): void {
+    $target = failedInboxTrackingTarget();
+    $ids = match ($proof) {
+        'no public ids' => [],
+        'invalid public id' => ['not-a-public-id'],
+        default => ['7688668628333643789'],
+    };
+    Http::fake([
+        'open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'PUBLISH_COMPLETE', 'publicaly_available_post_id' => $ids]]),
+        'open.tiktokapis.com/v2/video/query/*' => match ($proof) {
+            'ownership query unavailable' => Http::response(['error' => ['code' => 'internal_error']], 503),
+            'ownership query timeout' => fn () => throw new ConnectionException('ownership query unavailable'),
+            default => Http::response(['error' => ['code' => 'ok'], 'data' => ['videos' => []]]),
+        },
+    ]);
+
+    app(TikTokInboxReconciliation::class)->reconcile($target, manual: true);
+    $target->refresh();
+
+    expect($target->status)->toBe(PostTargetStatus::Completed)
+        ->and($target->publicationStatus())->toBe(PostTargetStatus::Completed)
+        ->and($target->post->fresh()->status)->toBe(PostStatus::Completed)
+        ->and($target->remote_id)->toBeNull()
+        ->and($target->remote_ids)->toBeEmpty()
+        ->and($target->posted_at)->toBeNull()
+        ->and($target->post->fresh()->published_at)->toBeNull()
+        ->and($target->attempts)->toBe(5)
+        ->and($target->error_kind)->toBeNull()
+        ->and($target->error_message)->toBeNull()
+        ->and($target->next_attempt_at)->toBeNull()
+        ->and($target->media_upload_state['media-id']['remote_ref'])->toBe('v_inbox_file~v2.123');
+    if ($proof !== 'ownership query timeout') {
+        Http::assertSentCount(in_array($proof, ['no public ids', 'invalid public id'], true) ? 1 : 2);
+    }
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'PUT' || str_contains($request->url(), '/init/'));
+})->with(['no public ids', 'invalid public id', 'ownership query unavailable', 'ownership query timeout', 'ownership unverified']);
+
+test('failed receipts without an unambiguous native inbox reference do not call TikTok', function (array $state): void {
+    $target = failedInboxTrackingTarget(attributes: ['media_upload_state' => $state]);
+    app(TikTokInboxReconciliation::class)->reconcile($target, manual: true);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->fresh()->media_upload_state)->toBe($state);
+    Http::assertNothingSent();
+})->with([
+    'no receipt' => [[]],
+    'lost init without id' => [['media-id' => ['metadata' => ['publish_mode' => 'inbox', 'init_outcome_unknown' => true]]]],
+    'direct post' => [['media-id' => ['remote_ref' => 'v_pub_file~v2.123', 'metadata' => ['publish_mode' => 'direct']]]],
+    'metricool' => [['_tiktok_provider' => 'metricool', 'media-id' => ['remote_ref' => 'v_inbox_file~v2.123', 'metadata' => ['publish_mode' => 'inbox']]]],
+    'accounts API' => [['_tiktok_provider' => 'accounts_api', '_tiktok_accounts' => ['publish_id' => 'share-id']]],
+    'ambiguous ids' => [['one' => ['remote_ref' => 'v_inbox_file~v2.123'], 'two' => ['remote_ref' => 'v_inbox_file~v2.124']]],
+]);
+
+test('failed receipt recovery respects the saved account and deletion boundaries', function (string $change): void {
+    $target = failedInboxTrackingTarget();
+    match ($change) {
+        'disabled account' => $target->account->update(['disabled_at' => now()]),
+        'wrong workspace' => $target->post->update(['workspace_id' => Workspace::factory()->create()->id]),
+        'wrong platform' => $target->account->update(['platform' => Platform::Instagram]),
+        'deleted post' => $target->post->update(['status' => PostStatus::Deleted]),
+        'deleted target' => $target->update(['status' => PostTargetStatus::Deleted]),
+    };
+    $saved = $target->fresh()->media_upload_state;
+    app(TikTokInboxReconciliation::class)->reconcile($target, manual: true);
+    expect($target->fresh()->status)->toBe($change === 'deleted target' ? PostTargetStatus::Deleted : PostTargetStatus::Failed)
+        ->and($target->fresh()->media_upload_state)->toBe($saved);
+    Http::assertNothingSent();
+})->with(['disabled account', 'wrong workspace', 'wrong platform', 'deleted post', 'deleted target']);
+
+test('a failed receipt remains retained when its read only status check cannot complete', function (): void {
+    $target = failedInboxTrackingTarget();
+    $saved = $target->media_upload_state;
+    Http::fake(['open.tiktokapis.com/v2/post/publish/status/fetch/' => fn () => throw new ConnectionException('status unavailable')]);
+    app(TikTokInboxReconciliation::class)->reconcile($target, manual: true);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->fresh()->attempts)->toBe(5)
+        ->and($target->fresh()->media_upload_state['media-id'])->toBe($saved['media-id'])
+        ->and($target->fresh()->media_upload_state['_tiktok_reconciliation']['error'])->not->toBeNull();
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'PUT' || str_contains($request->url(), '/init/'));
+});
+
+test('late provider responses cannot downgrade confirmed completion or its visible receipt', function (PostTargetStatus $terminal, string $oldStatus): void {
+    $published = $terminal === PostTargetStatus::Published;
+    $message = $published ? 'TikTok public publication verified from the original inbox upload.' : 'TikTok completed the original submission.';
+    $publicPosts = $published ? [['id' => '7688668628333643789', 'url' => 'https://www.tiktok.com/@mommygorl/video/7688668628333643789', 'caption' => 'Original caption', 'created_at' => now()->subHour()->timestamp]] : [];
+    $target = inboxTrackingTarget(attributes: [
+        'status' => $terminal,
+        'remote_id' => $published ? '7688668628333643789' : null,
+        'remote_ids' => $published ? ['7688668628333643789'] : [],
+        'media_upload_state' => [
+            'media-id' => ['remote_ref' => 'v_inbox_file~v2.123', 'metadata' => ['publish_mode' => 'inbox', 'provider_status' => 'PUBLISH_COMPLETE']],
+            'publication' => ['status' => $terminal->value, 'message' => $message],
+            '_tiktok_reconciliation' => [
+                'provider_status' => 'PUBLISH_COMPLETE',
+                'message' => $message,
+                'error' => null,
+                'public_posts' => $publicPosts,
+            ],
+        ],
+    ]);
+    $target->post->update(['status' => PostStatus::from($terminal->value)]);
+    Http::fake(['open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => $oldStatus, 'fail_reason' => 'internal']])]);
+    $service = app(TikTokInboxReconciliation::class);
+    $service->reconcile($target, manual: true);
+    $target->refresh();
+
+    expect($target->status)->toBe($terminal)
+        ->and($target->publicationStatus())->toBe($terminal)
+        ->and($target->post->fresh()->status)->toBe(PostStatus::from($terminal->value))
+        ->and($target->media_upload_state['media-id']['metadata']['provider_status'])->toBe('PUBLISH_COMPLETE')
+        ->and($target->media_upload_state['_tiktok_reconciliation']['provider_status'])->toBe('PUBLISH_COMPLETE')
+        ->and($service->view($target)['message'])->toBe($message)
+        ->and($service->view($target)['error'])->toBeNull()
+        ->and($service->view($target)['public_posts'])->toBe($publicPosts);
+    Http::assertSentCount(1);
+})->with([PostTargetStatus::Completed, PostTargetStatus::Published])->with(['SEND_TO_USER_INBOX', 'PROCESSING_UPLOAD', 'FAILED']);
+
+test('failed video receipt recovery ignores a response after the creator or receipt changes', function (bool $changeCreator): void {
+    $target = failedInboxTrackingTarget();
+    $expectedState = $target->media_upload_state;
+    Http::fake(['open.tiktokapis.com/v2/post/publish/status/fetch/' => function () use ($target, $changeCreator, &$expectedState) {
+        if ($changeCreator) {
+            $target->account->update(['remote_account_id' => 'replacement-creator']);
+        } else {
+            $expectedState['media-id']['remote_ref'] = 'v_inbox_file~v2.replacement';
+            $target->update(['media_upload_state' => $expectedState]);
+        }
+
+        return Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'SEND_TO_USER_INBOX']]);
+    }]);
+    app(TikTokInboxReconciliation::class)->reconcile($target, manual: true);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Failed)
+        ->and($target->fresh()->attempts)->toBe(5)
+        ->and($target->fresh()->media_upload_state)->toBe($expectedState);
+    Http::assertSentCount(1);
+})->with(['creator changed' => true, 'receipt replaced' => false]);
+
+test('late failed receipt recovery cannot overwrite a concurrently claimed retry', function (PostTargetStatus $status): void {
+    $target = failedInboxTrackingTarget();
+    $saved = $target->media_upload_state;
+    Http::fake(['open.tiktokapis.com/v2/post/publish/status/fetch/' => function () use ($target, $status) {
+        $target->update(['status' => $status, 'attempts' => 6]);
+
+        return Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'SEND_TO_USER_INBOX']]);
+    }]);
+    app(TikTokInboxReconciliation::class)->reconcile($target, manual: true);
+    expect($target->fresh()->status)->toBe($status)
+        ->and($target->fresh()->attempts)->toBe(6)
+        ->and($target->fresh()->media_upload_state)->toBe($saved);
+    Http::assertSentCount(1);
+})->with([PostTargetStatus::Pending, PostTargetStatus::Publishing]);
+
+test('inbox reconciliation schedules failed retained receipts only within its bounded lookback', function (): void {
+    $this->freezeSecond();
+    $recentFailure = failedInboxTrackingTarget(attributes: ['created_at' => now()->subDays(29)]);
+    failedInboxTrackingTarget(attributes: ['created_at' => now()->subDays(31), 'updated_at' => now()]);
+    failedInboxTrackingTarget(attributes: ['media_upload_state' => []]);
+    inboxTrackingTarget(attributes: ['created_at' => now()->subDays(31)]);
+    $recentDelivery = inboxTrackingTarget(attributes: ['created_at' => now()->subDays(29)]);
+    Queue::fake();
+
+    $this->artisan('tiktok:reconcile-inbox', ['--days' => 30, '--limit' => 100])->assertSuccessful();
+
+    Queue::assertPushed(ReconcileTikTokInbox::class, 2);
+    Queue::assertPushed(ReconcileTikTokInbox::class, fn (ReconcileTikTokInbox $job): bool => $job->target->is($recentFailure));
+    Queue::assertPushed(ReconcileTikTokInbox::class, fn (ReconcileTikTokInbox $job): bool => $job->target->is($recentDelivery));
+    Queue::assertNotPushed(PublishPostTarget::class);
+    Http::assertNothingSent();
+});
 
 test('reconciles exact inbox operation to every owned public post without uploading or triggering cross posting', function (): void {
     Event::fake([PostTargetPublished::class]);
@@ -172,7 +433,7 @@ test('does not infer ownership from captions or partial query results', function
         '*/video/query/*' => Http::response(['error' => ['code' => 'ok'], 'data' => ['videos' => $videos]]),
     ]);
     app(TikTokInboxReconciliation::class)->reconcile($target);
-    expect($target->fresh()->publicationStatus())->toBe(PostTargetStatus::AwaitingAction)
+    expect($target->fresh()->publicationStatus())->toBe(PostTargetStatus::Completed)
         ->and($target->fresh()->remote_id)->toBeNull()
         ->and($target->post->fresh()->published_at)->toBeNull()
         ->and(app(TikTokInboxReconciliation::class)->view($target->fresh())['error'])->not->toBeNull();
@@ -292,7 +553,7 @@ test('rejects malformed public identifiers before calling video query', function
     $target = inboxTrackingTarget();
     Http::fake(['*' => Http::response(['error' => ['code' => 'ok'], 'data' => ['status' => 'PUBLISH_COMPLETE', 'publicaly_available_post_id' => $ids]])]);
     app(TikTokInboxReconciliation::class)->reconcile($target);
-    expect($target->fresh()->status)->toBe(PostTargetStatus::AwaitingAction)
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Completed)
         ->and($target->fresh()->remote_id)->toBeNull();
     Http::assertSentCount(1);
 })->with([[['not-an-id']], [[true]], [[['id' => '123']]]]);
@@ -329,7 +590,7 @@ test('photo completion requires exact original IDs and authenticated ownership e
         'open.tiktokapis.com/v2/video/query/*' => Http::response(['error' => ['code' => 'ok'], 'data' => ['videos' => $owned ? [['id' => $id, 'share_url' => "https://www.tiktok.com/@creator/photo/{$id}", 'video_description' => 'Edited in TikTok']] : []]]),
     ]);
     app(TikTokInboxReconciliation::class)->reconcile($target);
-    expect($target->fresh()->publicationStatus())->toBe($owned ? PostTargetStatus::Published : PostTargetStatus::AwaitingAction)
+    expect($target->fresh()->publicationStatus())->toBe($owned ? PostTargetStatus::Published : PostTargetStatus::Completed)
         ->and($target->fresh()->remote_id)->toBe($owned ? $id : null)
         ->and($target->fresh()->media_upload_state['photo-id']['remote_ref'])->toBe('p_pub_url~v2.photo');
     Http::assertSentCount(2);

@@ -36,7 +36,7 @@ class TikTokInboxReconciliation
     public function eligible(PostTarget $target): bool
     {
         return $this->reference($target) !== null
-            && in_array($target->publicationStatus(), [PostTargetStatus::AwaitingAction, PostTargetStatus::Completed, PostTargetStatus::Published], true);
+            && in_array($target->publicationStatus(), [PostTargetStatus::Failed, PostTargetStatus::AwaitingAction, PostTargetStatus::Completed, PostTargetStatus::Published], true);
     }
 
     public function due(PostTarget $target, bool $manual = false): bool
@@ -59,7 +59,9 @@ class TikTokInboxReconciliation
         return [
             'can_refresh' => $this->eligible($target) && $target->account !== null && ! $target->account->isDisabled(),
             'status' => $target->publicationStatus()->value,
-            'message' => $record['error'] ?? $record['message'] ?? $target->publicationMessage() ?? 'Check TikTok for public posts created from this upload.',
+            'message' => $record['error'] ?? $record['message'] ?? $target->publicationMessage() ?? ($target->status === PostTargetStatus::Failed
+                ? 'TikTok accepted this upload, but delivery is unconfirmed. Check the original upload status before sending another copy.'
+                : 'Check TikTok for public posts created from this upload.'),
             'checked_at' => $record['checked_at'] ?? null,
             'verified_at' => $record['verified_at'] ?? null,
             'error' => $record['error'] ?? null,
@@ -118,8 +120,8 @@ class TikTokInboxReconciliation
                 }
                 $record['provider_status'] = $status;
                 $record['message'] = match ($status) {
-                    'SEND_TO_USER_INBOX' => 'TikTok reports inbox delivery; a current public post has not been confirmed.',
-                    'PROCESSING_UPLOAD', 'PROCESSING_DOWNLOAD' => 'TikTok is still processing this upload; a current public post has not been confirmed.',
+                    'SEND_TO_USER_INBOX' => 'TikTok reports that the notification was sent to your inbox. Open TikTok to finish posting; do not send another copy just to refresh the notification.',
+                    'PROCESSING_UPLOAD', 'PROCESSING_DOWNLOAD' => 'TikTok is still processing the original upload. No replacement was sent; check its status again before sending another copy.',
                     default => 'TikTok confirms completion, but current public visibility has not been verified.',
                 };
                 if ($status === 'FAILED') {
@@ -128,14 +130,14 @@ class TikTokInboxReconciliation
                     return;
                 }
                 if ($status !== 'PUBLISH_COMPLETE') {
-                    $this->saveEvidence($target, $reference, $record);
+                    $this->saveEvidence($target, $reference, $record, $status === 'SEND_TO_USER_INBOX' ? PostTargetStatus::AwaitingAction : null);
 
                     return;
                 }
 
                 $rawIds = $response->json('data.publicaly_available_post_id', []);
                 if (! is_array($rawIds) || count($rawIds) > 20 || collect($rawIds)->contains(fn ($id): bool => ! (is_int($id) || is_string($id)) || preg_match('/\A[1-9][0-9]{0,19}\z/', (string) $id) !== 1)) {
-                    $this->saveEvidence($target, $reference, [...$record, 'error' => 'TikTok returned invalid or too many public post identifiers; review this upload manually.']);
+                    $this->saveEvidence($target, $reference, [...$record, 'error' => 'TikTok returned invalid or too many public post identifiers; review this upload manually.'], PostTargetStatus::Completed);
 
                     return;
                 }
@@ -148,12 +150,15 @@ class TikTokInboxReconciliation
                     return;
                 }
 
+                // Completion is confirmed even if the separate ownership lookup times out.
+                $this->saveEvidence($target, $reference, $record, PostTargetStatus::Completed);
+
                 $videos = $this->http->withToken($token)->acceptJson()->timeout(15)->connectTimeout(5)
                     ->post('https://open.tiktokapis.com/v2/video/query/?fields=id,share_url,video_description,create_time', ['filters' => ['video_ids' => $ids]]);
                 $this->meter(UsageCategory::ExternalApi, UsageOperation::MEDIA_STATUS_POLL, $account, $videos);
                 $rows = $videos->json('data.videos');
                 if (! $videos->successful() || $videos->json('error.code') !== 'ok' || ! is_array($rows)) {
-                    $this->saveEvidence($target, $reference, [...$record, 'error' => 'Public post IDs were returned, but ownership could not be verified. Check video.list access for this TikTok account.']);
+                    $this->saveEvidence($target, $reference, [...$record, 'error' => 'Public post IDs were returned, but ownership could not be verified. Check video.list access for this TikTok account.'], PostTargetStatus::Completed);
 
                     return;
                 }
@@ -167,7 +172,7 @@ class TikTokInboxReconciliation
                     $posts[$id] = ['id' => $id, 'url' => $url, 'caption' => is_string($video['video_description'] ?? null) ? $video['video_description'] : '', 'created_at' => is_int($video['create_time'] ?? null) ? $video['create_time'] : null];
                 }
                 if (count($posts) !== count($ids) || count($rows) !== count($ids)) {
-                    $this->saveEvidence($target, $reference, [...$record, 'error' => 'Not every public post could be verified on the connected TikTok account. No caption-based match was made.']);
+                    $this->saveEvidence($target, $reference, [...$record, 'error' => 'Not every public post could be verified on the connected TikTok account. No caption-based match was made.'], PostTargetStatus::Completed);
 
                     return;
                 }
@@ -181,7 +186,7 @@ class TikTokInboxReconciliation
         }
     }
 
-    /** @return array{media_key: string, publish_id: string}|null */
+    /** @return array{media_key: string, publish_id: string, remote_account_id: string}|null */
     private function reference(PostTarget $target): ?array
     {
         $state = $target->media_upload_state ?? [];
@@ -190,15 +195,17 @@ class TikTokInboxReconciliation
             || array_key_exists('_metricool', $state) || array_key_exists('_tiktok_accounts', $state)) {
             return null;
         }
+        $account = $target->account()->withoutGlobalScopes()->first();
+        if ($account === null || $account->remote_account_id === '') {
+            return null;
+        }
         $references = [];
         foreach ($state as $key => $entry) {
             if (str_starts_with((string) $key, '_') || $key === 'publication' || ! is_array($entry)) {
                 continue;
             }
             if (data_get($entry, 'metadata.media_type') === 'PHOTO') {
-                $account = $target->account()->withoutGlobalScopes()->first();
-                if ($account === null || data_get($entry, 'metadata.connected_account_id') !== $target->connected_account_id
-                    || $account->remote_account_id === ''
+                if (data_get($entry, 'metadata.connected_account_id') !== $target->connected_account_id
                     || data_get($entry, 'metadata.remote_account_id') !== $account->remote_account_id) {
                     return null;
                 }
@@ -209,7 +216,7 @@ class TikTokInboxReconciliation
             }
             $id = $entry['remote_ref'] ?? null;
             if (is_string($id) && $id !== '' && ($mode === 'inbox' || str_starts_with($id, 'v_inbox_'))) {
-                $references[] = ['media_key' => (string) $key, 'publish_id' => $id];
+                $references[] = ['media_key' => (string) $key, 'publish_id' => $id, 'remote_account_id' => $account->remote_account_id];
             }
         }
 
@@ -229,7 +236,7 @@ class TikTokInboxReconciliation
             && preg_match('~\A/@[^/]+/(?:video|photo)/'.preg_quote($id, '~').'/?\z~', $parts['path'] ?? '') === 1;
     }
 
-    /** @param array{media_key: string, publish_id: string} $reference
+    /** @param array{media_key: string, publish_id: string, remote_account_id: string} $reference
      * @param  array<string, mixed>  $record
      */
     private function saveEvidence(PostTarget $target, array $reference, array $record, ?PostTargetStatus $status = null): void
@@ -240,12 +247,22 @@ class TikTokInboxReconciliation
                 return;
             }
             $account = ConnectedAccount::withoutGlobalScopes()->lockForUpdate()->find($target->connected_account_id);
-            if ($account === null || $account->isDisabled() || $account->workspace_id !== $post->workspace_id) {
+            if ($account === null || $account->isDisabled() || $account->workspace_id !== $post->workspace_id
+                || $account->remote_account_id !== $reference['remote_account_id']) {
                 return;
             }
             $fresh = PostTarget::query()->where('post_id', $target->post_id)->where('connected_account_id', $target->connected_account_id)->lockForUpdate()->find($target->id);
             if ($fresh === null || ! $this->eligible($fresh) || $this->reference($fresh) !== $reference) {
                 return;
+            }
+            // Late delivery responses cannot reverse confirmed completion or public evidence.
+            $canUpdateStatus = match ($fresh->publicationStatus()) {
+                PostTargetStatus::Published => $status === PostTargetStatus::Published,
+                PostTargetStatus::Completed => in_array($status, [PostTargetStatus::Completed, PostTargetStatus::Published], true),
+                default => true,
+            };
+            if (! $canUpdateStatus && isset($record['provider_status']) && $record['provider_status'] !== 'PUBLISH_COMPLETE') {
+                unset($record['error'], $record['provider_status'], $record['message'], $record['public_post_ids']);
             }
             $state = $fresh->media_upload_state ?? [];
             $state['_tiktok_reconciliation'] = [...($state['_tiktok_reconciliation'] ?? []), ...$record];
@@ -254,10 +271,10 @@ class TikTokInboxReconciliation
             }
             $attributes = ['media_upload_state' => $state];
             $verifiedPublishedAt = null;
-            // Later inconclusive checks never erase previously verified public evidence.
-            if ($status !== null && ($fresh->status !== PostTargetStatus::Published || $status === PostTargetStatus::Published)) {
+            if ($status !== null && $canUpdateStatus) {
                 $message = match ($status) {
                     PostTargetStatus::Published => 'TikTok public publication verified from the original inbox upload.',
+                    PostTargetStatus::AwaitingAction => PostTarget::TIKTOK_INBOX_MESSAGE,
                     PostTargetStatus::Failed => $record['error'],
                     default => 'TikTok confirms completion, but public visibility has not been confirmed. It may be private or still awaiting moderation.',
                 };
