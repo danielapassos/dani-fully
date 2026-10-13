@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mcp\Tools\Concerns;
 
+use App\Mcp\Web\WebMcpRequest;
 use App\Models\McpGrantWorkspace;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
@@ -28,6 +29,10 @@ abstract class WorkspaceTool extends Tool
      */
     protected function workspaceId(Request $request): ?string
     {
+        if ($request instanceof WebMcpRequest) {
+            return $request->workspaceId();
+        }
+
         $accessToken = $request->user()?->currentAccessToken();
 
         if (! $accessToken instanceof AccessToken) {
