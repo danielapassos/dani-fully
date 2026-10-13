@@ -15,7 +15,7 @@ class ReconcileTikTokInboxes extends Command
 {
     protected $signature = 'tiktok:reconcile-inbox {--days=30} {--limit=100}';
 
-    protected $description = 'Check existing TikTok inbox uploads for manually published public posts without uploading again.';
+    protected $description = 'Recover delivery and completion status of existing TikTok inbox uploads without uploading again.';
 
     public function handle(TikTokInboxReconciliation $reconciliation): int
     {
@@ -24,7 +24,7 @@ class ReconcileTikTokInboxes extends Command
         $count = 0;
         $accounts = [];
         foreach (PostTarget::query()->where('platform', Platform::TikTok)
-            ->whereIn('status', [PostTargetStatus::AwaitingAction, PostTargetStatus::Completed, PostTargetStatus::Publishing, PostTargetStatus::Published])
+            ->whereIn('status', [PostTargetStatus::Failed, PostTargetStatus::AwaitingAction, PostTargetStatus::Completed, PostTargetStatus::Publishing, PostTargetStatus::Published])
             ->where('created_at', '>=', now()->subDays($days))
             ->whereHas('account', fn ($query) => $query->whereNull('disabled_at'))
             ->orderBy('updated_at')->orderBy('id')->cursor() as $target) {
