@@ -319,6 +319,7 @@ function PublishedCard({
                     <TikTokInboxCompletion
                         key={target.id}
                         handoff={inboxHandoff}
+                        musicHandoff={target.music_handoff}
                     />
                 )}
                 <TikTokInboxTracking

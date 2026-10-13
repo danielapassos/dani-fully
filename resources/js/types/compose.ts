@@ -21,6 +21,20 @@ export type InstagramTrialParams = {
 
 export type PhotoMusicOptions = {
     track: string;
+    mode?: 'native' | 'existing_audio' | 'none';
+    required?: boolean;
+    artist?: string | null;
+    version?: string | null;
+    native_audio_id?: string | null;
+    source_url?: string | null;
+    start_seconds?: number | null;
+    duration_seconds?: number | null;
+    music_volume?: number | null;
+    original_volume?: number | null;
+    sync_notes?: string | null;
+    /** A person's availability check, not provider verification or a license. */
+    availability_checked_at?: string | null;
+    availability_note?: string | null;
 };
 
 export type InstagramPostOptions = {
@@ -238,6 +252,17 @@ export type TargetView = {
     issues: string[];
     status: TargetStatus;
     status_message?: string | null;
+    music_handoff?: {
+        kind: 'native_music';
+        connected_account_id: string;
+        platform: PlatformName;
+        format: PostFormat;
+        plan: PhotoMusicOptions;
+        audio_attached: false;
+        catalog_verified: false;
+        availability_source: 'manual_note';
+        instructions: string;
+    } | null;
     manual_completion?: {
         kind: 'tiktok_inbox';
         caption: string;

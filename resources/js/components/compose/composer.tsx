@@ -1554,28 +1554,38 @@ export default function Composer({
                             const mediaIds = new Set(
                                 Object.values(placements).flat(),
                             );
-                            const media = state.media.filter((item) =>
-                                mediaIds.has(item.id),
+                            const media = Array.from(mediaIds).flatMap(
+                                (mediaId) => {
+                                    const item = state.media.find(
+                                        (candidate) => candidate.id === mediaId,
+                                    );
+                                    return item ? [item] : [];
+                                },
                             );
-                            const track =
-                                state.musicByAccount[account.id]?.track ?? '';
-                            // Keep a saved note editable after its media changes so it can be cleared.
-                            if (
-                                !track &&
-                                (media.length === 0 ||
-                                    media.some((item) => item.kind !== 'image'))
-                            )
-                                return null;
                             return (
                                 <PhotoMusicControls
                                     key={account.id}
                                     account={account}
-                                    track={track}
-                                    onChange={(value) =>
+                                    options={state.musicByAccount[account.id]}
+                                    media={media}
+                                    coverId={
+                                        state.instagramByAccount[account.id]
+                                            ?.cover_media_id
+                                    }
+                                    caption={replaceMentionTokens(
+                                        (
+                                            state.overrideByAccount[
+                                                account.id
+                                            ] ?? state.segments
+                                        ).join('\n\n'),
+                                        state.mentions,
+                                        account.platform,
+                                    )}
+                                    onChange={(options) =>
                                         dispatch({
-                                            type: 'setPhotoMusic',
+                                            type: 'setMusicOptions',
                                             accountId: account.id,
-                                            track: value,
+                                            options,
                                         })
                                     }
                                 />

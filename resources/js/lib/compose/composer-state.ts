@@ -3,6 +3,7 @@ import {
     instagramPostOptionsEqual,
     normalizeInstagramPostOptions,
 } from '@/lib/compose/instagram-trial';
+import { normalizeMusicPlan } from '@/lib/compose/music';
 import { segmentRefs } from '@/lib/compose/tiptap-doc';
 import {
     NEW_YOUTUBE_DEFAULT_OPTIONS,
@@ -115,6 +116,11 @@ export type ComposerAction =
       }
     | { type: 'setYouTubeThumbnail'; accountId: string; mediaId: string | null }
     | { type: 'setPhotoMusic'; accountId: string; track: string }
+    | {
+          type: 'setMusicOptions';
+          accountId: string;
+          options: PhotoMusicOptions | null;
+      }
     | { type: 'disableAutoSplit'; accountIds: string[] }
     | { type: 'setOverrideSegments'; accountId: string; segments: string[] }
     | { type: 'discardOverride'; accountId: string }
@@ -453,10 +459,9 @@ function hydrate(post: PostView): ComposerState {
         autoSplitByAccount[target.connected_account_id] = target.auto_split;
         formatByAccount[target.connected_account_id] = target.format;
         const overrideSegments = target.content_override?.segments;
-        if (target.content_override?.music?.track?.trim()) {
-            musicByAccount[target.connected_account_id] = {
-                track: target.content_override.music.track,
-            };
+        const music = normalizeMusicPlan(target.content_override?.music);
+        if (music) {
+            musicByAccount[target.connected_account_id] = music;
         }
         if (target.content_override?.instagram) {
             instagramByAccount[target.connected_account_id] =
@@ -710,6 +715,16 @@ export function composerReducer(
                 saveState: 'dirty',
             };
 
+        case 'setMusicOptions':
+            return {
+                ...state,
+                musicByAccount: {
+                    ...state.musicByAccount,
+                    [action.accountId]: action.options,
+                },
+                saveState: 'dirty',
+            };
+
         case 'setPhotoMusic':
             if (
                 (state.musicByAccount[action.accountId]?.track ?? '') ===
@@ -722,7 +737,10 @@ export function composerReducer(
                 musicByAccount: {
                     ...state.musicByAccount,
                     [action.accountId]: action.track
-                        ? { track: action.track }
+                        ? {
+                              ...state.musicByAccount[action.accountId],
+                              track: action.track,
+                          }
                         : null,
                 },
                 saveState: 'dirty',
@@ -1161,10 +1179,9 @@ export function buildPutBody(
             };
         }
         if (accountId in state.musicByAccount) {
-            const track = state.musicByAccount[accountId]?.track.trim();
             content_override = {
                 ...content_override,
-                music: track ? { track } : null,
+                music: normalizeMusicPlan(state.musicByAccount[accountId]),
             };
         }
 
@@ -1272,16 +1289,16 @@ export function contentMatchesServer(
                 : post.targets.map((target) => target.connected_account_id),
     );
     const serverMusic = Object.fromEntries(
-        post.targets.flatMap<[string, string]>((target) => {
-            const track = target.content_override?.music?.track?.trim();
-            return track ? [[target.connected_account_id, track]] : [];
+        post.targets.flatMap<[string, PhotoMusicOptions]>((target) => {
+            const plan = normalizeMusicPlan(target.content_override?.music);
+            return plan ? [[target.connected_account_id, plan]] : [];
         }),
     );
     const localMusicKeys = Object.keys(state.musicByAccount)
         .filter(
             (id) =>
                 comparedAccountIds.has(id) &&
-                state.musicByAccount[id]?.track.trim(),
+                normalizeMusicPlan(state.musicByAccount[id]) !== null,
         )
         .sort();
     if (
@@ -1289,7 +1306,9 @@ export function contentMatchesServer(
             JSON.stringify(Object.keys(serverMusic).sort()) ||
         localMusicKeys.some(
             (key) =>
-                state.musicByAccount[key]?.track.trim() !== serverMusic[key],
+                JSON.stringify(
+                    normalizeMusicPlan(state.musicByAccount[key]),
+                ) !== JSON.stringify(serverMusic[key]),
         )
     ) {
         return false;

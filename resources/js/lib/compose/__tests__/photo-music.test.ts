@@ -120,3 +120,81 @@ describe('photo music autosave', () => {
         expect(contentMatchesServer(changed, post('Song — Artist'))).toBe(true);
     });
 });
+
+it('round trips the full music plan and detects non-title edits', () => {
+    const saved = post();
+    const plan = {
+        track: 'Song',
+        mode: 'native' as const,
+        required: true,
+        artist: 'Artist',
+        version: 'Official remix',
+        native_audio_id: 'audio-42',
+        source_url: 'https://www.instagram.com/reels/audio/42/',
+        start_seconds: 12.5,
+        duration_seconds: 15,
+        music_volume: 0,
+        original_volume: 100,
+        sync_notes: 'Keep narration clear',
+        availability_checked_at: '2026-10-12T12:00:00Z',
+        availability_note: 'Checked in this account, US, Reel',
+    };
+    saved.targets[0].content_override = { music: plan };
+    const state = composerReducer(initialComposerState(), {
+        type: 'hydrate',
+        post: saved,
+    });
+    expect(
+        buildPutBody(state, ['tiktok']).targets[0].content_override?.music,
+    ).toEqual(plan);
+    expect(contentMatchesServer(state, saved)).toBe(true);
+    const changed = composerReducer(state, {
+        type: 'setMusicOptions',
+        accountId: 'tiktok',
+        options: { ...plan, version: 'Radio edit' },
+    });
+    expect(contentMatchesServer(changed, saved)).toBe(false);
+    expect(
+        buildPutBody(changed, ['tiktok']).targets[0].content_override?.music,
+    ).toEqual({ ...plan, version: 'Radio edit' });
+});
+
+it('retains required music before a track is chosen and does not copy it to other accounts', () => {
+    const state = composerReducer(initialComposerState(), {
+        type: 'hydrate',
+        post: post(),
+    });
+    const changed = composerReducer(state, {
+        type: 'setMusicOptions',
+        accountId: 'tiktok',
+        options: { mode: 'native', track: '', required: true },
+    });
+    expect(
+        buildPutBody(changed, ['tiktok']).targets[0].content_override?.music,
+    ).toEqual({ mode: 'native', track: '', required: true });
+    expect(contentMatchesServer(changed, post())).toBe(false);
+    expect(
+        buildPutBody(changed, ['instagram']).targets[0].content_override,
+    ).toBeNull();
+});
+
+it.each(['none', 'existing_audio'] as const)(
+    'persists the %s decision instead of treating it as an unreviewed draft',
+    (mode) => {
+        const saved = post();
+        const state = composerReducer(initialComposerState(), {
+            type: 'hydrate',
+            post: saved,
+        });
+        const changed = composerReducer(state, {
+            type: 'setMusicOptions',
+            accountId: 'tiktok',
+            options: { mode, track: '', required: false },
+        });
+        expect(contentMatchesServer(changed, saved)).toBe(false);
+        expect(
+            buildPutBody(changed, ['tiktok']).targets[0].content_override?.music
+                ?.mode,
+        ).toBe(mode);
+    },
+);

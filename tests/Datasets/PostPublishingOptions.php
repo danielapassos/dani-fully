@@ -3,6 +3,10 @@
 use App\Enums\Platform;
 
 dataset('declared publishing options', [
+    'Native music exact video plan' => [Platform::Instagram, 'music', ['mode' => 'native', 'required' => true, 'track' => 'Song', 'artist' => 'Artist', 'version' => 'Official remix', 'native_audio_id' => '42', 'source_url' => 'https://www.instagram.com/reels/audio/42/', 'start_seconds' => 0, 'duration_seconds' => 15, 'music_volume' => 0, 'original_volume' => 100, 'sync_notes' => 'Keep narration clear', 'availability_checked_at' => '2026-10-01T10:00:00Z', 'availability_note' => 'Checked manually in the app']],
+    'Native music required before song selection' => [Platform::TikTok, 'music', ['mode' => 'native', 'required' => true]],
+    'Use existing audio decision' => [Platform::Instagram, 'music', ['mode' => 'existing_audio', 'required' => false]],
+    'No added music decision' => [Platform::Instagram, 'music', ['mode' => 'none', 'required' => false]],
     'Instagram photo music reminder' => [Platform::Instagram, 'music', ['track' => 'Peggy Gou - selected song']],
     'TikTok photo music reminder' => [Platform::TikTok, 'music', ['track' => 'Selected artist and song']],
     'TikTok complete choices' => [Platform::TikTok, 'tiktok', [
