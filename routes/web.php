@@ -5,8 +5,10 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Gifs\GifBrowserController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PublicShareController;
+use App\Http\Controllers\WebMcpController;
 use App\Http\Controllers\WorkspaceMentionController;
 use App\Http\Middleware\NoIndex;
+use App\Http\Middleware\WebMcpHeaders;
 use App\Services\Gifs\KlipyClient;
 use Illuminate\Support\Facades\Route;
 
@@ -18,6 +20,11 @@ Route::get('/share/{token}', [PublicShareController::class, 'show'])
     ->middleware([NoIndex::class, 'throttle:30,1'])
     ->name('share.show')
     ->where('token', '[A-Za-z0-9\-]+');
+
+Route::middleware([WebMcpHeaders::class, 'auth', 'verified', 'throttle:60,1'])->prefix('webmcp')->group(function (): void {
+    Route::get('tools', [WebMcpController::class, 'index'])->name('webmcp.tools.index');
+    Route::post('tools/{tool}', [WebMcpController::class, 'execute'])->name('webmcp.tools.execute');
+});
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
