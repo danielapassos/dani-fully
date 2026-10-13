@@ -3,12 +3,15 @@ import { useId, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useClipboard } from '@/hooks/use-clipboard';
+import { musicPlanSummary } from '@/lib/compose/music';
 import type { TargetView } from '@/types/compose';
 
 export function TikTokInboxCompletion({
     handoff,
+    musicHandoff,
 }: {
     handoff: NonNullable<TargetView['manual_completion']>;
+    musicHandoff?: TargetView['music_handoff'];
 }) {
     const captionId = useId();
     const captionRef = useRef<HTMLTextAreaElement>(null);
@@ -32,7 +35,7 @@ export function TikTokInboxCompletion({
             <p className="text-sm leading-6 text-muted-foreground">
                 {handoff.instructions}
             </p>
-            {handoff.media_type === 'photo' && handoff.music_track && (
+            {handoff.music_track && (
                 <p className="text-sm leading-6">
                     <span className="font-medium">
                         Music to add in TikTok:{' '}
@@ -44,6 +47,17 @@ export function TikTokInboxCompletion({
                         automatically.
                     </span>
                 </p>
+            )}
+            {musicHandoff && (
+                <div className="space-y-2">
+                    <p className="text-sm">{musicHandoff.instructions}</p>
+                    <Textarea
+                        aria-label="Music plan to apply in TikTok"
+                        readOnly
+                        value={musicPlanSummary(musicHandoff.plan)}
+                        className="max-h-64"
+                    />
+                </div>
             )}
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <label htmlFor={captionId} className="text-sm font-medium">

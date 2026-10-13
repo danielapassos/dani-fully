@@ -11,6 +11,7 @@ use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Posts\PublishPrecheck;
 use App\Services\Publishing\ManualRetryEligibility;
+use App\Services\Publishing\PhotoMusic;
 use App\Services\Publishing\PostStatusRollup;
 use App\Services\Publishing\TargetMediaSelection;
 use App\Services\Publishing\TikTokInboxHandoff;
@@ -81,6 +82,7 @@ final class PostView
                         'status' => $status->value,
                         'status_message' => $target->publicationMessage($status),
                         'manual_completion' => $inboxHandoff->forTarget($target),
+                        'music_handoff' => app(PhotoMusic::class)->handoff($target),
                         'inbox_tracking' => $inboxTracking->view($target),
                         'error_kind' => $projected ? null : $target->error_kind?->value,
                         'error_message' => $projected ? null : $target->error_message,

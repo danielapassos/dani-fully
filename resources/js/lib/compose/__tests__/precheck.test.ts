@@ -147,6 +147,44 @@ describe('photo inbox and music readiness', () => {
         ).toContain('music_requires_native_completion');
     });
 
+    it('holds Instagram required music before selection but accepts the same video plan for TikTok inbox', () => {
+        const musicByAccount = {
+            'acc-1': { mode: 'native' as const, required: true, track: '' },
+        };
+        expect(
+            precheckDestinations({ ...input, media: [video], musicByAccount }),
+        ).toEqual([]);
+        const instagram = {
+            ...input,
+            media: [video],
+            accounts: [accountFor({ platform: 'instagram' })],
+            limits: [limitsFor({ platform: 'instagram' })],
+        };
+        expect(
+            precheckDestinations({ ...instagram, musicByAccount })[0].reasons,
+        ).toEqual(['music_requires_native_completion']);
+        expect(
+            precheckDestinations({
+                ...instagram,
+                musicByAccount: {
+                    'acc-1': {
+                        mode: 'existing_audio',
+                        track: '',
+                        required: false,
+                    },
+                },
+            }),
+        ).toEqual([]);
+        expect(
+            precheckDestinations({
+                ...instagram,
+                musicByAccount: {
+                    'acc-1': { mode: 'none', track: '', required: false },
+                },
+            }),
+        ).toEqual([]);
+    });
+
     it('keeps Instagram music photo drafts blocked until the note is cleared', () => {
         const instagram = {
             ...input,

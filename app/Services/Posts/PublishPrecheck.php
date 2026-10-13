@@ -95,6 +95,7 @@ class PublishPrecheck
             ? app(TikTokPostOptions::class)->describe($issue)
             : match ($issue) {
                 'music_requires_photos' => 'Music notes apply to Instagram photos or TikTok photo inbox uploads only.',
+                'music_requires_supported_media' => 'Native music plans require Instagram or TikTok photos, or one video. Review the selected media.',
                 'music_requires_native_completion' => 'This post requires music to be selected in the native app. Keep it as a draft for manual publication, or remove the music note to publish without music.',
                 'empty' => 'Add text or media before publishing.',
                 'sync_source_media_unavailable' => 'The native source media could not be imported completely. Duplicate this post, attach the original media, and review it before publishing.',
@@ -207,9 +208,10 @@ class PublishPrecheck
         if ($photos->isEmpty()) {
             return $issues;
         }
-        if (app(TikTokPublishingRoute::class)->forTarget($target) !== 'native'
+        if (! app(TikTokPublishingRoute::class)->hasAcceptedInboxTransfer($target)
+            && (app(TikTokPublishingRoute::class)->forTarget($target) !== 'native'
             || config('services.tiktok.inbox_enabled') !== true
-            || config('services.tiktok.direct_post_enabled') === true) {
+            || config('services.tiktok.direct_post_enabled') === true)) {
             $issues[] = 'tiktok_photos_require_inbox';
         }
         foreach ($photos as $photo) {

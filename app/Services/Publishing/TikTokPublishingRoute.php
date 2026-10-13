@@ -131,6 +131,28 @@ class TikTokPublishingRoute
             || $target->remote_id !== null || ($target->remote_ids ?? []) !== [];
     }
 
+    /** A saved inbox operation is reconciled through its original route, never reinitialized. */
+    public function hasAcceptedInboxTransfer(PostTarget $target): bool
+    {
+        if ($target->platform !== Platform::TikTok || $this->forTarget($target) !== 'native') {
+            return false;
+        }
+        $found = false;
+        foreach ($target->media_upload_state ?? [] as $key => $entry) {
+            if (str_starts_with((string) $key, '_') || $key === 'publication' || ! is_array($entry) || empty($entry['remote_ref'])) {
+                continue;
+            }
+            if (data_get($entry, 'metadata.publish_mode') !== 'inbox'
+                || (data_get($entry, 'metadata.connected_account_id') !== null
+                    && data_get($entry, 'metadata.connected_account_id') !== $target->connected_account_id)) {
+                return false;
+            }
+            $found = true;
+        }
+
+        return $found;
+    }
+
     public function hasAcceptedOperation(PostTarget $target): bool
     {
         $accountsState = $target->media_upload_state['_tiktok_accounts'] ?? null;

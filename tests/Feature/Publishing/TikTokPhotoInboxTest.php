@@ -6,6 +6,7 @@ use App\Enums\Platform;
 use App\Models\ConnectedAccount;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
+use App\Services\Posts\PublishPrecheck;
 use App\Services\Publishing\Connectors\TikTokConnector;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
@@ -138,7 +139,7 @@ test('new TikTok video submissions cannot ignore a saved photo music requirement
     $result = app(TikTokConnector::class)->publish($context);
 
     expect($result->errorKind)->toBe(ErrorKind::Validation)
-        ->and($result->errorMessage)->toContain('music note');
+        ->and($result->errorMessage)->toContain('music plan');
     Http::assertNothingSent();
 })->with(['native', 'metricool', 'accounts_api']);
 
@@ -353,3 +354,26 @@ test('photo inbox rejects an unsafe application media origin without initializin
     expect(app(TikTokConnector::class)->publish(tikTokPhotoInboxContext([tikTokInboxPhoto()]))->errorKind)->toBe(ErrorKind::Validation);
     Http::assertNothingSent();
 });
+
+test('native music plan permits only status reconciliation after inbox configuration changes', function (bool $photo): void {
+    $media = $photo ? tikTokInboxPhoto() : PostMedia::factory()->video()->create();
+    $context = tikTokPhotoInboxContext([$media], targetOverrides: [
+        'content_override' => ['music' => ['mode' => 'native', 'required' => true, 'track' => 'Song']],
+        'media_upload_state' => [$media->id => ['remote_ref' => 'existing-inbox', 'metadata' => ['publish_mode' => 'inbox', 'source' => 'PULL_FROM_URL', ...($photo ? ['media_type' => 'PHOTO'] : [])]]],
+    ]);
+    $context->account->forceFill(['capabilities' => ['oauth_scopes' => ['video.upload', 'video.publish']]])->save();
+    $state = $context->target->media_upload_state;
+    $state[$media->id]['metadata']['connected_account_id'] = $context->account->id;
+    $state[$media->id]['metadata']['remote_account_id'] = $context->account->remote_account_id;
+    $context->target->forceFill(['media_upload_state' => $state])->save();
+    $media->forceFill(['post_id' => $context->target->post_id])->save();
+    config(['services.tiktok.direct_post_enabled' => true, 'services.tiktok.inbox_enabled' => false]);
+    Http::fake(['*/status/fetch/' => Http::response(['data' => ['status' => 'SEND_TO_USER_INBOX']])]);
+
+    $issues = app(PublishPrecheck::class)->blockingTargets($context->target->post->fresh(['targets.account', 'media']));
+    expect($issues)->toBe([]);
+    $result = app(TikTokConnector::class)->publish($context);
+    expect($result->outcome)->toBe('awaiting_action');
+    Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/status/fetch/') && $request['publish_id'] === 'existing-inbox');
+    Http::assertSentCount(1);
+})->with([false, true]);

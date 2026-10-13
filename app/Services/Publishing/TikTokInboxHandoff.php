@@ -45,8 +45,11 @@ final class TikTokInboxHandoff
         $completion = $photo
             ? ' The photo upload includes your caption. Review it in TikTok, select music if wanted, then review mentions, cover, and privacy before posting manually.'
             : ' Shoutrrr sends only the video. Replace any prefilled caption with the saved caption below, then review mentions, cover, and privacy before posting manually in TikTok.';
-        if ($photo && $music !== null) {
+        if ($music !== null) {
             $completion .= ' Music to select in TikTok: '.$music.'. This is a reminder; the track has not been attached. Availability depends on the TikTok music library for your account.';
+        }
+        if (app(PhotoMusic::class)->requiresNativeMusic($target)) {
+            $completion .= ' Follow the saved music plan for the exact version, excerpt, volume and sync. Do not post until the requested music is added, or the plan is explicitly changed.';
         }
 
         return [

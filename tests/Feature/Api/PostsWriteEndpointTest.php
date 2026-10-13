@@ -214,3 +214,21 @@ test('partial API edits preserve music requirement unless explicitly cleared', f
     ])->assertOk();
     expect($target->fresh()->content_override['music'])->toBe($clear ? null : ['track' => 'Required song']);
 })->with([true, false]);
+
+test('a required native music plan survives an API round trip and cannot enqueue silent Instagram publication', function (): void {
+    Queue::fake();
+    Http::preventStrayRequests();
+    [$user, $workspace, $token] = issuedKey();
+    $account = ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::Instagram]);
+    $response = $this->withToken($token)->postJson('/api/v1/posts', [
+        'base_text' => 'Approved caption', 'destination' => ['kind' => 'account', 'id' => $account->id],
+        'targets' => [['connected_account_id' => $account->id, 'content_override' => ['music' => ['mode' => 'native', 'required' => true]]]],
+    ])->assertCreated();
+    $post = Post::query()->findOrFail($response->json('post.id'));
+    PostMedia::factory()->video()->for($workspace)->create(['post_id' => $post->id]);
+    $this->withToken($token)->postJson("/api/v1/posts/{$post->id}/publish", ['confirm' => true])->assertStatus(422);
+    expect($post->fresh()->status)->toBe(PostStatus::Draft)
+        ->and($post->targets()->sole()->content_override['music'])->toBe(['mode' => 'native', 'required' => true]);
+    Queue::assertNothingPushed();
+    Http::assertNothingSent();
+});

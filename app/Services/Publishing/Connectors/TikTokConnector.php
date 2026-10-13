@@ -62,7 +62,7 @@ class TikTokConnector implements PublishConnector
                     && (! empty($entry['remote_ref']) || data_get($entry, 'metadata.init_outcome_unknown') === true),
             );
         if (! $existingTransfer && app(PhotoMusic::class)->issues($context->target, $media) !== []) {
-            return PublishResult::failure(ErrorKind::Validation, 'A saved photo music note requires native TikTok photo inbox delivery. Use photos or explicitly clear the note before submitting other media.');
+            return PublishResult::failure(ErrorKind::Validation, 'This music plan requires native TikTok inbox delivery. Use a native music plan for one video or photos, and choose the music in TikTok before posting.');
         }
         if ($provider !== 'native' && collect($media)->contains(static fn (PostMedia $item): bool => ! $item->isVideo())) {
             return PublishResult::failure(ErrorKind::Unsupported, 'TikTok photos require the native inbox delivery route.');

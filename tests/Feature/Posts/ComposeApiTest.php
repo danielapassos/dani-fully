@@ -472,3 +472,23 @@ test('DELETE /posts/{post} removes the draft and its targets', function () {
 
     expect(Post::withoutGlobalScopes()->whereKey($created['id'])->exists())->toBeFalse();
 });
+
+test('web composer stores and updates music decisions without losing the native hold or exact mix', function (): void {
+    [$user, $workspace, $accounts] = actingMember(1);
+    $account = $accounts->first();
+    $account->forceFill(['platform' => Platform::Instagram])->save();
+    $payload = ['segments' => ['Approved caption'], 'destination' => ['kind' => 'account', 'id' => $account->id], 'targets' => [['connected_account_id' => $account->id, 'content_override' => ['music' => ['mode' => 'native', 'required' => true]]]]];
+    $this->postJson('/posts', $payload)->assertSuccessful();
+    $post = Post::query()->where('workspace_id', $workspace->id)->sole();
+    expect($post->targets()->sole()->content_override['music'])->toBe(['mode' => 'native', 'required' => true]);
+    $plan = ['mode' => 'native', 'required' => true, 'track' => 'Song', 'version' => 'Official remix', 'start_seconds' => 0, 'music_volume' => 0, 'original_volume' => 100, 'sync_notes' => 'Keep speech clear'];
+    $payload['targets'][0]['content_override']['music'] = $plan;
+    $this->putJson("/posts/{$post->id}", $payload)->assertSuccessful();
+    expect($post->targets()->sole()->content_override['music'])->toBe($plan);
+    $payload['targets'][0]['content_override'] = ['segments' => ['Revised caption']];
+    $this->putJson("/posts/{$post->id}", $payload)->assertSuccessful();
+    expect($post->targets()->sole()->content_override['music'])->toBe($plan);
+    $payload['targets'][0]['content_override']['music'] = ['mode' => 'none'];
+    $this->putJson("/posts/{$post->id}", $payload)->assertSuccessful();
+    expect($post->targets()->sole()->content_override['music'])->toBe(['mode' => 'none']);
+});

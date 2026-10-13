@@ -1,4 +1,5 @@
 import { replaceMentionTokens } from '@/lib/compose/mentions';
+import { normalizeMusicPlan, requiresNativeMusic } from '@/lib/compose/music';
 import { measure } from '@/lib/compose/section-split';
 import {
     TIKTOK_ISSUE_MESSAGES,
@@ -31,6 +32,7 @@ export type BlockReason =
     | 'instagram_cover_requires_reel'
     | 'instagram_trial_requires_reel'
     | 'music_requires_photos'
+    | 'music_requires_supported_media'
     | 'music_requires_native_completion'
     | 'empty'
     | 'publishing_unavailable'
@@ -283,16 +285,27 @@ export function precheckDestinations({
             format: formatByAccount[account.id] ?? 'feed',
             limits: platformLimits,
         });
-        if (musicByAccount?.[account.id]?.track.trim()) {
+        const music = normalizeMusicPlan(musicByAccount?.[account.id]);
+        if (music && requiresNativeMusic(music)) {
+            const native = music.mode === 'native';
+            const photos =
+                targetMedia.length > 0 &&
+                targetMedia.every((item) => item.kind === 'image');
+            const video =
+                targetMedia.length === 1 && targetMedia[0].kind === 'video';
             if (
-                targetMedia.length === 0 ||
-                targetMedia.some((item) => item.kind !== 'image') ||
+                (!photos && !(native && video)) ||
                 !['instagram', 'tiktok'].includes(account.platform)
             ) {
-                reasons.push('music_requires_photos');
+                reasons.push(
+                    native
+                        ? 'music_requires_supported_media'
+                        : 'music_requires_photos',
+                );
             } else if (
                 account.platform === 'instagram' ||
-                account.tiktok_inbox_enabled !== true
+                account.tiktok_inbox_enabled !== true ||
+                account.tiktok_direct_post_enabled === true
             ) {
                 reasons.push('music_requires_native_completion');
             }
@@ -414,10 +427,12 @@ export function describeReason(
             return 'use exactly one video in an Instagram Reel or feed post, or turn off Trial Reel';
         case 'music_requires_photos':
             return 'Music notes are supported for Instagram and TikTok photo posts. Use photos or clear the music note.';
+        case 'music_requires_supported_media':
+            return 'Native music plans need Instagram or TikTok photos, or one video. Review the selected media.';
         case 'music_requires_native_completion':
             return platform === 'instagram'
-                ? 'This Instagram photo post needs native music selection. Keep it as a draft to finish in Instagram, or clear the music note to publish without music.'
-                : 'This photo music note requires TikTok inbox delivery. Enable inbox delivery or clear the music note.';
+                ? 'This Instagram post needs native music selection. Keep it as a draft to finish in Instagram, or clear the music note to publish without music.'
+                : 'This music plan requires TikTok inbox delivery. Enable inbox delivery or clear the music note.';
         case 'youtube_options_required':
             return 'Complete YouTube publishing settings and fix any title or description errors before publishing.';
         case 'youtube_thumbnail_unavailable':
