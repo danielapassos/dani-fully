@@ -261,11 +261,8 @@ class TikTokInboxReconciliation
                 PostTargetStatus::Completed => in_array($status, [PostTargetStatus::Completed, PostTargetStatus::Published], true),
                 default => true,
             };
-            if (! $canUpdateStatus) {
-                if (isset($record['provider_status']) && $record['provider_status'] !== 'PUBLISH_COMPLETE') {
-                    unset($record['error']);
-                }
-                unset($record['provider_status'], $record['message'], $record['public_post_ids']);
+            if (! $canUpdateStatus && isset($record['provider_status']) && $record['provider_status'] !== 'PUBLISH_COMPLETE') {
+                unset($record['error'], $record['provider_status'], $record['message'], $record['public_post_ids']);
             }
             $state = $fresh->media_upload_state ?? [];
             $state['_tiktok_reconciliation'] = [...($state['_tiktok_reconciliation'] ?? []), ...$record];
