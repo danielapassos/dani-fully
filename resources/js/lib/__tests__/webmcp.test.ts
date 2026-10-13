@@ -46,10 +46,17 @@ const publishTool: WebMcpTool = {
 const cleanups: (() => void)[] = [];
 
 function response(body: unknown, status = 200, headers: HeadersInit = {}) {
+    const responseHeaders = new Headers(headers);
+    responseHeaders.set('Content-Type', 'application/json');
+
     return new Response(JSON.stringify(body), {
         status,
-        headers: { 'Content-Type': 'application/json', ...headers },
+        headers: responseHeaders,
     });
+}
+
+function requestUrl(input: RequestInfo | URL): URL {
+    return new URL(input instanceof Request ? input.url : input);
 }
 
 function discovery(tools: WebMcpTool[] = [readTool]) {
@@ -160,7 +167,7 @@ describe('connectWebMcp', () => {
             publishTool,
         );
         expect(fetch).toHaveBeenCalledTimes(1);
-        const discoveryUrl = new URL(String(vi.mocked(fetch).mock.calls[0][0]));
+        const discoveryUrl = requestUrl(vi.mocked(fetch).mock.calls[0][0]);
         expect(discoveryUrl.origin).toBe('https://shoutrrr.test');
         expect(discoveryUrl.searchParams.get('user_id')).toBe('user-1');
         expect(discoveryUrl.searchParams.get('workspace_id')).toBe(
@@ -212,7 +219,7 @@ describe('connectWebMcp', () => {
         expect(JSON.parse(output)).toEqual(result);
         expect(fetch).toHaveBeenCalledTimes(2);
         const [url, request] = vi.mocked(fetch).mock.calls[1];
-        expect(String(url)).toBe(
+        expect(requestUrl(url).href).toBe(
             'https://shoutrrr.test/webmcp/tools/publish_post',
         );
         expect(request).toMatchObject({

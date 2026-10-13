@@ -1,5 +1,5 @@
 import { cleanup, renderHook } from '@testing-library/react';
-import { act, StrictMode, useLayoutEffect } from 'react';
+import { act, useLayoutEffect } from 'react';
 import {
     afterEach,
     beforeEach,
@@ -248,7 +248,7 @@ describe('useWebMcp', () => {
 
     it('retires the first StrictMode registration and keeps exactly one active registration', () => {
         const { unmount } = renderHook(() => useWebMcp(), {
-            wrapper: ({ children }) => <StrictMode>{children}</StrictMode>,
+            reactStrictMode: true,
         });
 
         expect(connectWebMcp).toHaveBeenCalledTimes(2);

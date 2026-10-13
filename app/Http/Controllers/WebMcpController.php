@@ -11,6 +11,7 @@ use App\Mcp\Web\WebMcpResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Response;
+use LogicException;
 use Throwable;
 
 class WebMcpController extends Controller
@@ -40,8 +41,13 @@ class WebMcpController extends Controller
         }
 
         try {
+            $callback = [$handler, 'handle'];
+            if (! is_callable($callback)) {
+                throw new LogicException('The registered browser tool has no callable handler.');
+            }
+
             /** @var Response $result */
-            $result = app()->call([$handler, 'handle'], ['request' => $bound]);
+            $result = app()->call($callback, ['request' => $bound]);
 
             return WebMcpResponse::tool($result);
         } catch (ValidationException $exception) {
