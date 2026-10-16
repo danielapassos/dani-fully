@@ -31,7 +31,7 @@ test('retry_post_target requires confirmation', function (): void {
     expect($target->fresh()->status)->toBe(PostTargetStatus::Failed);
 });
 
-test('retry_post_target with confirm resets target to pending', function (): void {
+test('retry_post_target with confirm claims target as publishing', function (): void {
     Queue::fake();
     $user = User::factory()->create();
     $workspace = Workspace::factory()->create();
@@ -49,7 +49,7 @@ test('retry_post_target with confirm resets target to pending', function (): voi
     ]);
 
     $response->assertOk();
-    expect($target->fresh()->status)->toBe(PostTargetStatus::Pending);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Publishing);
 });
 
 test('retry_post_target rejects a non-failed target', function (): void {

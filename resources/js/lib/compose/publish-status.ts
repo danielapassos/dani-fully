@@ -45,7 +45,17 @@ const TARGET_STATUS_META: Record<TargetStatus, TargetStatusMeta> = {
 export function targetStatusMeta(
     status: TargetStatus,
     platform?: PlatformName,
+    progress?: TargetView['publication_progress'],
 ): TargetStatusMeta {
+    if (progress) {
+        return {
+            ...TARGET_STATUS_META[status],
+            label: progress.label,
+            ...(progress.phase === 'uncertain'
+                ? { tone: 'warning' as const, spinning: false }
+                : {}),
+        };
+    }
     if (status === 'awaiting_action' && platform === 'tiktok') {
         return {
             ...TARGET_STATUS_META.awaiting_action,
@@ -58,8 +68,14 @@ export function targetStatusMeta(
 
 /** Explain terminal uploads without implying that the content is public. */
 export function targetStatusMessage(
-    target: Pick<TargetView, 'status' | 'platform' | 'status_message'>,
+    target: Pick<
+        TargetView,
+        'status' | 'platform' | 'status_message' | 'publication_progress'
+    >,
 ): string | null {
+    if (target.publication_progress?.message) {
+        return target.publication_progress.message;
+    }
     if (target.status_message) {
         return target.status_message;
     }
@@ -163,6 +179,7 @@ export function applyOptimisticSubmit(
                       status: optimistic.targetStatus,
                       error_kind: null,
                       error_message: null,
+                      publication_progress: undefined,
                   },
         ),
     };

@@ -36,7 +36,7 @@ class TikTokInboxReconciliation
     public function eligible(PostTarget $target): bool
     {
         return $this->reference($target) !== null
-            && in_array($target->publicationStatus(), [PostTargetStatus::Failed, PostTargetStatus::AwaitingAction, PostTargetStatus::Completed, PostTargetStatus::Published], true);
+            && in_array($target->publicationStatus(), [PostTargetStatus::Failed, PostTargetStatus::Skipped, PostTargetStatus::AwaitingAction, PostTargetStatus::Completed, PostTargetStatus::Published], true);
     }
 
     public function due(PostTarget $target, bool $manual = false): bool
@@ -265,6 +265,10 @@ class TikTokInboxReconciliation
                 unset($record['error'], $record['provider_status'], $record['message'], $record['public_post_ids']);
             }
             $state = $fresh->media_upload_state ?? [];
+            if (isset($record['verified_at'])) {
+                $record = [...$record, 'connected_account_id' => $fresh->connected_account_id,
+                    'remote_account_id' => $reference['remote_account_id'], 'publish_id' => $reference['publish_id']];
+            }
             $state['_tiktok_reconciliation'] = [...($state['_tiktok_reconciliation'] ?? []), ...$record];
             if (isset($record['provider_status'])) {
                 $state[$reference['media_key']]['metadata']['provider_status'] = $record['provider_status'];

@@ -17,6 +17,7 @@ function youtubeThumbnailContext(string $privacy = 'public', bool $canUpdate = t
 {
     $account = ConnectedAccount::factory()->create([
         'platform' => Platform::YouTube,
+        'remote_account_id' => 'UC-dani',
         'capabilities' => ['oauth_scopes' => array_filter([
             'https://www.googleapis.com/auth/youtube.upload',
             $canUpdate ? 'https://www.googleapis.com/auth/youtube.force-ssl' : null,
@@ -81,6 +82,7 @@ function youtubeThumbnailProvider(object $provider): void
 
             return Http::response(['items' => [[
                 'id' => 'covered_42',
+                'snippet' => ['channelId' => 'UC-dani'],
                 'status' => [
                     'uploadStatus' => 'processed', 'privacyStatus' => $provider->privacy,
                     'selfDeclaredMadeForKids' => false, 'containsSyntheticMedia' => true,

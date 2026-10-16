@@ -54,6 +54,29 @@ test('dispatcher never redispatches failed targets through the general publish p
     Bus::assertNotDispatched(PublishPostTarget::class);
 });
 
+test('a stale blocked precheck cannot overwrite a target claimed by another request', function (PostTargetStatus $status) {
+    Bus::fake();
+    $post = Post::factory()->create();
+    $target = PostTarget::factory()->for($post)->create([
+        'sections' => [''],
+        'status' => PostTargetStatus::Pending,
+    ]);
+    $post->load(['targets.account', 'targets.placements', 'media']);
+    $target->forceFill([
+        'status' => $status,
+        'remote_id' => $status === PostTargetStatus::Published ? 'already-live' : null,
+        'error_message' => null,
+    ])->save();
+
+    app(PublishDispatcher::class)->dispatchForPost($post);
+
+    expect($target->refresh()->status)->toBe($status)
+        ->and($target->error_kind)->toBeNull()
+        ->and($target->error_message)->toBeNull()
+        ->and($target->remote_id)->toBe($status === PostTargetStatus::Published ? 'already-live' : null);
+    Bus::assertNotDispatched(PublishPostTarget::class);
+})->with([PostTargetStatus::Publishing, PostTargetStatus::Published]);
+
 test('dispatcher never seeds a second chain for an already publishing target', function (): void {
     Bus::fake();
 

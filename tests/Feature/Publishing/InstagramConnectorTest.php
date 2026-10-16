@@ -67,6 +67,7 @@ test('instagram publishes a single image through the container flow', function (
         'https://graph.facebook.com/*/ig123/media' => Http::response(['id' => 'container-1']),
         'https://graph.facebook.com/*/container-1*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'media-999']),
+        'https://graph.facebook.com/*/media-999*' => Http::response(['id' => 'media-999', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/media-999/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(['look at this'], [$media]));
@@ -92,6 +93,7 @@ test('direct instagram login publishes against graph instagram', function () {
         'https://graph.instagram.com/*/ig123/media' => Http::response(['id' => 'direct-container']),
         'https://graph.instagram.com/*/direct-container*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.instagram.com/*/ig123/media_publish' => Http::response(['id' => 'direct-media']),
+        'https://graph.instagram.com/*/direct-media*' => Http::response(['id' => 'direct-media', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/direct-media/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(
@@ -117,6 +119,7 @@ test('instagram converts a non-jpeg image and hands Meta the derived jpeg url', 
         'https://graph.facebook.com/*/ig123/media' => Http::response(['id' => 'container-png']),
         'https://graph.facebook.com/*/container-png*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'media-png']),
+        'https://graph.facebook.com/*/media-png*' => Http::response(['id' => 'media-png', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/media-png/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(['a png'], [$media]));
@@ -159,6 +162,7 @@ test('instagram resumes from a persisted container id, skipping re-creation', fu
     Http::fake([
         'https://graph.facebook.com/*/container-existing*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'media-777']),
+        'https://graph.facebook.com/*/media-777*' => Http::response(['id' => 'media-777', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/media-777/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(
@@ -173,7 +177,7 @@ test('instagram resumes from a persisted container id, skipping re-creation', fu
     Http::assertNotSent(fn ($request) => str_contains($request->url(), '/ig123/media')
         && ! str_contains($request->url(), 'media_publish'));
 
-    Http::assertSentCount(2);
+    Http::assertSentCount(3);
 });
 
 test('instagram persists a manual-review gate when the media publish response is lost', function () {
@@ -207,7 +211,8 @@ test('instagram persists a manual-review gate when the media publish response is
     $retry = app(InstagramConnector::class)->publish($context);
 
     expect($retry->errorKind)->toBe(ErrorKind::Unknown)
-        ->and($retryCalledProvider)->toBeFalse();
+        ->and($retryCalledProvider)->toBeTrue();
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
 });
 
 test('instagram does not republish a container Meta already reports as published', function () {
@@ -241,6 +246,7 @@ test('instagram builds a carousel from two images then publishes the parent cont
             ->push(['id' => 'parent-1']),
         'https://graph.facebook.com/*/parent-1*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'media-carousel']),
+        'https://graph.facebook.com/*/media-carousel*' => Http::response(['id' => 'media-carousel', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/media-carousel/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(['carousel caption'], [$first, $second]));
@@ -284,6 +290,7 @@ test('instagram honors target-specific media order and exclusions', function () 
             ->push(['id' => 'parent']),
         'https://graph.facebook.com/*/parent*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'published']),
+        'https://graph.facebook.com/*/published*' => Http::response(['id' => 'published', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/published/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(
@@ -322,6 +329,7 @@ test('instagram sets media_type=VIDEO on a carousel video child container', func
             ->push(['id' => 'parent-1']),
         'https://graph.facebook.com/*/parent-1*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'media-carousel']),
+        'https://graph.facebook.com/*/media-carousel*' => Http::response(['id' => 'media-carousel', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/media-carousel/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(['carousel caption'], [$image, $video]));
@@ -345,6 +353,7 @@ test('instagram publishes a video as a REELS container', function () {
         'https://graph.facebook.com/*/ig123/media' => Http::response(['id' => 'reel-container']),
         'https://graph.facebook.com/*/reel-container*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'reel-media']),
+        'https://graph.facebook.com/*/reel-media*' => Http::response(['id' => 'reel-media', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/reel-media/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(['reel time'], [$media]));
@@ -373,8 +382,10 @@ test('instagram maps a 401 to AuthExpired', function () {
         ->and($result->errorKind)->toBe(ErrorKind::AuthExpired);
 });
 
-test('instagram resume guard returns success without making any http calls', function () {
-    Http::fake();
+test('instagram verifies a saved media id without publishing again', function () {
+    Http::fake([
+        '*/media-555*' => Http::response(['id' => 'media-555', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/media-555/']),
+    ]);
 
     $result = app(InstagramConnector::class)->publish(igContext(['hi'], [], [
         'remote_id' => 'media-555',
@@ -384,7 +395,8 @@ test('instagram resume guard returns success without making any http calls', fun
     expect($result->isSuccessful())->toBeTrue()
         ->and($result->remoteIds)->toBe(['media-555']);
 
-    Http::assertNothingSent();
+    Http::assertSentCount(1);
+    Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
 });
 
 test('instagram connector never silently publishes photos with a saved music requirement', function (): void {
@@ -393,4 +405,134 @@ test('instagram connector never silently publishes photos with a saved music req
     $result = app(InstagramConnector::class)->publish(igContext(['Photo caption'], [$photo], ['content_override' => ['music' => ['track' => 'Required song']]]));
     expect($result->isSuccessful())->toBeFalse()->and($result->errorKind)->toBe(ErrorKind::Validation);
     Http::assertNothingSent();
+});
+
+test('instagram retries a receipt read after timeout without publishing the accepted media again', function () {
+    $context = igContext(['receipt verification'], [PostMedia::factory()->create()], [
+        'media_upload_state' => ['container' => ['remote_ref' => 'existing-container', 'state' => 'processing']],
+    ]);
+    $reads = 0;
+    Http::preventStrayRequests();
+    Http::fake(function (Request $request) use (&$reads) {
+        if (str_contains($request->url(), '/existing-container')) {
+            return Http::response(['status_code' => 'FINISHED']);
+        }
+        if ($request->method() === 'POST') {
+            return Http::response(['id' => 'accepted-media']);
+        }
+        $reads++;
+        if ($reads === 1) {
+            throw new ConnectionException('Receipt read timed out');
+        }
+
+        return Http::response(['id' => 'accepted-media', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/reel/approved/']);
+    });
+
+    expect(app(InstagramConnector::class)->publish($context)->errorKind)->toBe(ErrorKind::Network)
+        ->and($context->target->fresh()->remote_id)->toBe('accepted-media');
+    expect(app(InstagramConnector::class)->publish($context)->remoteIds)->toBe(['accepted-media'])
+        ->and(data_get($context->target->fresh()->media_upload_state, 'publication.receipt.url'))->toBe('https://www.instagram.com/reel/approved/')
+        ->and(data_get($context->target->fresh()->media_upload_state, 'publication.receipt.remote_account_id'))->toBe('ig123');
+    expect(Http::recorded(fn (Request $request): bool => $request->method() === 'POST'))->toHaveCount(1);
+});
+
+test('instagram never confirms a receipt with a different media id account or invalid permalink', function (array $receipt) {
+    $context = igContext(['existing post'], [], ['remote_id' => 'saved-media', 'remote_ids' => ['saved-media']]);
+    Http::preventStrayRequests();
+    Http::fake(['*/saved-media*' => Http::response($receipt)]);
+
+    $result = app(InstagramConnector::class)->publish($context);
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($context->target->fresh()->remote_id)->toBe('saved-media')
+        ->and(data_get($context->target->fresh()->media_upload_state, 'publication.receipt'))->toBeNull();
+    Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
+})->with([
+    'different media' => [['id' => 'other-media', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/approved/']],
+    'different account' => [['id' => 'saved-media', 'owner' => ['id' => 'other-account'], 'permalink' => 'https://www.instagram.com/p/approved/']],
+    'missing owner' => [['id' => 'saved-media', 'permalink' => 'https://www.instagram.com/p/approved/']],
+    'foreign link' => [['id' => 'saved-media', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://example.com/p/approved/']],
+    'credential-bearing link' => [['id' => 'saved-media', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://user:secret@www.instagram.com/p/approved/']],
+    'unexpected port' => [['id' => 'saved-media', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com:9999/p/approved/']],
+    'missing link' => [['id' => 'saved-media', 'owner' => ['id' => 'ig123']]],
+]);
+
+test('instagram retains the unknown outcome gate after a malformed publish acknowledgement', function () {
+    $context = igContext(['uncertain post'], [PostMedia::factory()->create()], [
+        'media_upload_state' => ['container' => ['remote_ref' => 'existing-container', 'state' => 'processing']],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake([
+        '*/existing-container*' => Http::response(['status_code' => 'FINISHED']),
+        '*/media_publish' => Http::response([]),
+    ]);
+
+    expect(app(InstagramConnector::class)->publish($context)->errorKind)->toBe(ErrorKind::Unknown)
+        ->and(app(InstagramConnector::class)->publish($context)->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($context->target->fresh()->media_upload_state['container']['metadata']['publish_outcome_unknown'])->toBeTrue();
+    Http::assertSentCount(4);
+});
+
+test('instagram reconciles a lost acknowledgement as published without inventing a receipt or republishing', function () {
+    $context = igContext(['uncertain post'], [PostMedia::factory()->create()], [
+        'media_upload_state' => ['container' => [
+            'remote_ref' => 'published-container',
+            'metadata' => ['publish_outcome_unknown' => true],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake(['*/published-container*' => Http::response(['status_code' => 'PUBLISHED'])]);
+
+    $result = app(InstagramConnector::class)->publish($context);
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorMessage)->toContain('confirms the container was published')
+        ->and($context->target->fresh()->remote_id)->toBeNull()
+        ->and(data_get($context->target->fresh()->media_upload_state, 'container.metadata.provider_status'))->toBe('PUBLISHED')
+        ->and(data_get($context->target->fresh()->media_upload_state, 'container.metadata.publish_outcome_unknown'))->toBeTrue()
+        ->and(data_get($context->target->fresh()->media_upload_state, 'publication.receipt'))->toBeNull();
+    Http::assertSentCount(1);
+    Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
+});
+
+test('instagram retains an uncertain upload when its selected account changes', function () {
+    $context = igContext(['existing post'], [PostMedia::factory()->create()], [
+        'media_upload_state' => ['container' => [
+            'remote_ref' => 'existing-container',
+            'metadata' => ['publish_outcome_unknown' => true, 'remote_account_id' => 'original-account'],
+        ]],
+    ]);
+    Http::preventStrayRequests();
+    Http::fake();
+
+    $result = app(InstagramConnector::class)->publish($context);
+    expect($result->outcome)->toBe('awaiting_action')
+        ->and($result->statusMessage)->toContain('different account')
+        ->and(data_get($context->target->fresh()->media_upload_state, 'container.remote_ref'))->toBe('existing-container');
+    Http::assertNothingSent();
+});
+
+test('instagram immediately reconciles a lost final publish response using only a container read', function () {
+    $context = igContext(['uncertain post'], [PostMedia::factory()->create()], [
+        'media_upload_state' => ['container' => ['remote_ref' => 'accepted-container', 'state' => 'processing']],
+    ]);
+    $publishCalls = 0;
+    $statusReads = 0;
+    Http::preventStrayRequests();
+    Http::fake(function (Request $request) use (&$publishCalls, &$statusReads) {
+        if ($request->method() === 'POST') {
+            $publishCalls++;
+            throw new ConnectionException('Publish acknowledgement lost');
+        }
+        $statusReads++;
+
+        return Http::response(['status_code' => $statusReads === 1 ? 'FINISHED' : 'PUBLISHED']);
+    });
+
+    $result = app(InstagramConnector::class)->publish($context);
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($result->errorMessage)->toContain('confirms the container was published')
+        ->and($statusReads)->toBe(2)
+        ->and($publishCalls)->toBe(1)
+        ->and(data_get($context->target->fresh()->media_upload_state, 'container.metadata.publish_outcome_unknown'))->toBeTrue()
+        ->and(data_get($context->target->fresh()->media_upload_state, 'container.metadata.provider_status'))->toBe('PUBLISHED')
+        ->and($context->target->fresh()->remote_id)->toBeNull();
 });

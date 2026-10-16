@@ -10,6 +10,7 @@ use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Publishing\ManualRetryEligibility;
 use App\Services\Publishing\PostStatusRollup;
+use App\Services\Publishing\PublicationProgress;
 
 final class PostListItem
 {
@@ -49,6 +50,7 @@ final class PostListItem
                     'platform' => $target->platform->value,
                     'status' => $status->value,
                     'status_message' => $target->publicationMessage($status),
+                    'publication_progress' => app(PublicationProgress::class)->view($target),
                     'error_kind' => $projected ? null : $target->error_kind?->value,
                     'error_message' => $projected ? null : $target->error_message,
                     'can_retry' => $retry['allowed'],

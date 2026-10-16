@@ -80,6 +80,10 @@ class YouTubeConnector implements PublishConnector
             }
         }
         $state = new MediaUploadState($context->target->media_upload_state);
+        $storedAccount = $state->metadata($media->id)['remote_account_id'] ?? null;
+        if ($storedAccount !== null && $storedAccount !== $context->account->remote_account_id) {
+            return PublishResult::awaitingAction([], 'This YouTube upload belongs to a different channel. Restore the original destination before continuing.');
+        }
         $storedPrivacy = (string) ($state->metadata($media->id)['privacy_status'] ?? '');
         $expectedPrivacy = in_array($storedPrivacy, ['private', 'unlisted', 'public'], true)
             ? $storedPrivacy
@@ -199,6 +203,7 @@ class YouTubeConnector implements PublishConnector
             'total_bytes' => $media->size_bytes,
             'content_type' => $media->mime,
             'format_intent' => $options['formatIntent'],
+            'remote_account_id' => $context->account->remote_account_id,
             'privacy_status' => $hasThumbnail ? $metadata['thumbnail']['intended_privacy'] : $options['privacyStatus'],
             'snippet' => ['title' => $title, 'description' => $description],
             'outcome_unknown' => false,
@@ -255,13 +260,7 @@ class YouTubeConnector implements PublishConnector
         }
 
         if (in_array($response->status(), [404, 410], true)) {
-            if (is_array($state->metadata($media->id)['thumbnail'] ?? null)) {
-                return PublishResult::awaitingAction([], 'The private YouTube upload session expired with no confirmed video ID. Review the channel before replacing the upload.');
-            }
-            $state->forget($media->id);
-            $this->persistState($context, $state);
-
-            return PublishResult::failure(ErrorKind::MediaProcessing, 'YouTube upload session expired; starting a fresh session.', retryAfter: 1);
+            return PublishResult::awaitingAction([], 'The YouTube upload session expired with an uncertain outcome and no confirmed video ID. The existing upload is retained. Review the channel before replacing it to avoid publishing a duplicate.');
         }
 
         return $this->httpFailure($response, 'YouTube could not reconcile the resumable upload.');
@@ -297,6 +296,10 @@ class YouTubeConnector implements PublishConnector
         if (! is_string($bytes) || strlen($bytes) !== $length) {
             throw new RuntimeException('The next YouTube video chunk could not be read from storage.');
         }
+
+        $metadata['outcome_unknown'] = true;
+        $state->setMetadata($media->id, $metadata);
+        $this->persistState($context, $state);
 
         $response = $this->http
             ->timeout(120)
@@ -359,9 +362,17 @@ class YouTubeConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::ServerError, 'YouTube completed the upload without a valid video id.');
         }
 
+        $state = new MediaUploadState($context->target->media_upload_state);
+        $media = $context->effectiveMedia()[0];
+        $metadata = $state->metadata($media->id);
+        $metadata['outcome_unknown'] = false;
+        $metadata['uploaded_bytes'] = $media->size_bytes;
+        $metadata['upload_complete'] = true;
+        $state->setMetadata($media->id, $metadata);
         $context->target->forceFill([
             'remote_id' => $videoId,
             'remote_ids' => [$videoId],
+            'media_upload_state' => $state->toArray(),
         ])->save();
 
         return $this->processingStatus($context, $token, $videoId, $expectedPrivacy);
@@ -389,6 +400,10 @@ class YouTubeConnector implements PublishConnector
         $item = $response->json('items.0');
         if (! is_array($item)) {
             return PublishResult::failure(ErrorKind::ServerError, 'YouTube did not return the uploaded video.');
+        }
+
+        if (($item['id'] ?? null) !== $videoId || data_get($item, 'snippet.channelId') !== $context->account->remote_account_id) {
+            return PublishResult::failure(ErrorKind::Unknown, 'YouTube has not verified this video on the selected channel. The existing video ID is retained; review the destination before continuing.');
         }
 
         $uploadStatus = strtolower((string) ($item['status']['uploadStatus'] ?? ''));
@@ -434,6 +449,16 @@ class YouTubeConnector implements PublishConnector
                 "YouTube processed the video as {$privacyStatus}, but this upload requested {$expectedPrivacy}.",
             );
         }
+
+        $state = $context->target->media_upload_state ?? [];
+        $state['publication']['receipt'] = [
+            'remote_id' => $videoId,
+            'remote_account_id' => $context->account->remote_account_id,
+            'url' => 'https://www.youtube.com/watch?v='.$videoId,
+            'visibility' => $privacyStatus,
+            'verified_at' => now()->toIso8601String(),
+        ];
+        $context->target->forceFill(['media_upload_state' => $state])->save();
 
         return $privacyStatus === 'public'
             ? PublishResult::success([$videoId])

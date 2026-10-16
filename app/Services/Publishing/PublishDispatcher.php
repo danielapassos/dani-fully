@@ -51,8 +51,7 @@ class PublishDispatcher
 
             $issues = $issuesByAccount[(string) $target->connected_account_id] ?? null;
             if ($issues !== null) {
-                $this->markBlocked($target, $issues);
-                $statusChanged = true;
+                $statusChanged = $this->markBlocked($target, $issues) || $statusChanged;
 
                 continue;
             }
@@ -156,13 +155,16 @@ class PublishDispatcher
      *
      * @param  list<string>  $issues
      */
-    private function markBlocked(PostTarget $target, array $issues): void
+    private function markBlocked(PostTarget $target, array $issues): bool
     {
-        $target->forceFill([
-            'status' => PostTargetStatus::Failed->value,
-            'error_kind' => ErrorKind::Validation->value,
-            'error_message' => $this->precheck->describe($issues, $target->platform),
-            'next_attempt_at' => null,
-        ])->save();
+        return PostTarget::query()
+            ->whereKey($target->getKey())
+            ->where('status', PostTargetStatus::Pending->value)
+            ->update([
+                'status' => PostTargetStatus::Failed->value,
+                'error_kind' => ErrorKind::Validation->value,
+                'error_message' => $this->precheck->describe($issues, $target->platform),
+                'next_attempt_at' => null,
+            ]) === 1;
     }
 }

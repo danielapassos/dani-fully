@@ -7,6 +7,7 @@ namespace App\Mcp\Tools;
 use App\Enums\Platform;
 use App\Mcp\Tools\Concerns\WorkspaceTool;
 use App\Models\ConnectedAccount;
+use App\Services\Publishing\AccountPublishingReadiness;
 use App\Services\Publishing\TikTokInboxHandoff;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
@@ -14,7 +15,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('List every connected social account in the bound workspace with publishing readiness, exact blocker, and recovery action. A connected login is not proof that publishing is approved; operator_configuration requires app setup, not another user sign-in.')]
+#[Description('List every connected social account in the bound workspace with stored publishing readiness, exact blocker, recovery action, and music capabilities. publishing_ready checks saved configuration and credentials; it does not verify current provider eligibility or browser sign-in. A connected login is not proof that publishing is approved; operator_configuration requires app setup, not another user sign-in.')]
 class ListConnectedAccountsTool extends WorkspaceTool
 {
     public function handle(Request $request): Response
@@ -36,6 +37,7 @@ class ListConnectedAccountsTool extends WorkspaceTool
                 'status' => $account->status->value,
                 'status_label' => $account->status->label(),
                 'publishing_ready' => $account->canPublish(),
+                ...app(AccountPublishingReadiness::class)->view($account),
                 'tiktok_inbox_enabled' => app(TikTokInboxHandoff::class)->enabledFor($account),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
                 'publishing_recovery_kind' => $account->publishingRecoveryKind(),

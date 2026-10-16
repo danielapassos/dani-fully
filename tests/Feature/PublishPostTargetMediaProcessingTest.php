@@ -20,7 +20,12 @@ test('MediaProcessing re-dispatches without burning the publish attempt budget',
     Bus::fake();
 
     $target = publishTarget();
-    $target->forceFill(['attempts' => 2, 'media_upload_state' => ['_polls' => 3]])->save();
+    $target->forceFill([
+        'attempts' => 2,
+        'media_upload_state' => ['_polls' => 3],
+        'error_kind' => ErrorKind::Network,
+        'error_message' => 'previous connection failure',
+    ])->save();
 
     bindConnector(PublishResult::failure(ErrorKind::MediaProcessing, 'video still processing', retryAfter: 15));
 
@@ -37,6 +42,8 @@ test('MediaProcessing re-dispatches without burning the publish attempt budget',
     expect($target->attempts)->toBe(2);
     expect($target->media_upload_state['_polls'])->toBe(4);
     expect($target->status)->toBe(PostTargetStatus::Publishing);
+    expect($target->error_kind)->toBe(ErrorKind::MediaProcessing)
+        ->and($target->error_message)->toBe('video still processing');
 
     Bus::assertDispatched(PublishPostTarget::class);
 });

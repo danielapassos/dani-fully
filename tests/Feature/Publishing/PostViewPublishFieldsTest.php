@@ -24,6 +24,8 @@ test('post view exposes per-target publish status and root published_at', functi
 
     expect($view['published_at'])->not->toBeNull()
         ->and($view['targets'][0]['status'])->toBe('failed')
+        ->and($view['targets'][0]['publication_progress']['phase'])->toBe('failed')
+        ->and($view['targets'][0]['publication_progress']['live_verified'])->toBeFalse()
         ->and($view['targets'][0]['error_kind'])->toBe('rate_limited')
         ->and($view['targets'][0]['error_message'])->toBe('slow down')
         ->and($view['targets'][0]['can_retry'])->toBeTrue()
@@ -47,6 +49,7 @@ test('legacy confirmed inbox delivery is presented truthfully without changing s
 
     expect($view['status'])->toBe('awaiting_action')
         ->and($view['targets'][0]['status'])->toBe('awaiting_action')
+        ->and($view['targets'][0]['publication_progress']['phase'])->toBe('inbox')
         ->and($view['targets'][0]['status_message'])->toContain('not live')
         ->and($view['targets'][0]['can_retry'])->toBeFalse()
         ->and($view['targets'][0]['error_kind'])->toBeNull()
@@ -118,6 +121,8 @@ test('post view marks an unconfirmed provider outcome for manual review', functi
     expect($view['targets'][0]['can_retry'])->toBeFalse()
         ->and($view['targets'][0]['retry_blocked_reason'])
         ->toBe('The provider outcome is unconfirmed and may already be live. Check the connected platform before taking any further action.');
+
+    expect($view['targets'][0]['publication_progress']['phase'])->toBe('uncertain');
 });
 
 test('post view replaces retry with account recovery when a connection needs attention', function () {

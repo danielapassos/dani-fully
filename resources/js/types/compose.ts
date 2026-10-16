@@ -117,6 +117,30 @@ export type Destination =
 
 export type AccountStatus = 'active' | 'needs_attention';
 
+export type PublishingReadiness = {
+    basis: 'stored_configuration_and_credentials';
+    provider_verified: false;
+    provider_checked_at: null;
+    permission_status:
+        | 'granted'
+        | 'missing'
+        | 'unknown'
+        | 'not_required'
+        | 'separate_credentials';
+    mode: string;
+    message: string;
+    browser_session_verified: false;
+};
+
+export type MusicCapabilities = {
+    native_catalog_search: false;
+    native_track_attachment: false;
+    existing_file_audio: true;
+    native_finishing_required_for_music: boolean;
+    message: string;
+    license_note: string;
+};
+
 export type Account = {
     id: string;
     platform: PlatformName;
@@ -132,6 +156,8 @@ export type Account = {
     auto_repost_enabled?: boolean;
     /** False when this connection cannot currently accept publish jobs. */
     publishing_ready?: boolean;
+    publishing_readiness?: PublishingReadiness;
+    music_capabilities?: MusicCapabilities;
     /** Actionable explanation shown beside a connection that cannot publish. */
     publishing_unavailable_reason?: string | null;
     tiktok_direct_post_enabled?: boolean;
@@ -252,6 +278,19 @@ export type TargetView = {
     issues: string[];
     status: TargetStatus;
     status_message?: string | null;
+    publication_progress?: {
+        phase: string;
+        label: string;
+        message: string | null;
+        live_verified: boolean;
+        receipt: {
+            remote_id: string;
+            remote_account_id: string;
+            url: string;
+            verified_at: string;
+            visibility: 'public' | 'published' | 'private' | 'unlisted';
+        } | null;
+    };
     music_handoff?: {
         kind: 'native_music';
         connected_account_id: string;

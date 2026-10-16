@@ -3,10 +3,12 @@
 use App\Dto\Publishing\PublishContext;
 use App\Enums\ErrorKind;
 use App\Enums\Platform;
+use App\Enums\PostTargetStatus;
 use App\Models\ConnectedAccount;
 use App\Models\PostMedia;
 use App\Models\PostTarget;
 use App\Services\Publishing\Connectors\TikTokConnector;
+use App\Services\Publishing\TikTokInboxReconciliation;
 use Aws\Command;
 use Aws\Exception\AwsException;
 use Aws\Result;
@@ -259,7 +261,7 @@ test('tiktok preserves the unknown-outcome gate for an initialization server err
     Http::assertSentCount(1);
 });
 
-test('tiktok resumes the stored publish and records the public video id', function () {
+test('tiktok inbox video completion waits for public receipt verification without uploading again', function () {
     Http::fake([
         'https://open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response([
             'data' => [
@@ -273,13 +275,18 @@ test('tiktok resumes the stored publish and records the public video id', functi
     $video = PostMedia::factory()->video()->create();
     $context = tiktokPublishContext([$video], [
         'media_upload_state' => [
-            $video->id => ['remote_ref' => 'publish-42', 'state' => 'processing'],
+            $video->id => ['remote_ref' => 'publish-42', 'state' => 'processing', 'metadata' => ['publish_mode' => 'inbox']],
         ],
     ]);
     $result = tiktokPublishConnector()->publish($context);
 
     expect($result->isSuccessful())->toBeTrue()
-        ->and($result->remoteIds)->toBe(['7390000000000000042']);
+        ->and($result->outcome)->toBe('completed')
+        ->and($result->remoteIds)->toBe([])
+        ->and($result->statusMessage)->toContain('ownership still need verification');
+
+    $context->target->forceFill(['status' => PostTargetStatus::Completed])->save();
+    expect(app(TikTokInboxReconciliation::class)->eligible($context->target))->toBeTrue();
 
     Http::assertSentCount(1);
 });

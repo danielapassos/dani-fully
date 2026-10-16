@@ -138,8 +138,8 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
             return;
         }
 
-        // Manual retries must first atomically move Failed/Skipped back to
-        // Pending. A stale duplicate job must never turn a completed failure
+        // Manual retries must first atomically claim Failed/Skipped as
+        // Publishing. A stale duplicate job must never turn a completed failure
         // into an implicit retry after the overlap lock has been released.
         if (! in_array($target->status, self::RUNNABLE, true)) {
             return;
@@ -326,7 +326,7 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $segmentCount = count($target->sections ?? []);
         $postedCount = count($this->postedRemoteIds($target));
 
-        if ($target->platform !== Platform::YouTube && $segmentCount > 0 && $postedCount >= $segmentCount) {
+        if (! in_array($target->platform, [Platform::YouTube, Platform::Instagram], true) && $segmentCount > 0 && $postedCount >= $segmentCount) {
             $this->reconcilePublished($target);
 
             return;
@@ -577,7 +577,11 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
     private function onNonPublicCompletion(PostTarget $target, ?PostTargetAttempt $attempt, PublishResult $result): void
     {
         $state = $target->media_upload_state ?? [];
-        $state['publication'] = ['status' => $result->outcome, 'message' => $result->statusMessage];
+        $state['publication'] = [
+            ...(is_array($state['publication'] ?? null) ? $state['publication'] : []),
+            'status' => $result->outcome,
+            'message' => $result->statusMessage,
+        ];
         $existingIds = $target->remote_ids ?? array_filter([$target->remote_id]);
         $remoteIds = array_values(array_unique([...$existingIds, ...$result->remoteIds]));
 
@@ -709,6 +713,8 @@ class PublishPostTarget implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
         $target->forceFill([
             'status' => PostTargetStatus::Publishing->value,
+            'error_kind' => ErrorKind::MediaProcessing->value,
+            'error_message' => $result->errorMessage,
             // Transcode polls must not exhaust the publish-failure budget, so neutralize
             // the attempts++ that handle() applied at the start of this run.
             'attempts' => max(0, $target->attempts - 1),

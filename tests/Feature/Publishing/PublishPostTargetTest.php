@@ -46,7 +46,10 @@ test('successful publish marks the target published with remote ids', function (
 test('a completed handoff stops processing without announcing a public post or sending it again', function (string $outcome, array $remoteIds) {
     $target = publishTarget(['one']);
     $target->forceFill([
-        'media_upload_state' => ['media-1' => ['remote_ref' => 'upload-operation', 'state' => 'processing']],
+        'media_upload_state' => [
+            'media-1' => ['remote_ref' => 'upload-operation', 'state' => 'processing'],
+            'publication' => ['receipt' => ['remote_id' => 'video_42', 'visibility' => 'private']],
+        ],
         'next_attempt_at' => now()->addMinute(),
     ])->save();
     Bus::fake();
@@ -69,6 +72,7 @@ test('a completed handoff stops processing without announcing a public post or s
         ->and($target->remote_id)->toBe($remoteIds[0] ?? null)
         ->and(data_get($target->media_upload_state, 'media-1.remote_ref'))->toBe('upload-operation')
         ->and(data_get($target->media_upload_state, 'publication.message'))->toBe($message)
+        ->and(data_get($target->media_upload_state, 'publication.receipt.remote_id'))->toBe('video_42')
         ->and($target->next_attempt_at)->toBeNull()
         ->and($target->canRetryManually())->toBeFalse();
     expect($target->attemptLogs()->sole()->status)->toBe($outcome);
@@ -119,10 +123,10 @@ test('legacy confirmed TikTok inbox evidence is reconciled without invoking the 
     Notification::assertNothingSent();
 });
 
-test('a YouTube upload id alone cannot reconcile a dead worker as publicly published', function () {
+test('a media id alone cannot reconcile a dead worker before its provider receipt is checked', function (Platform $platform) {
     $target = publishTarget(['one']);
     $target->forceFill([
-        'platform' => Platform::YouTube,
+        'platform' => $platform,
         'status' => PostTargetStatus::Publishing,
         'remote_id' => 'video_42',
         'remote_ids' => ['video_42'],
@@ -137,7 +141,7 @@ test('a YouTube upload id alone cannot reconcile a dead worker as publicly publi
         ->and($target->posted_at)->toBeNull();
     Bus::assertDispatched(PublishPostTarget::class);
     Notification::assertNothingSent();
-});
+})->with([Platform::YouTube, Platform::Instagram]);
 
 test('a retained TikTok transfer may finish polling with its original upload grant', function (bool $hasReference) {
     config()->set('services.tiktok.direct_post_enabled', true);

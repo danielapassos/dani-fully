@@ -42,6 +42,7 @@ function fakeTrialContainer(string $status = 'FINISHED'): void
         '*/ig-trial/media' => Http::response(['id' => 'trial-container']),
         '*/trial-container*' => Http::response(['status_code' => $status]),
         '*/ig-trial/media_publish' => Http::response(['id' => 'trial-media']),
+        '*/trial-media*' => Http::response(['id' => 'trial-media', 'owner' => ['id' => 'ig-trial'], 'permalink' => 'https://www.instagram.com/p/trial-media/']),
     ]);
 }
 
@@ -111,6 +112,7 @@ test('trial reel processing resumes the same container and strategy without anot
         '*/ig-trial/media' => Http::response(['id' => 'trial-container']),
         '*/trial-container*' => Http::sequence()->push(['status_code' => 'IN_PROGRESS'])->push(['status_code' => 'FINISHED']),
         '*/ig-trial/media_publish' => Http::response(['id' => 'trial-media']),
+        '*/trial-media*' => Http::response(['id' => 'trial-media', 'owner' => ['id' => 'ig-trial'], 'permalink' => 'https://www.instagram.com/p/trial-media/']),
     ]);
     expect(app(InstagramConnector::class)->publish($context)->errorKind)->toBe(ErrorKind::MediaProcessing);
 

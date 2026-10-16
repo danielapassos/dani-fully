@@ -419,6 +419,25 @@ export function AccountCard({
                 </div>
             )}
 
+            {account.publishing_readiness && (
+                <p className="text-[12px] leading-relaxed text-muted-foreground">
+                    {account.publishing_readiness.message}
+                    {account.publishing_readiness.mode === 'inbox' &&
+                        ' This destination uploads to the TikTok inbox for manual completion.'}
+                    {' Browser sign-ins are separate and are not checked here.'}
+                </p>
+            )}
+            {account.music_capabilities
+                ?.native_finishing_required_for_music && (
+                <details className="text-[12px] leading-relaxed text-muted-foreground">
+                    <summary className="cursor-pointer">
+                        Music capabilities
+                    </summary>
+                    <p className="mt-1">{account.music_capabilities.message}</p>
+                    <p>{account.music_capabilities.license_note}</p>
+                </details>
+            )}
+
             {account.platform === 'x' && (
                 <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
                     <span className="min-w-0">

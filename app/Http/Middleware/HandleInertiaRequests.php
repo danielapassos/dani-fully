@@ -12,6 +12,7 @@ use App\Models\PostTargetReply;
 use App\Models\User;
 use App\Models\WorkspaceMembership;
 use App\Services\Gifs\KlipyClient;
+use App\Services\Publishing\AccountPublishingReadiness;
 use App\Services\Publishing\TikTokInboxHandoff;
 use App\Services\Publishing\TikTokPublishingRoute;
 use App\Support\CommunityStats;
@@ -163,6 +164,7 @@ class HandleInertiaRequests extends Middleware
         $defaultAccountId = $user->currentWorkspace()->value('default_connected_account_id');
 
         return ConnectedAccount::query()
+            ->with('secret:connected_account_id,session')
             ->where('workspace_id', $user->current_workspace_id)
             ->enabled()
             ->get()
@@ -180,6 +182,7 @@ class HandleInertiaRequests extends Middleware
                 'x_premium' => $account->hasXPremium(),
                 'auto_repost_enabled' => $account->autoRepostEnabled(),
                 'publishing_ready' => $account->canPublish(),
+                ...app(AccountPublishingReadiness::class)->view($account),
                 'tiktok_inbox_enabled' => app(TikTokInboxHandoff::class)->enabledFor($account),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
                 'tiktok_direct_post_enabled' => $account->platform->value === 'tiktok'

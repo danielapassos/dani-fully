@@ -12,7 +12,10 @@ test('API exposes inbox mode only for the native inbox configuration', function 
     ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::TikTok]);
 
     $this->withToken($token)->getJson('/api/v1/connected-accounts')->assertOk()
-        ->assertJsonPath('data.0.tiktok_inbox_enabled', $expected);
+        ->assertJsonPath('data.0.tiktok_inbox_enabled', $expected)
+        ->assertJsonPath('data.0.publishing_readiness.provider_verified', false)
+        ->assertJsonPath('data.0.publishing_readiness.browser_session_verified', false)
+        ->assertJsonPath('data.0.music_capabilities.native_track_attachment', false);
 })->with([
     'inbox' => ['native', false, true],
     'direct' => ['native', true, false],

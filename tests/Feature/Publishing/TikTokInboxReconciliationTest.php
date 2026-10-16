@@ -12,7 +12,12 @@ use App\Models\ConnectedAccountSecret;
 use App\Models\Post;
 use App\Models\PostTarget;
 use App\Models\Workspace;
+use App\Services\Publishing\BackoffSchedule;
+use App\Services\Publishing\PostStatusRollup;
+use App\Services\Publishing\PublishConnectorRegistry;
 use App\Services\Publishing\TikTokInboxReconciliation;
+use App\Services\Publishing\TokenManager;
+use App\Support\InstanceSettings;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
@@ -138,6 +143,53 @@ test('a failed retained inbox receipt recovers verified public completion read o
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'PUT' || str_contains($request->url(), '/init/'));
     Queue::assertNotPushed(PublishPostTarget::class);
     Event::assertNotDispatched(PostTargetPublished::class);
+});
+
+test('an accepted inbox transfer skipped after publishing is disabled still allows a status-only refresh', function (): void {
+    $target = failedInboxTrackingTarget(attributes: ['status' => PostTargetStatus::Publishing]);
+    Queue::fake();
+    Event::fake([PostTargetPublished::class]);
+    config(['services.tiktok.inbox_enabled' => false, 'services.tiktok.direct_post_enabled' => false]);
+    app(InstanceSettings::class)->update(['platforms_enabled' => ['tiktok' => false]]);
+    Http::fake(['open.tiktokapis.com/v2/post/publish/status/fetch/' => Http::response([
+        'error' => ['code' => 'ok'], 'data' => ['status' => 'SEND_TO_USER_INBOX'],
+    ])]);
+
+    (new PublishPostTarget($target))->handle(
+        app(PublishConnectorRegistry::class), app(TokenManager::class), app(PostStatusRollup::class), app(BackoffSchedule::class),
+    );
+    expect($target->refresh()->status)->toBe(PostTargetStatus::Skipped);
+    Http::assertNothingSent();
+
+    $service = app(TikTokInboxReconciliation::class);
+    expect($service->view($target)['can_refresh'])->toBeTrue();
+    $service->reconcile($target, manual: true);
+
+    expect($target->refresh()->status)->toBe(PostTargetStatus::AwaitingAction)
+        ->and($target->media_upload_state['media-id']['remote_ref'])->toBe('v_inbox_file~v2.123')
+        ->and($target->attempts)->toBe(5);
+    Http::assertSentCount(1);
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'PUT' || str_contains($request->url(), '/init/'));
+    Queue::assertNotPushed(PublishPostTarget::class);
+    Event::assertNotDispatched(PostTargetPublished::class);
+});
+
+test('skipped inbox receipt recovery respects account disablement until the account is restored', function (): void {
+    $target = failedInboxTrackingTarget(attributes: ['status' => PostTargetStatus::Skipped]);
+    $target->account->update(['disabled_at' => now()]);
+    fakeInboxPublicPosts();
+    $service = app(TikTokInboxReconciliation::class);
+
+    expect($service->view($target)['can_refresh'])->toBeFalse();
+    $service->reconcile($target, manual: true);
+    Http::assertNothingSent();
+
+    $target->account->update(['disabled_at' => null]);
+    $service->reconcile($target, manual: true);
+
+    expect($target->refresh()->status)->toBe(PostTargetStatus::Published);
+    Http::assertSentCount(2);
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'PUT' || str_contains($request->url(), '/init/'));
 });
 
 test('failed receipt completion without public proof remains completed rather than published', function (string $proof): void {
@@ -309,6 +361,23 @@ test('inbox reconciliation schedules failed retained receipts only within its bo
     Http::assertNothingSent();
 });
 
+test('skipped inbox receipts are scheduled only with a saved operation inside the lookback', function (): void {
+    $this->freezeSecond();
+    $recent = failedInboxTrackingTarget(attributes: ['status' => PostTargetStatus::Skipped, 'created_at' => now()->subDays(29)]);
+    failedInboxTrackingTarget(attributes: ['status' => PostTargetStatus::Skipped, 'created_at' => now()->subDays(31)]);
+    failedInboxTrackingTarget(attributes: ['status' => PostTargetStatus::Skipped, 'media_upload_state' => []]);
+    $disabled = failedInboxTrackingTarget(attributes: ['status' => PostTargetStatus::Skipped]);
+    $disabled->account->update(['disabled_at' => now()]);
+    Queue::fake();
+
+    $this->artisan('tiktok:reconcile-inbox', ['--days' => 30, '--limit' => 100])->assertSuccessful();
+
+    Queue::assertPushed(ReconcileTikTokInbox::class, 1);
+    Queue::assertPushed(ReconcileTikTokInbox::class, fn (ReconcileTikTokInbox $job): bool => $job->target->is($recent));
+    Queue::assertNotPushed(PublishPostTarget::class);
+    Http::assertNothingSent();
+});
+
 test('reconciles exact inbox operation to every owned public post without uploading or triggering cross posting', function (): void {
     Event::fake([PostTargetPublished::class]);
     $target = inboxTrackingTarget();
@@ -326,6 +395,9 @@ test('reconciles exact inbox operation to every owned public post without upload
         ->and($target->media_upload_state['media-id']['remote_ref'])->toBe('v_inbox_file~v2.123')
         ->and($target->media_upload_state['_tiktok_provider'])->toBe('native')
         ->and($target->media_upload_state['_tiktok_reconciliation']['public_posts'])->toHaveCount(2)
+        ->and($target->media_upload_state['_tiktok_reconciliation']['remote_account_id'])->toBe($target->account->remote_account_id)
+        ->and($target->media_upload_state['_tiktok_reconciliation']['connected_account_id'])->toBe($target->connected_account_id)
+        ->and($target->media_upload_state['_tiktok_reconciliation']['publish_id'])->toBe('v_inbox_file~v2.123')
         ->and($target->sections)->toBe(['Caption can be changed in TikTok'])
         ->and($target->post->status)->toBe(PostStatus::Published)
         ->and($target->attempts)->toBe(1);

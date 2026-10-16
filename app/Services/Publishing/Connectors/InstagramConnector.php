@@ -58,7 +58,7 @@ class InstagramConnector implements PublishConnector
         }
 
         if (($context->target->remote_id ?? null) !== null) {
-            return PublishResult::success($context->target->remote_ids ?? [$context->target->remote_id]);
+            return $this->verifyPublication($context, $context->target->remote_id, $token);
         }
 
         if ($context->effectiveMedia() === []) {
@@ -77,8 +77,12 @@ class InstagramConnector implements PublishConnector
         }
 
         $state = new MediaUploadState($context->target->media_upload_state);
+        $metadata = $state->metadata(self::CONTAINER_KEY);
+        if (isset($metadata['remote_account_id']) && $metadata['remote_account_id'] !== $igUserId) {
+            return PublishResult::awaitingAction([], 'This Instagram upload belongs to a different account. Restore the original destination before continuing.');
+        }
         if ($this->publishOutcomeUnknown($state)) {
-            return $this->publishNeedsReview();
+            return $this->reconcileUnknownPublication($context, $state, $token);
         }
 
         if (app(PhotoMusic::class)->issues($context->target, $context->effectiveMedia()) !== []) {
@@ -115,7 +119,7 @@ class InstagramConnector implements PublishConnector
             $this->persistState($context, $state);
             $finalPublishPending = true;
 
-            $publish = $this->http->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media_publish', [
+            $publish = $this->http->timeout(30)->connectTimeout(5)->asForm()->post(InstagramGraphApi::baseUrl($context->account).'/'.$igUserId.'/media_publish', [
                 'creation_id' => $containerId,
                 'access_token' => $token,
             ]);
@@ -124,7 +128,7 @@ class InstagramConnector implements PublishConnector
 
             if ($publish->failed()) {
                 if ($publish->serverError()) {
-                    return $this->publishNeedsReview();
+                    return $this->reconcileUnknownPublication($context, $state, $token);
                 }
 
                 $this->setPublishOutcomeUnknown($state, false);
@@ -147,14 +151,14 @@ class InstagramConnector implements PublishConnector
             return PublishResult::failure(ErrorKind::Unsupported, $e->getMessage());
         } catch (ConnectionException $e) {
             if ($finalPublishPending) {
-                return $this->publishNeedsReview();
+                return $this->reconcileUnknownPublication($context, $state, $token);
             }
 
             return PublishResult::failure(ErrorKind::Network, $e->getMessage());
         }
 
         if ($mediaId === '') {
-            return $this->publishNeedsReview();
+            return $this->reconcileUnknownPublication($context, $state, $token);
         }
 
         // Clear the ambiguity marker and persist the returned media id in the same
@@ -166,7 +170,81 @@ class InstagramConnector implements PublishConnector
             'media_upload_state' => $state->toArray(),
         ])->save();
 
+        return $this->verifyPublication($context, $mediaId, $token);
+    }
+
+    private function verifyPublication(PublishContext $context, string $mediaId, string $token): PublishResult
+    {
+        try {
+            $response = $this->http->timeout(10)->connectTimeout(5)
+                ->get(InstagramGraphApi::baseUrl($context->account).'/'.$mediaId, [
+                    'fields' => 'id,owner,permalink',
+                    'access_token' => $token,
+                ]);
+        } catch (ConnectionException) {
+            return PublishResult::failure(ErrorKind::Network, 'Instagram accepted the post, but its published receipt could not be read. Retrying verification of the saved media ID.', retryAfter: 10);
+        }
+
+        $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_STATUS_POLL, $context->account, $response);
+        if ($response->failed()) {
+            return $this->mapFailure($response);
+        }
+
+        $permalink = $response->json('permalink');
+        $url = is_string($permalink) ? parse_url($permalink) : false;
+        if ((string) $response->json('id') !== $mediaId
+            || (string) $response->json('owner.id') !== $context->account->remote_account_id
+            || ! is_array($url) || ($url['scheme'] ?? null) !== 'https'
+            || ! in_array($url['host'] ?? null, ['instagram.com', 'www.instagram.com'], true)
+            || isset($url['user']) || isset($url['pass']) || isset($url['port'])
+            || ! preg_match('~^/(?:p|reel|reels|stories)/[^/]+~', $url['path'] ?? '')) {
+            return PublishResult::failure(ErrorKind::Unknown, 'Instagram accepted a media ID but has not verified its published link and owning account. Review the saved post before retrying; Shoutrrr will not upload it again.');
+        }
+
+        $state = $context->target->media_upload_state ?? [];
+        $state['publication']['receipt'] = [
+            'remote_id' => $mediaId,
+            'remote_account_id' => $context->account->remote_account_id,
+            'url' => $permalink,
+            'visibility' => 'published',
+            'verified_at' => now()->toIso8601String(),
+        ];
+        $context->target->forceFill(['media_upload_state' => $state])->save();
+
         return PublishResult::success([$mediaId]);
+    }
+
+    private function reconcileUnknownPublication(PublishContext $context, MediaUploadState $state, string $token): PublishResult
+    {
+        $containerId = $state->remoteRef(self::CONTAINER_KEY);
+        if ($containerId === null) {
+            return $this->publishNeedsReview();
+        }
+
+        try {
+            $response = $this->http->timeout(10)->connectTimeout(5)
+                ->get(InstagramGraphApi::baseUrl($context->account).'/'.$containerId, [
+                    'fields' => 'status_code',
+                    'access_token' => $token,
+                ]);
+        } catch (ConnectionException) {
+            return $this->publishNeedsReview();
+        }
+
+        $this->meter(UsageCategory::Publish, UsageOperation::MEDIA_STATUS_POLL, $context->account, $response);
+        if ($response->successful() && is_string($response->json('status_code'))) {
+            $metadata = $state->metadata(self::CONTAINER_KEY);
+            $metadata['provider_status'] = $response->json('status_code');
+            $metadata['reconciled_at'] = now()->toIso8601String();
+            $state->setMetadata(self::CONTAINER_KEY, $metadata);
+            $this->persistState($context, $state);
+
+            if ($metadata['provider_status'] === 'PUBLISHED') {
+                return PublishResult::failure(ErrorKind::Unknown, 'Instagram confirms the container was published, but did not return its media ID and link. Check Instagram to record the existing post; Shoutrrr will not publish it again.');
+            }
+        }
+
+        return $this->publishNeedsReview();
     }
 
     /**
@@ -191,6 +269,7 @@ class InstagramConnector implements PublishConnector
         // is lost. An old container without this snapshot is a regular Reel.
         $metadata = $state->metadata(self::CONTAINER_KEY);
         $metadata['instagram_trial_params'] = app(InstagramTrialReel::class)->params($context->target);
+        $metadata['remote_account_id'] = $igUserId;
         $state->setMetadata(self::CONTAINER_KEY, $metadata);
         $this->persistState($context, $state);
 

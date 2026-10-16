@@ -13,6 +13,7 @@ use App\Services\ConnectedAccounts\AccountConnectionService;
 use App\Services\ConnectedAccounts\BlueskyConnector;
 use App\Services\ConnectedAccounts\DiscordConnector;
 use App\Services\ConnectedAccounts\XAccountCapabilities;
+use App\Services\Publishing\AccountPublishingReadiness;
 use App\Services\Publishing\TikTokAccounts\TikTokAccountsReadiness;
 use App\Services\Publishing\TikTokInboxHandoff;
 use App\Services\Publishing\TikTokPublishingRoute;
@@ -80,6 +81,7 @@ class ConnectedAccountController extends Controller
                     && app(TikTokAccountsReadiness::class)->configurationReason() === null
                         ? route('accounts.tiktok-accounts.connect', $account) : null,
                 'publishing_ready' => $account->canPublish(),
+                ...app(AccountPublishingReadiness::class)->view($account),
                 'tiktok_inbox_enabled' => app(TikTokInboxHandoff::class)->enabledFor($account),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
                 'publishing_recovery_kind' => $account->publishingRecoveryKind(),
