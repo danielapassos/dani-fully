@@ -100,6 +100,8 @@ test('youtube completes a resumable upload and waits for public processing', fun
         }
         if ($request->method() === 'GET' && str_contains($request->url(), '/youtube/v3/videos')) {
             return Http::response(['items' => [[
+                'id' => 'video_42',
+                'snippet' => ['channelId' => 'UC-dani'],
                 'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'public'],
                 'processingDetails' => ['processingStatus' => 'succeeded'],
             ]]]);
@@ -114,6 +116,9 @@ test('youtube completes a resumable upload and waits for public processing', fun
     expect($result->isSuccessful())->toBeTrue()
         ->and($result->remoteIds)->toBe(['video_42'])
         ->and($context->target->fresh()->remote_id)->toBe('video_42')
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['uploaded_bytes'])->toBe(strlen($bytes))
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['upload_complete'])->toBeTrue()
+        ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['outcome_unknown'])->toBeFalse()
         ->and($context->target->fresh()->media_upload_state[$video->id]['metadata']['snippet'])->toBe([
             'title' => 'A sharp YouTube title',
             'description' => "A sharp YouTube title\n\nThe rest of the description.",
@@ -134,6 +139,8 @@ test('youtube completes a resumable upload and waits for public processing', fun
 test('youtube records a processed nonpublic video without claiming public publication', function (string $privacy) {
     Http::fake([
         'https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [[
+            'id' => 'video_42',
+            'snippet' => ['channelId' => 'UC-dani'],
             'status' => ['uploadStatus' => 'processed', 'privacyStatus' => $privacy],
             'processingDetails' => ['processingStatus' => 'succeeded'],
         ]]]),
@@ -252,6 +259,8 @@ test('a stored YouTube session retains its original copy and never opens another
     Http::fake([
         $session => Http::response(['id' => 'existing-video'], 200),
         'https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [[
+            'id' => 'existing-video',
+            'snippet' => ['channelId' => 'UC-dani'],
             'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'private'],
             'processingDetails' => ['processingStatus' => 'succeeded'],
         ]]]),
@@ -269,6 +278,8 @@ test('a stored YouTube session retains its original copy and never opens another
 test('youtube requires positive processing completion evidence', function (string $upload, string $processing) {
     Http::fake([
         'https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [[
+            'id' => 'video_42',
+            'snippet' => ['channelId' => 'UC-dani'],
             'status' => ['uploadStatus' => $upload, 'privacyStatus' => 'public'],
             'processingDetails' => ['processingStatus' => $processing],
         ]]]),
@@ -287,6 +298,8 @@ test('youtube requires positive processing completion evidence', function (strin
 test('youtube fails closed when processed privacy differs from the requested privacy', function () {
     Http::fake([
         'https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [[
+            'id' => 'video_42',
+            'snippet' => ['channelId' => 'UC-dani'],
             'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'private'],
             'processingDetails' => ['processingStatus' => 'succeeded'],
         ]]]),
@@ -433,6 +446,8 @@ test('youtube probes before retrying after an ambiguous server error', function 
         }
 
         return Http::response(['items' => [[
+            'id' => 'video_42',
+            'snippet' => ['channelId' => 'UC-dani'],
             'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'public'],
             'processingDetails' => ['processingStatus' => 'succeeded'],
         ]]]);
@@ -463,5 +478,129 @@ test('youtube requires one video and every publishing declaration', function () 
 
     expect($result->errorKind)->toBe(ErrorKind::Validation)
         ->and($result->errorMessage)->toContain('declarations');
+    Http::assertNothingSent();
+});
+
+test('youtube persists the uncertain chunk boundary before a worker dies and reconciles its saved session', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/crash.mp4', 'video-bytes');
+    $video = PostMedia::factory()->video()->create(['disk' => 'public', 'path' => 'media/crash.mp4', 'size_bytes' => 11]);
+    $session = 'https://www.googleapis.com/upload/youtube/v3/videos?upload_id=worker-death';
+    $context = youtubePublishContext([$video]);
+    $crashed = false;
+    $chunkCount = 0;
+    Http::preventStrayRequests();
+    Http::fake(function (Request $request) use ($session, $context, $video, &$crashed, &$chunkCount) {
+        if ($request->method() === 'POST') {
+            return Http::response([], 200, ['Location' => $session]);
+        }
+        if ($request->method() === 'PUT' && ! $request->hasHeader('Content-Range', 'bytes */11')) {
+            $chunkCount++;
+            expect($context->target->fresh()->media_upload_state[$video->id]['metadata']['outcome_unknown'])->toBeTrue();
+            $crashed = true;
+            throw new Error('Worker terminated after YouTube accepted the chunk');
+        }
+        if ($request->method() === 'PUT') {
+            return Http::response(['id' => 'video_42'], 201);
+        }
+
+        return Http::response(['items' => [[
+            'id' => 'video_42', 'snippet' => ['channelId' => 'UC-dani'],
+            'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'public'],
+            'processingDetails' => ['processingStatus' => 'succeeded'],
+        ]]]);
+    });
+
+    expect(fn () => app(YouTubeConnector::class)->publish($context))->toThrow(Error::class);
+    expect($crashed)->toBeTrue();
+    $context->target->refresh();
+    $result = app(YouTubeConnector::class)->publish($context);
+
+    expect($result->remoteIds)->toBe(['video_42'])
+        ->and($chunkCount)->toBe(1)
+        ->and(data_get($context->target->fresh()->media_upload_state, 'publication.receipt.remote_account_id'))->toBe('UC-dani')
+        ->and(data_get($context->target->fresh()->media_upload_state, 'publication.receipt.url'))->toBe('https://www.youtube.com/watch?v=video_42');
+    expect(Http::recorded(fn (Request $request): bool => $request->method() === 'POST'))->toHaveCount(1);
+});
+
+test('youtube probes a malformed completion receipt instead of retransmitting the video', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('media/malformed.mp4', 'video-bytes');
+    $video = PostMedia::factory()->video()->create(['disk' => 'public', 'path' => 'media/malformed.mp4', 'size_bytes' => 11]);
+    $session = 'https://www.googleapis.com/upload/youtube/v3/videos?upload_id=malformed-completion';
+    Http::preventStrayRequests();
+    Http::fake(function (Request $request) use ($session) {
+        if ($request->method() === 'POST') {
+            return Http::response([], 200, ['Location' => $session]);
+        }
+        if ($request->method() === 'PUT') {
+            return Http::response($request->hasHeader('Content-Range', 'bytes */11') ? ['id' => 'video_42'] : [], 200);
+        }
+
+        return Http::response(['items' => [[
+            'id' => 'video_42', 'snippet' => ['channelId' => 'UC-dani'],
+            'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'public'],
+            'processingDetails' => ['processingStatus' => 'succeeded'],
+        ]]]);
+    });
+    $context = youtubePublishContext([$video]);
+    expect(app(YouTubeConnector::class)->publish($context)->errorKind)->toBe(ErrorKind::ServerError);
+    expect($context->target->fresh()->media_upload_state[$video->id]['metadata']['outcome_unknown'])->toBeTrue();
+    expect(app(YouTubeConnector::class)->publish($context)->remoteIds)->toBe(['video_42']);
+    expect(Http::recorded(fn (Request $request): bool => $request->hasHeader('Content-Range', 'bytes 0-10/11')))->toHaveCount(1);
+});
+
+test('youtube retains an expired uncertain upload rather than automatically opening a duplicate', function (int $status) {
+    $video = PostMedia::factory()->video()->create(['size_bytes' => 11]);
+    $session = 'https://www.googleapis.com/upload/youtube/v3/videos?upload_id=expired-uncertain';
+    $context = youtubePublishContext([$video], ['media_upload_state' => [$video->id => [
+        'remote_ref' => Crypt::encryptString($session),
+        'metadata' => ['outcome_unknown' => true, 'uploaded_bytes' => 0],
+    ]]]);
+    Http::preventStrayRequests();
+    Http::fake([$session => Http::response([], $status)]);
+
+    foreach ([1, 2] as $attempt) {
+        $result = app(YouTubeConnector::class)->publish($context);
+        expect($result->outcome)->toBe('awaiting_action')
+            ->and($result->statusMessage)->toContain('duplicate')
+            ->and(Crypt::decryptString($context->target->fresh()->media_upload_state[$video->id]['remote_ref']))->toBe($session);
+    }
+    Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST');
+})->with([404, 410]);
+
+test('youtube requires a receipt for the exact video and channel before claiming publication', function (array $identity) {
+    $video = PostMedia::factory()->video()->create();
+    $context = youtubePublishContext([$video], ['remote_id' => 'video_42']);
+    Http::preventStrayRequests();
+    Http::fake(['https://www.googleapis.com/youtube/v3/videos*' => Http::response(['items' => [[
+        ...$identity,
+        'status' => ['uploadStatus' => 'processed', 'privacyStatus' => 'public'],
+        'processingDetails' => ['processingStatus' => 'succeeded'],
+    ]]])]);
+
+    $result = app(YouTubeConnector::class)->publish($context);
+    expect($result->errorKind)->toBe(ErrorKind::Unknown)
+        ->and($context->target->fresh()->remote_id)->toBe('video_42')
+        ->and(data_get($context->target->fresh()->media_upload_state, 'publication.receipt'))->toBeNull();
+    Http::assertNotSent(fn (Request $request): bool => $request->method() !== 'GET');
+})->with([
+    'missing identity' => [[]],
+    'different video' => [['id' => 'wrong_42', 'snippet' => ['channelId' => 'UC-dani']]],
+    'different channel' => [['id' => 'video_42', 'snippet' => ['channelId' => 'UC-other']]],
+]);
+
+test('youtube will not resume an accepted upload after its destination channel changes', function () {
+    $video = PostMedia::factory()->video()->create();
+    $context = youtubePublishContext([$video], ['remote_id' => 'video_42', 'media_upload_state' => [$video->id => [
+        'metadata' => ['remote_account_id' => 'UC-original', 'outcome_unknown' => false],
+    ]]]);
+    Http::preventStrayRequests();
+    Http::fake();
+
+    $result = app(YouTubeConnector::class)->publish($context);
+    expect($result->outcome)->toBe('awaiting_action')
+        ->and($result->statusMessage)->toContain('different channel')
+        ->and($context->target->fresh()->remote_id)->toBe('video_42');
     Http::assertNothingSent();
 });

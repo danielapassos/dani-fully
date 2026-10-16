@@ -257,3 +257,46 @@ describe('targetStatusMeta', () => {
         ).toBe('The upload is complete. Public publishing is not confirmed.');
     });
 });
+
+describe('provider progress', () => {
+    it('uses server processing and uncertain phases without claiming live publication', () => {
+        const progress = {
+            phase: 'uncertain',
+            label: 'Outcome unconfirmed',
+            message:
+                'Check the existing submission before sending another copy.',
+            live_verified: false,
+            receipt: null,
+        };
+        expect(
+            targetStatusMeta('publishing', 'youtube', progress),
+        ).toMatchObject({
+            tone: 'warning',
+            label: 'Outcome unconfirmed',
+            spinning: false,
+        });
+        expect(
+            targetStatusMessage({
+                status: 'publishing',
+                platform: 'youtube',
+                publication_progress: progress,
+            }),
+        ).toBe(progress.message);
+    });
+
+    it('clears stale derived progress when an eligible target is submitted again', () => {
+        const before = post([target('a', 'failed')]);
+        before.targets[0].publication_progress = {
+            phase: 'failed',
+            label: 'Failed',
+            message: 'Previous request failed.',
+            live_verified: false,
+            receipt: null,
+        };
+        expect(
+            applyOptimisticSubmit(before, OPTIMISTIC_PUBLISH).targets[0]
+                .publication_progress,
+        ).toBeUndefined();
+        expect(before.targets[0].publication_progress?.phase).toBe('failed');
+    });
+});

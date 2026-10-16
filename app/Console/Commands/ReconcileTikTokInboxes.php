@@ -24,7 +24,7 @@ class ReconcileTikTokInboxes extends Command
         $count = 0;
         $accounts = [];
         foreach (PostTarget::query()->where('platform', Platform::TikTok)
-            ->whereIn('status', [PostTargetStatus::Failed, PostTargetStatus::AwaitingAction, PostTargetStatus::Completed, PostTargetStatus::Publishing, PostTargetStatus::Published])
+            ->whereIn('status', [PostTargetStatus::Failed, PostTargetStatus::Skipped, PostTargetStatus::AwaitingAction, PostTargetStatus::Completed, PostTargetStatus::Publishing, PostTargetStatus::Published])
             ->where('created_at', '>=', now()->subDays($days))
             ->whereHas('account', fn ($query) => $query->whereNull('disabled_at'))
             ->orderBy('updated_at')->orderBy('id')->cursor() as $target) {

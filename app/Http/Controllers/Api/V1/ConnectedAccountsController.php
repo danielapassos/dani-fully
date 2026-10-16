@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Enums\Platform;
 use App\Http\Controllers\Controller;
 use App\Models\ConnectedAccount;
+use App\Services\Publishing\AccountPublishingReadiness;
 use App\Services\Publishing\TikTokInboxHandoff;
 use App\Support\CursorPage;
 use Illuminate\Http\JsonResponse;
@@ -33,6 +34,7 @@ class ConnectedAccountsController extends Controller
                 'status' => $account->status->value,
                 'status_label' => $account->status->label(),
                 'publishing_ready' => $account->canPublish(),
+                ...app(AccountPublishingReadiness::class)->view($account),
                 'tiktok_inbox_enabled' => app(TikTokInboxHandoff::class)->enabledFor($account),
                 'publishing_unavailable_reason' => $account->publishingUnavailableReason(),
                 'publishing_recovery_kind' => $account->publishingRecoveryKind(),

@@ -1,3 +1,5 @@
+import type { MusicCapabilities, PublishingReadiness } from '@/types/compose';
+
 export type Account = {
     id: string;
     platform: string;
@@ -25,6 +27,8 @@ export type Account = {
     tiktok_accounts_api?: boolean;
     publishing_authorization_url?: string | null;
     publishing_ready: boolean;
+    publishing_readiness?: PublishingReadiness;
+    music_capabilities?: MusicCapabilities;
     publishing_unavailable_reason: string | null;
     publishing_recovery_kind:
         | 'enable_account'

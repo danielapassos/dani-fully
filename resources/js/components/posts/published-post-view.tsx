@@ -259,7 +259,8 @@ function PublishedCard({
         target.display_name ?? target.handle ?? platformLabel(target.platform);
     const permalink =
         target.status === 'published'
-            ? postPermalink(target.platform, target.handle, target.remote_id)
+            ? (target.publication_progress?.receipt?.url ??
+              postPermalink(target.platform, target.handle, target.remote_id))
             : null;
     const when =
         target.status === 'published'
@@ -310,7 +311,8 @@ function PublishedCard({
                         options={target.content_override?.instagram}
                     />
                 )}
-                {target.status !== 'published' && (
+                {(target.status !== 'published' ||
+                    target.publication_progress) && (
                     <div className="mb-4 border-b border-border pb-4">
                         <TargetStatusChips targets={[target]} />
                     </div>

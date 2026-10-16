@@ -95,6 +95,7 @@ test('the freshly connected instagram account can publish through the registered
         'https://graph.facebook.com/*/ig123/media' => Http::response(['id' => 'container-1']),
         'https://graph.facebook.com/*/container-1*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'media-999']),
+        'https://graph.facebook.com/*/media-999*' => Http::response(['id' => 'media-999', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/reel/media-999/']),
     ]);
 
     $context = new PublishContext(

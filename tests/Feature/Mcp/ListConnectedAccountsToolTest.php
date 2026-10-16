@@ -18,7 +18,8 @@ test('MCP account list distinguishes an inbox upload from direct publishing', fu
     ConnectedAccount::factory()->for($workspace)->create(['platform' => Platform::TikTok]);
 
     ShoutrrrServer::actingAs($user)->tool(ListConnectedAccountsTool::class, [])
-        ->assertOk()->assertSee('"tiktok_inbox_enabled": true');
+        ->assertOk()->assertSee('"tiktok_inbox_enabled": true')
+        ->assertSee('"provider_verified": false')->assertSee('"native_track_attachment": false');
 });
 
 test('list_connected_accounts returns accounts in the bound workspace', function (): void {

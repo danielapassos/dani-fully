@@ -263,3 +263,61 @@ describe('target status chips', () => {
         expect(container.textContent).not.toContain('Retry');
     });
 });
+
+describe('verified publication receipts', () => {
+    it('uses the exact verified Instagram permalink and shows verification evidence', () => {
+        const url = 'https://www.instagram.com/reel/VerifiedShortCode/';
+        const container = renderChips([
+            failedTarget({
+                platform: 'instagram',
+                status: 'published',
+                remote_id: 'numeric-media-id',
+                error_kind: null,
+                error_message: null,
+                publication_progress: {
+                    phase: 'live',
+                    label: 'Published · receipt verified',
+                    message:
+                        'The provider verified this post and destination at the receipt time.',
+                    live_verified: true,
+                    receipt: {
+                        remote_id: 'numeric-media-id',
+                        remote_account_id: 'ig-account',
+                        url,
+                        visibility: 'published',
+                        verified_at: '2026-10-16T00:00:00Z',
+                    },
+                },
+            }),
+        ]);
+        expect(container.textContent).toContain('Published · receipt verified');
+        expect(container.querySelector('a')?.href).toBe(url);
+    });
+
+    it('shows unresolved YouTube outcomes as uncertain without a public link or retry', () => {
+        const container = renderChips(
+            [
+                failedTarget({
+                    platform: 'youtube',
+                    status: 'awaiting_action',
+                    remote_id: null,
+                    error_kind: null,
+                    error_message: null,
+                    publication_progress: {
+                        phase: 'uncertain',
+                        label: 'Outcome unconfirmed',
+                        message:
+                            'Reconcile the existing submission before sending another copy.',
+                        live_verified: false,
+                        receipt: null,
+                    },
+                }),
+            ],
+            () => undefined,
+        );
+        expect(container.textContent).toContain('Outcome unconfirmed');
+        expect(container.querySelector('a')).toBeNull();
+        expect(container.querySelector('button')).toBeNull();
+        expect(container.querySelector('.animate-spin')).toBeNull();
+    });
+});

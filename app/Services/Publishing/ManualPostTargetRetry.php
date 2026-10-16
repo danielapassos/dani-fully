@@ -71,7 +71,7 @@ final class ManualPostTargetRetry
             ];
 
             $updated = $claim->update([
-                'status' => PostTargetStatus::Pending->value,
+                'status' => PostTargetStatus::Publishing->value,
                 'error_kind' => null,
                 'error_message' => null,
                 'next_attempt_at' => null,
@@ -104,7 +104,7 @@ final class ManualPostTargetRetry
 
     /**
      * A queue outage after the atomic claim must not strand the target in
-     * Pending without a job. Restore only the exact untouched claim; if a sync
+     * Publishing without a job. Restore only the exact untouched claim; if a sync
      * worker already advanced it, the compare-and-set deliberately does nothing.
      *
      * @param  array{status: mixed, error_kind: mixed, error_message: string|null, next_attempt_at: mixed}  $previous
@@ -114,7 +114,8 @@ final class ManualPostTargetRetry
         try {
             $restored = PostTarget::query()
                 ->whereKey($claimed->getKey())
-                ->where('status', PostTargetStatus::Pending->value)
+                ->where('status', PostTargetStatus::Publishing->value)
+                ->where('attempts', $claimed->attempts)
                 ->whereNull('error_kind')
                 ->whereNull('error_message')
                 ->whereNull('next_attempt_at')

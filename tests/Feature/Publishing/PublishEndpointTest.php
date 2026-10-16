@@ -92,7 +92,7 @@ test('publish-now is blocked across workspaces', function () {
     test()->postJson("/posts/{$foreign->id}/publish")->assertNotFound();
 });
 
-test('per-target retry resets a failed target to pending and dispatches it', function () {
+test('per-target retry claims a failed target as publishing and dispatches it', function () {
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Failed]);
@@ -104,7 +104,7 @@ test('per-target retry resets a failed target to pending and dispatches it', fun
         ->assertJsonPath('post.id', $post->id);
 
     $target->refresh();
-    expect($target->status)->toBe(PostTargetStatus::Pending)
+    expect($target->status)->toBe(PostTargetStatus::Publishing)
         ->and($target->error_kind)->toBeNull()
         ->and($target->error_message)->toBeNull();
 
@@ -226,11 +226,11 @@ test('per-target retry redirects after an Inertia retry request', function () {
         ])
         ->assertRedirect('/dashboard');
 
-    expect($target->refresh()->status)->toBe(PostTargetStatus::Pending);
+    expect($target->refresh()->status)->toBe(PostTargetStatus::Publishing);
     Bus::assertDispatched(PublishPostTarget::class, fn (PublishPostTarget $job): bool => $job->target->is($target));
 });
 
-test('per-target retry resets a skipped target to pending and dispatches it', function () {
+test('per-target retry claims a skipped target as publishing and dispatches it', function () {
     Bus::fake();
     [$user, $workspace] = publishingMember();
     $post = Post::factory()->create(['workspace_id' => $workspace->id, 'status' => PostStatus::Partial]);
@@ -246,7 +246,7 @@ test('per-target retry resets a skipped target to pending and dispatches it', fu
         ->assertJsonPath('post.id', $post->id);
 
     $target->refresh();
-    expect($target->status)->toBe(PostTargetStatus::Pending)
+    expect($target->status)->toBe(PostTargetStatus::Publishing)
         ->and($target->error_kind)->toBeNull()
         ->and($target->error_message)->toBeNull();
 
@@ -306,7 +306,7 @@ test('a second manual retry cannot enqueue the same target again', function () {
         ->assertStatus(409)
         ->assertJsonPath('message', 'Only failed or skipped targets can be retried.');
 
-    expect($target->fresh()->status)->toBe(PostTargetStatus::Pending);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Publishing);
     Bus::assertDispatchedTimes(PublishPostTarget::class, 1);
 });
 

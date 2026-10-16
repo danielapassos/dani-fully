@@ -736,13 +736,14 @@ class TikTokConnector implements PublishConnector
         }
 
         if ($status === 'PUBLISH_COMPLETE') {
-            $ids = array_values(array_unique(array_filter(
-                array_map(
-                    static fn (mixed $id): string => trim((string) $id),
-                    array_filter((array) $response->json('data.publicaly_available_post_id', []), is_scalar(...)),
-                ),
-                static fn (string $id): bool => $id !== '',
-            )));
+            $rawIds = $response->json('data.publicaly_available_post_id', []);
+            if (! is_array($rawIds) || count($rawIds) > 20 || collect($rawIds)->contains(
+                static fn (mixed $id): bool => ! (is_int($id) || is_string($id))
+                    || preg_match('/\A[1-9][0-9]{0,19}\z/', (string) $id) !== 1,
+            )) {
+                return PublishResult::completed([], 'TikTok completed the submission but returned invalid public post identifiers. Check the original submission before claiming public publication.');
+            }
+            $ids = array_values(array_unique(array_map(strval(...), $rawIds)));
 
             if ($ids === []) {
                 // A private/friends post is a valid completed inbox handoff but
@@ -758,6 +759,10 @@ class TikTokConnector implements PublishConnector
 
             if (($metadata['media_type'] ?? null) === 'PHOTO') {
                 return PublishResult::completed([], 'TikTok completed the photo submission. Public visibility and ownership still need verification from the original inbox upload.');
+            }
+
+            if (($metadata['publish_mode'] ?? 'inbox') === 'inbox') {
+                return PublishResult::completed([], 'TikTok completed the video submission. Public visibility and ownership still need verification from the original inbox upload.');
             }
 
             return PublishResult::success($ids);

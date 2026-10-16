@@ -49,7 +49,7 @@ function directTikTokContext(array $options = [], array $state = []): PublishCon
     return new PublishContext($target, ['Exact approved caption #test'], [$video], $account, ['access_token' => 'test-token']);
 }
 
-function fakeTikTokDirect(array $creator = [], string $status = 'PUBLISH_COMPLETE', array $ids = ['public-123'], mixed $init = null, mixed $statusResponse = null): void
+function fakeTikTokDirect(array $creator = [], string $status = 'PUBLISH_COMPLETE', array $ids = ['7390000000000000042'], mixed $init = null, mixed $statusResponse = null): void
 {
     Http::fake([
         '*/creator_info/query/' => Http::response(['error' => ['code' => 'ok'], 'data' => array_replace([
@@ -80,7 +80,7 @@ test('direct post uses the latest creator restrictions and exact reviewed option
     $result = app(TikTokConnector::class)->publish($context);
 
     expect($result->isSuccessful())->toBeTrue()
-        ->and($result->remoteIds)->toBe(['public-123'])
+        ->and($result->remoteIds)->toBe(['7390000000000000042'])
         ->and($context->target->fresh()->media_upload_state[$context->media[0]->id]['remote_ref'])->toBe('direct-session');
     Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/video/init/')
         && ! str_contains($request->url(), '/inbox/')
@@ -104,6 +104,36 @@ test('direct post never substitutes an inbox upload for a missing direct grant',
     expect($result->errorKind)->toBe(ErrorKind::AuthExpired);
     Http::assertNothingSent();
 });
+
+test('direct post completion cannot turn malformed provider identifiers into a public receipt', function (mixed $ids): void {
+    fakeTikTokDirect(statusResponse: Http::response([
+        'error' => ['code' => 'ok'],
+        'data' => ['status' => 'PUBLISH_COMPLETE', 'publicaly_available_post_id' => $ids],
+    ]));
+    $context = directTikTokContext([], [
+        'remote_ref' => 'existing-direct-session',
+        'state' => 'processing',
+        'metadata' => ['publish_mode' => 'direct'],
+    ]);
+
+    $result = app(TikTokConnector::class)->publish($context);
+
+    expect($result->outcome)->toBe('completed')
+        ->and($result->remoteIds)->toBe([])
+        ->and($result->statusMessage)->toContain('invalid public post identifiers')
+        ->and($context->target->fresh()->media_upload_state[$context->media[0]->id]['remote_ref'])->toBe('existing-direct-session');
+    Http::assertSentCount(1);
+    Http::assertNotSent(fn (Request $request): bool => str_ends_with($request->url(), '/video/init/'));
+})->with([
+    'non-array' => ['7390000000000000042'],
+    'boolean' => [[true]],
+    'float' => [[7.39]],
+    'operation reference' => [['publish-42']],
+    'zero' => [['0']],
+    'negative' => [[-42]],
+    'oversized' => [[str_repeat('7', 21)]],
+    'too many' => [array_fill(0, 21, '7390000000000000042')],
+]);
 
 test('direct post blocks options that no longer match creator settings before initializing', function (array $options, array $creator) {
     fakeTikTokDirect($creator);

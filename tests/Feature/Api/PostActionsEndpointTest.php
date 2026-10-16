@@ -117,7 +117,7 @@ test('retrying a failed target dispatches and returns 202', function () {
         ->assertStatus(202)
         ->assertJsonPath('status', 'queued');
 
-    expect($target->fresh()->status)->toBe(PostTargetStatus::Pending);
+    expect($target->fresh()->status)->toBe(PostTargetStatus::Publishing);
 });
 
 test('retrying an unconfirmed provider outcome is rejected for manual review', function () {

@@ -38,6 +38,7 @@ export type ChipTarget = Pick<
     | 'platform'
     | 'status'
     | 'status_message'
+    | 'publication_progress'
     | 'error_kind'
     | 'error_message'
     | 'can_retry'
@@ -70,7 +71,11 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
     return (
         <ul className="flex flex-col gap-1.5">
             {targets.map((target) => {
-                const meta = targetStatusMeta(target.status, target.platform);
+                const meta = targetStatusMeta(
+                    target.status,
+                    target.platform,
+                    target.publication_progress,
+                );
                 const statusMessage = targetStatusMessage(target);
                 const isFailed = target.status === 'failed';
                 const isSkipped = target.status === 'skipped';
@@ -100,11 +105,12 @@ export function TargetStatusChips({ targets, onRetry, retryingIds }: Props) {
                     : null;
                 const permalink =
                     target.status === 'published'
-                        ? postPermalink(
+                        ? (target.publication_progress?.receipt?.url ??
+                          postPermalink(
                               target.platform,
                               target.handle,
                               target.remote_id,
-                          )
+                          ))
                         : null;
 
                 return (

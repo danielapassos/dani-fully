@@ -13,6 +13,7 @@ use App\Services\Posts\PublishPrecheck;
 use App\Services\Publishing\ManualRetryEligibility;
 use App\Services\Publishing\PhotoMusic;
 use App\Services\Publishing\PostStatusRollup;
+use App\Services\Publishing\PublicationProgress;
 use App\Services\Publishing\TargetMediaSelection;
 use App\Services\Publishing\TikTokInboxHandoff;
 use App\Services\Publishing\TikTokInboxReconciliation;
@@ -81,6 +82,7 @@ final class PostView
                         'format' => $target->format->value,
                         'status' => $status->value,
                         'status_message' => $target->publicationMessage($status),
+                        'publication_progress' => app(PublicationProgress::class)->view($target),
                         'manual_completion' => $inboxHandoff->forTarget($target),
                         'music_handoff' => app(PhotoMusic::class)->handoff($target),
                         'inbox_tracking' => $inboxTracking->view($target),

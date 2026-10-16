@@ -135,6 +135,7 @@ test('a Reel uses the chosen existing cover URL without adding image media or ch
         'https://graph.facebook.com/*/ig-cover-user/media' => Http::response(['id' => 'cover-container']),
         'https://graph.facebook.com/*/cover-container*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig-cover-user/media_publish' => Http::response(['id' => 'published-reel']),
+        'https://graph.facebook.com/*/published-reel*' => Http::response(['id' => 'published-reel', 'owner' => ['id' => 'ig-cover-user'], 'permalink' => 'https://www.instagram.com/reel/published-reel/']),
     ]);
     $result = app(InstagramConnector::class)->publish(new PublishContext($target, ['Caption'], [$video], $account, ['access_token' => 'fake']));
     expect($result->isSuccessful())->toBeTrue();
@@ -184,9 +185,10 @@ test('an existing container resumes without creating a replacement for a later c
     Http::fake([
         'https://graph.facebook.com/*/original-container*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig-cover-user/media_publish' => Http::response(['id' => 'published-original']),
+        'https://graph.facebook.com/*/published-original*' => Http::response(['id' => 'published-original', 'owner' => ['id' => 'ig-cover-user'], 'permalink' => 'https://www.instagram.com/reel/published-original/']),
     ]);
     expect(app(InstagramConnector::class)->publish(new PublishContext($target, ['Caption'], [$video], $account, ['access_token' => 'fake']))->isSuccessful())->toBeTrue();
-    Http::assertSentCount(2);
+    Http::assertSentCount(3);
     Http::assertNotSent(fn ($request) => str_ends_with($request->url(), '/ig-cover-user/media'));
 });
 

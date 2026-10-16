@@ -45,6 +45,7 @@ test('a story container sends media_type STORIES and no caption', function () {
         'https://graph.facebook.com/*/ig123/media' => Http::response(['id' => 'container-1']),
         'https://graph.facebook.com/*/container-1*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'ig-1']),
+        'https://graph.facebook.com/*/ig-1*' => Http::response(['id' => 'ig-1', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/ig-1/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igFormatContext(['hello story'], [$media], PostFormat::Story));
@@ -74,6 +75,7 @@ test('a reels container keeps the caption and sends media_type REELS', function 
         'https://graph.facebook.com/*/ig123/media' => Http::response(['id' => 'container-2']),
         'https://graph.facebook.com/*/container-2*' => Http::response(['status_code' => 'FINISHED']),
         'https://graph.facebook.com/*/ig123/media_publish' => Http::response(['id' => 'ig-2']),
+        'https://graph.facebook.com/*/ig-2*' => Http::response(['id' => 'ig-2', 'owner' => ['id' => 'ig123'], 'permalink' => 'https://www.instagram.com/p/ig-2/']),
     ]);
 
     $result = app(InstagramConnector::class)->publish(igFormatContext(['reel caption'], [$media], PostFormat::Reels));
